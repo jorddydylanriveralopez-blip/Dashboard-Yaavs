@@ -1,0 +1,101 @@
+/* Fondo tech compartido (panel interior) */
+.app-tech-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.45;
+  background-image:
+    linear-gradient(rgba(0, 85, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 85, 255, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(ellipse 90% 80% at 50% 30%, black 20%, transparent 75%);
+}
+
+.app-tech-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 60% 45% at 100% 0%, rgba(0, 180, 255, 0.12), transparent 55%),
+    radial-gradient(ellipse 50% 40% at 0% 100%, rgba(0, 85, 255, 0.1), transparent 50%);
+}
+
+.tech-float-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tech-float {
+  position: absolute;
+  width: var(--float-size);
+  height: var(--float-size);
+  opacity: var(--float-opacity, 0.35);
+  animation: tech-float var(--float-duration) ease-in-out infinite;
+  animation-delay: var(--float-delay);
+}
+
+.tech-float--hex {
+  border: 1px solid rgba(0, 180, 255, 0.35);
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  box-shadow: 0 0 20px rgba(0, 180, 255, 0.12);
+}
+
+.tech-float--ring {
+  border: 1.5px solid rgba(0, 85, 255, 0.28);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 180, 255, 0.06) 40%, transparent 70%);
+}
+
+.tech-float--dot {
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(56, 189, 248, 0.9), rgba(0, 85, 255, 0.5));
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.45);
+}
+
+@keyframes tech-float {
+  0%,
+  100% {
+    transform: translateY(0) translateX(0);
+  }
+  50% {
+    transform: translateY(-10px) translateX(5px);
+  }
+}
+
+/* Tarjetas tipo glass tech */
+.tech-surface {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 85, 255, 0.12);
+  box-shadow:
+    var(--shadow-sm),
+    0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+}
+
+.tech-surface-accent {
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    color-mix(in srgb, var(--accent) 4%, rgba(255, 255, 255, 0.88)) 100%
+  );
+}
+
+.tech-surface:hover {
+  border-color: color-mix(in srgb, var(--yaavs-electric) 35%, var(--border));
+  box-shadow:
+    var(--shadow-md),
+    0 0 24px rgba(0, 180, 255, 0.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tech-float {
+    animation: none;
+  }
+}

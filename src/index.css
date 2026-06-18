@@ -1,0 +1,403 @@
+@import './styles/tech-ambience.css';
+
+:root {
+  --accent: #0055ff;
+  --accent-hover: #0044cc;
+  --accent-soft: rgba(0, 85, 255, 0.1);
+  --accent-glow: rgba(0, 180, 255, 0.35);
+  --yaavs-ink: #0a1628;
+  --yaavs-blue-dark: #061018;
+  --yaavs-blue-mid: #0d2040;
+  --yaavs-electric: #00b4ff;
+  --bg-page: #e8f1fc;
+  --bg-surface: rgba(255, 255, 255, 0.92);
+  --bg-muted: rgba(232, 240, 252, 0.85);
+  --bg-input: #ffffff;
+  --text-primary: #0a1628;
+  --text-secondary: #5a6b85;
+  --border: #c5d8f0;
+  --shadow-sm: 0 2px 12px rgba(0, 40, 120, 0.06);
+  --shadow-md: 0 12px 36px rgba(0, 55, 150, 0.1);
+  --shadow-lg: 0 24px 56px rgba(0, 40, 100, 0.14);
+  --radius: 10px;
+  --radius-lg: 14px;
+  --font: 'Figtree', 'Segoe UI', system-ui, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-page);
+  background-image:
+    linear-gradient(rgba(0, 85, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 85, 255, 0.03) 1px, transparent 1px),
+    radial-gradient(ellipse 120% 80% at 100% 0%, rgba(0, 180, 255, 0.1), transparent 50%),
+    radial-gradient(ellipse 80% 60% at 0% 100%, rgba(0, 85, 255, 0.08), transparent 45%);
+  background-size:
+    40px 40px,
+    40px 40px,
+    auto,
+    auto;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+
+  .btn-primary,
+  .btn-ghost,
+  .tab-item,
+  .nav-item,
+  .filter-chip {
+    min-height: 44px;
+  }
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent) 0%, #0077ee 50%, var(--yaavs-electric) 100%);
+  color: white;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition:
+    background 0.2s ease,
+    transform 0.15s ease,
+    box-shadow 0.2s ease;
+  box-shadow: 0 4px 20px var(--accent-glow);
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 28px var(--accent-glow);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  transition: background 0.15s ease;
+}
+
+.btn-ghost:hover {
+  background: var(--bg-muted);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--text-secondary);
+  transition: background 0.15s ease;
+}
+
+.btn-icon:hover {
+  background: var(--bg-muted);
+}
+
+.btn-icon.danger:hover {
+  background: #ffeef0;
+  color: #e2445c;
+}
+
+.btn-danger {
+  background: transparent;
+  border: 1px solid #e2445c;
+  color: #e2445c;
+  border-radius: var(--radius);
+  padding: 8px 16px;
+  font-size: 0.875rem;
+}
+
+.btn-danger:hover {
+  background: #ffeef0;
+}
+
+.avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+
+.avatar.sm {
+  width: 36px;
+  height: 36px;
+  font-size: 0.8125rem;
+  border-radius: 10px;
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Prioridad — badge y selector segmentado */
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.priority-badge::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: currentColor;
+  opacity: 0.9;
+}
+
+.priority-badge--baja {
+  color: #475569;
+  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 10px rgba(71, 85, 105, 0.12);
+}
+
+.priority-badge--baja::before {
+  background: #94a3b8;
+}
+
+.priority-badge--media {
+  color: #92400e;
+  background: linear-gradient(135deg, #fffbeb 0%, #fde68a 100%);
+  border-color: #fbbf24;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.25);
+}
+
+.priority-badge--media::before {
+  background: #f59e0b;
+}
+
+.priority-badge--alta_urgente {
+  color: #ffffff;
+  background: linear-gradient(135deg, #f87171 0%, #dc2626 55%, #b91c1c 100%);
+  border-color: rgba(255, 255, 255, 0.35);
+  box-shadow:
+    0 4px 20px rgba(239, 68, 68, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.15) inset;
+}
+
+.priority-badge--alta_urgente::before {
+  background: #ffffff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.9);
+  animation: priority-dot-pulse 1.6s ease-in-out infinite;
+}
+
+.priority-badge--compact {
+  padding: 4px 10px;
+  font-size: 0.6875rem;
+  gap: 6px;
+}
+
+.priority-badge--compact::before {
+  width: 6px;
+  height: 6px;
+}
+
+@keyframes priority-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.15);
+  }
+}
+
+.priority-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.priority-picker-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius-lg);
+  border: 2px solid var(--border);
+  background: var(--bg-input);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.15s ease;
+}
+
+.priority-picker-btn:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  color: var(--yaavs-ink);
+}
+
+.priority-picker-btn--baja.is-active {
+  color: #475569;
+  background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+  border-color: #94a3b8;
+  box-shadow: 0 4px 14px rgba(71, 85, 105, 0.15);
+}
+
+.priority-picker-btn--media.is-active {
+  color: #92400e;
+  background: linear-gradient(135deg, #fffbeb, #fde68a);
+  border-color: #f59e0b;
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.3);
+}
+
+.priority-picker-btn--alta_urgente.is-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #f87171, #dc2626, #b91c1c);
+  border-color: #fca5a5;
+  box-shadow: 0 6px 24px rgba(239, 68, 68, 0.45);
+  transform: translateY(-1px);
+}
+
+.project-field-badge-wrap {
+  margin: 0;
+  padding: 2px 0;
+}
+
+.deadline-badge {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.deadline-badge.tone-ok {
+  background: #e8f8ef;
+  color: #0d6b42;
+}
+
+.deadline-badge.tone-soon {
+  background: #fff6e8;
+  color: #9a6200;
+}
+
+.deadline-badge.tone-urgent,
+.deadline-badge.tone-overdue {
+  background: #ffeff2;
+  color: #b4234a;
+}
+
+.deadline-badge.tone-done {
+  background: #e8f8ef;
+  color: #0d6b42;
+}
+
+.capitalize {
+  text-transform: capitalize;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.filter-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.filter-chip span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--bg-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .priority-badge--alta_urgente::before {
+    animation: none;
+  }
+}

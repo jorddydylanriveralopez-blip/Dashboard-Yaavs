@@ -1,0 +1,39 @@
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 25, 23, 0.45);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 10000;
+}
+
+.confirm-panel {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  max-width: 400px;
+  width: 100%;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+.confirm-panel h2 {
+  font-size: 1.125rem;
+  margin-bottom: 8px;
+}
+
+.confirm-panel p {
+  margin: 0 0 20px;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}

@@ -1,0 +1,63 @@
+.brand-logo {
+  object-fit: contain;
+  display: block;
+  flex-shrink: 0;
+}
+
+.brand-logo-sm {
+  width: 32px;
+  height: 32px;
+}
+
+.brand-logo-md {
+  width: 48px;
+  height: 48px;
+}
+
+.brand-logo-lg {
+  width: 56px;
+  height: 56px;
+}
+
+.brand-logo-xl {
+  width: auto;
+  height: 88px;
+  max-width: min(320px, 88vw);
+}
+
+.brand-logo-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #5034ff, #7b61ff);
+  color: white;
+  font-weight: 700;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.brand-logo-fallback.brand-logo-sm {
+  width: 32px;
+  height: 32px;
+  font-size: 14px;
+  border-radius: 8px;
+}
+
+.brand-logo-fallback.brand-logo-md {
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+}
+
+.brand-logo-fallback.brand-logo-lg {
+  width: 56px;
+  height: 56px;
+  font-size: 22px;
+}
+
+.brand-logo-fallback.brand-logo-xl {
+  width: 88px;
+  height: 88px;
+  font-size: 36px;
+  border-radius: 16px;
+}

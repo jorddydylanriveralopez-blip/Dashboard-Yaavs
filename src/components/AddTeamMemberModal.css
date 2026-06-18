@@ -1,0 +1,43 @@
+.add-member-modal {
+  max-width: 440px;
+}
+
+.add-member-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0 20px 20px;
+}
+
+.add-member-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.add-member-form input {
+  font-weight: 400;
+}
+
+.add-member-error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #e2445c;
+}
+
+.add-member-note {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.add-member-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 4px;
+}

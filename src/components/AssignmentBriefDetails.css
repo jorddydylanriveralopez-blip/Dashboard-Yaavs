@@ -1,0 +1,59 @@
+.assign-brief {
+  margin: 12px 0;
+  padding: 14px;
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.assign-brief-title {
+  margin: 0 0 10px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.assign-brief-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin: 0;
+}
+
+.assign-brief-grid dt {
+  margin: 0;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.assign-brief-grid dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--yaavs-ink);
+  line-height: 1.35;
+}
+
+.assign-brief-comments {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.assign-brief-compact .assign-brief-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+}
+
+@media (max-width: 520px) {
+  .assign-brief-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,7 @@
+.spellcheck-field {
+  /* El navegador subraya errores; el diccionario corrige al salir del campo. */
+}
+
+.spellcheck-field::spelling-error {
+  text-decoration: underline wavy #e2445c;
+}

@@ -1,0 +1,118 @@
+.close-month-modal {
+  background: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  width: 100%;
+  max-width: 720px;
+  max-height: 92dvh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border);
+}
+
+.close-month-empty {
+  padding: 32px;
+  text-align: center;
+}
+
+.close-month-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.close-month-header h2 {
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+}
+
+.close-month-header p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.close-month-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 24px;
+  font-size: 0.875rem;
+  border-bottom: 1px solid var(--border);
+  background: #fffaf5;
+}
+
+.close-month-list {
+  flex: 1;
+  overflow: auto;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.close-month-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  background: var(--bg-muted);
+}
+
+.close-month-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.close-month-row-head strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.wa-preview {
+  flex-shrink: 0;
+  color: #25d366 !important;
+  border-color: #25d366 !important;
+  font-weight: 600;
+}
+
+.close-month-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.close-month-field input,
+.close-month-field textarea {
+  font-weight: 400;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  background: var(--bg-surface);
+}
+
+.close-month-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 600px) {
+  .close-month-footer .btn-primary,
+  .close-month-footer .btn-ghost {
+    flex: 1 1 100%;
+  }
+}

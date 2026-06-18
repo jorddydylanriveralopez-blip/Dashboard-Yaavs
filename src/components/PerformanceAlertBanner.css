@@ -1,0 +1,30 @@
+.performance-alert-banner {
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid #f5c6a0;
+  background: linear-gradient(135deg, #fff8f0, #fff3e8);
+  color: var(--yaavs-ink);
+}
+
+.performance-alert-banner strong {
+  display: block;
+  font-size: 0.9375rem;
+  margin-bottom: 6px;
+  color: #c2410c;
+}
+
+.performance-alert-banner p {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.performance-alert-hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.performance-streak-badge {
+  background: #e2445c !important;
+}
