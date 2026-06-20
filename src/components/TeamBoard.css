@@ -278,6 +278,7 @@
 }
 
 .card-assign,
+.card-kpi,
 .card-delete {
   border: none;
   background: none;
@@ -294,7 +295,13 @@
   font-weight: 600;
 }
 
+.card-kpi {
+  color: var(--yaavs-electric);
+  font-weight: 600;
+}
+
 .team-card:hover .card-assign,
+.team-card:hover .card-kpi,
 .team-card:hover .card-delete {
   opacity: 1;
 }

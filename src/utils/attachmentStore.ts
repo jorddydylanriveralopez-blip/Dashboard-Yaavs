@@ -362,3 +362,17 @@ export async function deleteAttachmentBlobs(ids: string[]): Promise<void> {
     /* ignore */
   }
 }
+
+/** Borra adjuntos en memoria, localStorage e IndexedDB (reset total). */
+export async function clearAllAttachmentData(): Promise<void> {
+  memoryCache.clear();
+  pendingBlobs.clear();
+  localStorage.removeItem(LS_KEY);
+  if (typeof indexedDB === 'undefined') return;
+  await new Promise<void>((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(DB_NAME);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => resolve();
+  });
+}

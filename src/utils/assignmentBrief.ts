@@ -9,6 +9,7 @@ import {
   REQUESTING_DEPARTMENTS,
 } from '../data/projectOptions';
 import { MARKETING_DEPARTMENT } from '../data/seed';
+import { employeeIdForCollaboratorSlug } from './collaboratorMap';
 import { formatShortDate } from './formatDate';
 import type {
   AssignmentBrief,
@@ -40,9 +41,7 @@ export function employeeIdForCollaborator(
   collaborator: Collaborator,
   users: User[],
 ): string | undefined {
-  if (collaborator === 'todos' || collaborator === 'carlos') return undefined;
-  const u = users.find((x) => x.username.toLowerCase() === collaborator);
-  return u?.employeeId;
+  return employeeIdForCollaboratorSlug(collaborator, users);
 }
 
 export function briefFromProject(project: CreativeProject): AssignmentBrief {

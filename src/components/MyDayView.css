@@ -1,3 +1,38 @@
+.my-day-next {
+  padding: 20px 22px;
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--yaavs-electric) 35%, var(--border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--yaavs-electric) 10%, var(--bg-surface)),
+    rgba(255, 255, 255, 0.92)
+  );
+  box-shadow: 0 4px 20px rgba(0, 85, 255, 0.08);
+}
+
+.my-day-next-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--yaavs-blue-mid);
+  margin-bottom: 6px;
+}
+
+.my-day-next h2 {
+  margin: 0 0 6px;
+  font-size: 1.125rem;
+  color: var(--yaavs-ink);
+}
+
+.my-day-next p {
+  margin: 0 0 14px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
 .my-day {
   display: flex;
   flex-direction: column;

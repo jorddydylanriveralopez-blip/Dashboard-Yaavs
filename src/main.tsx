@@ -65,7 +65,10 @@ function renderApp(): void {
   }
 }
 
-void prepareApp().then(renderApp);
+void prepareApp().then(() => {
+  if (new URLSearchParams(window.location.search).get('fix') === '1') return;
+  renderApp();
+});
 
 // Atajo en consola: window.__yaavsReset()
 if (import.meta.env.DEV) {

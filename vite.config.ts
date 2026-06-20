@@ -6,6 +6,7 @@ const LOGO_ICON =
   'https://assets.zyrosite.com/EnigzBPrgZr5GxnU/recurso-77-pP4VA9UNvFrtfbx3.png';
 
 export default defineConfig({
+  appType: 'spa',
   server: {
     host: '0.0.0.0',
     port: 5173,

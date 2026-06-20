@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useConfirm } from '../context/ConfirmContext';
+import { useToast } from '../context/ToastContext';
 import { STATUS_COLORS, STATUS_LABELS } from '../constants';
 import { getDeadlineInfo } from '../utils/deadline';
 import type { EmployeeTask, TaskStatus } from '../types';
@@ -18,9 +19,10 @@ interface Props {
   tasks: EmployeeTask[];
   onSelect: (task: EmployeeTask) => void;
   onAssign?: (task: EmployeeTask) => void;
+  onSendKpi?: (task: EmployeeTask) => void;
 }
 
-export function TeamBoard({ tasks, onSelect, onAssign }: Props) {
+export function TeamBoard({ tasks, onSelect, onAssign, onSendKpi }: Props) {
   const { canEditTask, updateTask, canEditAll, removeTeamMember } = useApp();
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all'>('all');
 
@@ -78,8 +80,10 @@ export function TeamBoard({ tasks, onSelect, onAssign }: Props) {
             editable={canEditTask(task)}
             canDelete={canEditAll}
             canAssign={Boolean(onAssign)}
+            canSendKpi={Boolean(onSendKpi)}
             onOpen={() => onSelect(task)}
             onAssign={onAssign ? () => onAssign(task) : undefined}
+            onSendKpi={onSendKpi ? () => onSendKpi(task) : undefined}
             onUpdate={(patch) => updateTask(task.id, patch)}
             onDelete={() => removeTeamMember(task.employeeId)}
           />
@@ -99,8 +103,10 @@ function TeamCard({
   editable,
   canDelete,
   canAssign,
+  canSendKpi,
   onOpen,
   onAssign,
+  onSendKpi,
   onUpdate,
   onDelete,
 }: {
@@ -109,12 +115,15 @@ function TeamCard({
   editable: boolean;
   canDelete: boolean;
   canAssign: boolean;
+  canSendKpi: boolean;
   onOpen: () => void;
   onAssign?: () => void;
+  onSendKpi?: () => void;
   onUpdate: (patch: Partial<EmployeeTask>) => void;
   onDelete: () => { ok: boolean; error?: string };
 }) {
   const { confirm } = useConfirm();
+  const toast = useToast();
   const deadline = getDeadlineInfo(task.dueDate, task.status);
   const kpiPct = Math.min(100, Math.round((task.kpiCurrent / task.kpiTarget) * 100) || 0);
 
@@ -135,7 +144,9 @@ function TeamCard({
     });
     if (ok) {
       const result = onDelete();
-      if (!result.ok && result.error) {
+      if (result.ok) {
+        toast.success(`${task.employeeName} fue dado de baja del equipo.`);
+      } else if (result.error) {
         await confirm({
           title: 'No se pudo dar de baja',
           message: result.error,
@@ -194,6 +205,18 @@ function TeamCard({
 
       <div className="team-card-actions">
         <span className="open-link">Ver detalle →</span>
+        {canSendKpi && onSendKpi && (
+          <button
+            type="button"
+            className="card-kpi"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSendKpi();
+            }}
+          >
+            Objetivo KPI
+          </button>
+        )}
         {canAssign && onAssign && (
           <button
             type="button"

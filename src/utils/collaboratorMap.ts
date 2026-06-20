@@ -1,64 +1,108 @@
-import type { Collaborator, User } from '../types';
+import type { Collaborator, CreativeProject, User } from '../types';
 
-const BY_USERNAME: Record<string, Collaborator> = {
-  andrea: 'andrea',
-  roberto: 'roberto',
-  jorddy: 'jorddy',
-  andres: 'andres',
-  jesus: 'jesus',
-  carlos: 'carlos',
+/** Usuario de login → slug de colaborador en proyectos. */
+const USERNAME_TO_COLLABORATOR: Record<string, Collaborator> = {
+  juancarlos: 'carlos',
 };
+
+/** Slug de colaborador → usuario de login (cuando no coinciden). */
+const COLLABORATOR_USERNAMES: Partial<Record<Collaborator, string>> = {
+  carlos: 'juancarlos',
+};
+
+const NAMED_COLLABORATORS: Collaborator[] = [
+  'andrea',
+  'roberto',
+  'jorddy',
+  'andres',
+  'jesus',
+  'carlos',
+  'ana',
+];
 
 export function collaboratorForUser(user: User | null): Collaborator | null {
   if (!user) return null;
-  return BY_USERNAME[user.username.toLowerCase()] ?? null;
+  const un = user.username.toLowerCase();
+  if (USERNAME_TO_COLLABORATOR[un]) return USERNAME_TO_COLLABORATOR[un];
+  if (NAMED_COLLABORATORS.includes(un as Collaborator)) return un as Collaborator;
+  return null;
 }
 
-export function projectVisibleToUser(
+export function employeeIdForCollaboratorSlug(
   collaborator: Collaborator,
+  users: User[],
+): string | undefined {
+  if (collaborator === 'todos') return undefined;
+  const username = COLLABORATOR_USERNAMES[collaborator] ?? collaborator;
+  return users.find((u) => u.username.toLowerCase() === username)?.employeeId;
+}
+
+export function resolveProjectAssignee(
+  project: Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId'>,
+  activeUsers: User[],
+): string | undefined {
+  if (project.assignedEmployeeId) return project.assignedEmployeeId;
+  return employeeIdForCollaboratorSlug(project.collaborator, activeUsers);
+}
+
+/** Colaboradores solo ven proyectos asignados a su persona; gerente ve todo. */
+export function projectVisibleToUser(
+  project: Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId'>,
   user: User | null,
   canEditAll: boolean,
+  activeUsers: User[],
 ): boolean {
   if (canEditAll) return true;
-  const mine = collaboratorForUser(user);
-  if (!mine) return collaborator === 'todos';
-  return collaborator === 'todos' || collaborator === mine;
+  if (!user?.employeeId) return false;
+  const assignee = resolveProjectAssignee(project, activeUsers);
+  if (!assignee) return false;
+  return assignee === user.employeeId;
+}
+
+export function patchForCollaboratorChange(
+  collaborator: Collaborator,
+  activeUsers: User[],
+): Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId'> {
+  return {
+    collaborator,
+    assignedEmployeeId: employeeIdForCollaboratorSlug(collaborator, activeUsers),
+  };
 }
 
 /** Puede quitar del listado un proyecto ya marcado como terminado. */
 export function canDeleteFinishedProject(
-  collaborator: Collaborator,
+  project: Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId'>,
   user: User | null,
   canEditAll: boolean,
+  activeUsers: User[],
 ): boolean {
   if (canEditAll) return true;
-  return projectVisibleToUser(collaborator, user, false);
+  return projectVisibleToUser(project, user, false, activeUsers);
 }
 
-/** Colaborador asignado (o equipo en «todos») puede fijar la fecha de compromiso una sola vez. */
+/** Colaborador asignado puede fijar la fecha de compromiso una sola vez. */
 export function canEmployeeSetCommitmentDate(
-  project: { collaborator: Collaborator; commitmentDateLocked?: boolean },
+  project: Pick<
+    CreativeProject,
+    'collaborator' | 'assignedEmployeeId' | 'commitmentDateLocked'
+  >,
   user: User | null,
   canEditAll: boolean,
+  activeUsers: User[],
 ): boolean {
   if (canEditAll || !user || user.role === 'admin') return false;
   if (project.commitmentDateLocked) return false;
-  if (!projectVisibleToUser(project.collaborator, user, false)) return false;
-  if (project.collaborator === 'todos') return user.role === 'empleado';
-  const mine = collaboratorForUser(user);
-  return mine === project.collaborator;
+  return projectVisibleToUser(project, user, false, activeUsers);
 }
 
 /** Colaborador asignado puede cerrar el proyecto con prueba fotográfica. */
 export function canEmployeeCompleteProject(
-  project: { collaborator: Collaborator; status: string },
+  project: Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId' | 'status'>,
   user: User | null,
   canEditAll: boolean,
+  activeUsers: User[],
 ): boolean {
   if (canEditAll || !user || user.role === 'admin') return false;
   if (project.status === 'terminado') return false;
-  if (!projectVisibleToUser(project.collaborator, user, false)) return false;
-  if (project.collaborator === 'todos') return user.role === 'empleado';
-  const mine = collaboratorForUser(user);
-  return mine === project.collaborator;
+  return projectVisibleToUser(project, user, false, activeUsers);
 }

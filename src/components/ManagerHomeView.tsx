@@ -10,6 +10,8 @@ import { isActiveProject } from '../utils/activeItems';
 import { getDeadlineInfo } from '../utils/deadline';
 import { formatShortDate } from '../utils/formatDate';
 import { countOverdueProjects, sortProjectsByUrgency } from '../utils/projectLink';
+import { buildTeamCapacity } from '../utils/teamWorkload';
+import { ActivityFeedPanel } from './ActivityFeedPanel';
 import type { CreativeProject } from '../types';
 import './ManagerHomeView.css';
 
@@ -32,7 +34,8 @@ export function ManagerHomeView({
   onGoTeam,
   onOpenProject,
 }: Props) {
-  const { assignments } = useApp();
+  const { assignments, activeUsers, activityFeed, workloadLimits, canManageWorkloadLimits } =
+    useApp();
 
   const activeProjects = useMemo(
     () => projects.filter(isActiveProject),
@@ -68,8 +71,59 @@ export function ManagerHomeView({
 
   const overdueCount = countOverdueProjects(activeProjects);
 
+  const capacity = useMemo(
+    () => buildTeamCapacity(projects, assignments, activeUsers, workloadLimits),
+    [projects, assignments, activeUsers, workloadLimits],
+  );
+
+  const saturatedCount = useMemo(
+    () => capacity.filter((row) => row.saturated).length,
+    [capacity],
+  );
+
+  const needsAttention = overdueCount > 0 || teamPending.length > 0;
+  const isBlankBoard = activeProjects.length === 0;
+
   return (
     <div className="manager-home">
+      {isBlankBoard && (
+        <section className="manager-home-welcome" role="status">
+          <h2>Tablero en blanco</h2>
+          <p>
+            No hay proyectos todavía. Crea el primero en Proyectos y asigna colaborador para
+            que solo esa persona lo vea.
+          </p>
+          <button type="button" className="btn-primary" onClick={onGoProjects}>
+            + Crear primer proyecto
+          </button>
+        </section>
+      )}
+
+      {needsAttention && (
+        <section className="manager-home-priority" role="status">
+          <h2>Prioridad hoy</h2>
+          <p>
+            {overdueCount > 0 && teamPending.length > 0
+              ? `${overdueCount} proyecto${overdueCount > 1 ? 's' : ''} con retraso y ${teamPending.length} indicación${teamPending.length > 1 ? 'es' : ''} sin aceptar.`
+              : overdueCount > 0
+                ? `${overdueCount} proyecto${overdueCount > 1 ? 's' : ''} pasaron la fecha de compromiso.`
+                : `${teamPending.length} indicación${teamPending.length > 1 ? 'es' : ''} esperando respuesta del equipo.`}
+          </p>
+          <div className="manager-home-priority-actions">
+            {overdueCount > 0 && (
+              <button type="button" className="btn-primary" onClick={onGoProjects}>
+                Ver atrasados
+              </button>
+            )}
+            {teamPending.length > 0 && (
+              <button type="button" className="btn-ghost" onClick={onGoAssignments}>
+                Revisar indicaciones
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="manager-home-kpis" aria-label="Resumen">
         <div className="manager-kpi manager-kpi--danger">
           <strong>{overdueCount}</strong>
@@ -82,6 +136,10 @@ export function ManagerHomeView({
         <div className="manager-kpi manager-kpi--ok">
           <strong>{activeProjects.length}</strong>
           <span>En curso</span>
+        </div>
+        <div className={`manager-kpi${saturatedCount > 0 ? ' manager-kpi--warn' : ''}`}>
+          <strong>{saturatedCount}</strong>
+          <span>Al límite de carga</span>
         </div>
         <div className="manager-kpi">
           <strong>{completedProjects.length}</strong>
@@ -101,6 +159,72 @@ export function ManagerHomeView({
           Equipo
         </button>
       </div>
+
+      {capacity.length > 0 && (
+        <section className="manager-home-block manager-home-block--capacity">
+          <div className="manager-home-block-head">
+            <h2>Carga y límites del equipo</h2>
+            <div className="manager-home-block-actions">
+              {canManageWorkloadLimits && (
+                <button type="button" className="btn-ghost manager-home-link" onClick={onGoAssignments}>
+                  Ajustar límites →
+                </button>
+              )}
+              <button type="button" className="btn-ghost manager-home-link" onClick={onGoTeam}>
+                Equipo →
+              </button>
+            </div>
+          </div>
+          <p className="manager-home-sub">
+            Proyectos activos + indicaciones pendientes vs el máximo permitido. Si alguien está
+            saturado, no recibe más trabajo sin tu contraseña.
+          </p>
+          <ul className="manager-workload-list">
+            {capacity.map((row) => (
+              <li
+                key={row.id}
+                className={`manager-workload-row${row.saturated ? ' manager-workload-row--full' : row.nearlyFull ? ' manager-workload-row--warn' : ''}`}
+              >
+                <div className="manager-workload-name">
+                  <strong>{row.name}</strong>
+                  <span>
+                    {row.total}/{row.max} trabajos · {row.projects} proy. · {row.pendingAssignments}{' '}
+                    indic.
+                  </span>
+                </div>
+                <div className="manager-workload-bars" title={`${row.fillPercent}% del límite`}>
+                  <div
+                    className={`manager-workload-bar manager-workload-bar--fill${row.saturated ? ' manager-workload-bar--full' : row.nearlyFull ? ' manager-workload-bar--warn' : ''}`}
+                    style={{ width: `${row.fillPercent}%` }}
+                  />
+                </div>
+                <div className="manager-workload-tags">
+                  {row.saturated && (
+                    <span className="manager-workload-tag manager-workload-tag--full">
+                      Saturado
+                    </span>
+                  )}
+                  {!row.saturated && row.nearlyFull && (
+                    <span className="manager-workload-tag manager-workload-tag--soon">
+                      Casi lleno
+                    </span>
+                  )}
+                  {row.overdueCount > 0 && (
+                    <span className="manager-workload-tag manager-workload-tag--danger">
+                      {row.overdueCount} atrasado{row.overdueCount > 1 ? 's' : ''}
+                    </span>
+                  )}
+                  {row.dueSoonCount > 0 && (
+                    <span className="manager-workload-tag manager-workload-tag--soon">
+                      {row.dueSoonCount} pronto
+                    </span>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section className="manager-home-block">
         <div className="manager-home-block-head">
@@ -181,6 +305,10 @@ export function ManagerHomeView({
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="manager-home-block">
+        <ActivityFeedPanel events={activityFeed} limit={10} />
       </section>
     </div>
   );

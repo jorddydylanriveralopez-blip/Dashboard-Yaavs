@@ -1,0 +1,71 @@
+.activity-feed-title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+
+.activity-feed-empty {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.activity-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-feed-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--bg-muted);
+  border: 1px solid var(--border);
+}
+
+.activity-feed-icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.875rem;
+  font-weight: 700;
+  background: rgba(0, 85, 255, 0.1);
+  color: var(--yaavs-blue-mid);
+}
+
+.activity-feed-item--project_completed .activity-feed-icon {
+  background: #d1fae5;
+  color: #059669;
+}
+
+.activity-feed-item--assignment_sent .activity-feed-icon,
+.activity-feed-item--assignment_accepted .activity-feed-icon {
+  background: #fff4e5;
+  color: var(--accent);
+}
+
+.activity-feed-item--team_member_removed .activity-feed-icon {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.activity-feed-body p {
+  margin: 0 0 2px;
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  color: var(--yaavs-ink);
+}
+
+.activity-feed-body span {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+}

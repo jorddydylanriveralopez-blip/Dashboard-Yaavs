@@ -1,0 +1,68 @@
+.workload-override-panel {
+  max-width: 440px;
+}
+
+.workload-override-head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.workload-override-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+  background: #fff8eb;
+  border: 1px solid #fdab3d;
+  color: #b45309;
+}
+
+.workload-override-head h2 {
+  margin: 0 0 6px;
+  font-size: 1.0625rem;
+}
+
+.workload-override-head p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.workload-override-hint {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--bg-muted);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.workload-override-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.workload-override-error {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  color: #b4234a;
+}
+
+.workload-override-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}

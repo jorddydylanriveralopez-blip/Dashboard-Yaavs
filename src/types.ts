@@ -14,6 +14,8 @@ export interface User {
   name: string;
   role: UserRole;
   avatarColor: string;
+  /** Foto de perfil (data URL). */
+  avatarUrl?: string;
   employeeId?: string;
 }
 
@@ -53,6 +55,10 @@ export interface EmployeeTask {
   lastAssignmentId?: string;
   /** Proyecto creativo vinculado al aceptar una indicación con brief. */
   linkedProjectId?: string;
+  /** Mes (YYYY-MM) del objetivo KPI asignado por gerente/coordinador. */
+  kpiObjectiveMonthKey?: string;
+  kpiAssignedByName?: string;
+  kpiAssignedAt?: string;
 }
 
 export type BusinessUnit = 'prepago' | 'pospago' | 'silemi' | 'yaavs_shop';
@@ -97,6 +103,7 @@ export type Collaborator =
   | 'andres'
   | 'jesus'
   | 'carlos'
+  | 'ana'
   | 'todos';
 
 export type ProjectStatus =
@@ -123,6 +130,8 @@ export interface CreativeProject {
   commitmentDateLocked?: boolean;
   internalArea: InternalArea;
   collaborator: Collaborator;
+  /** Empleado al que se asignó el proyecto (para privacidad entre colaboradores). */
+  assignedEmployeeId?: string;
   status: ProjectStatus;
   finishedDate?: string;
   comments: string;
@@ -209,6 +218,56 @@ export interface TaskAssignment {
   rejectReason?: string;
 }
 
+/** Objetivo KPI mensual enviado por gerente/coordinador; el colaborador debe aceptarlo. */
+export interface KpiObjectiveAssignment {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  assignedById: string;
+  assignedByName: string;
+  monthKey: string;
+  monthLabel: string;
+  objective: string;
+  kpiTarget: number;
+  dueDate: string;
+  notes: string;
+  status: AssignmentStatus;
+  createdAt: string;
+  respondedAt?: string;
+  rejectReason?: string;
+}
+
+/** Límite de trabajos activos por colaborador (proyectos + indicaciones pendientes). */
+export interface WorkloadLimitsStore {
+  /** Máximo por defecto si no hay límite individual. */
+  defaultMax: number;
+  /** Máximo por employeeId. */
+  byEmployee: Record<string, number>;
+}
+
+export interface WorkloadBreakdown {
+  projects: number;
+  pendingAssignments: number;
+  total: number;
+}
+
+export interface WorkloadCheckResult {
+  employeeId: string;
+  employeeName: string;
+  current: WorkloadBreakdown;
+  max: number;
+  /** Tras sumar addSlots (p. ej. 1 trabajo nuevo). */
+  projected: number;
+  allowed: boolean;
+  saturated: boolean;
+}
+
+export type WorkloadActionResult =
+  | { ok: true }
+  | { ok: false; reason: 'workload_limit'; status: WorkloadCheckResult }
+  | { ok: false; reason: 'invalid_override' }
+  | { ok: false; reason: 'forbidden' };
+
 /** Calificación del cierre de mes (KPI + cumplimiento). */
 export type PerformanceRating = 'positive' | 'regular' | 'negative';
 
@@ -236,11 +295,118 @@ export interface PerformanceHistoryStore {
   lastAutoCloseMonthKey?: string;
 }
 
+/** Respaldo completo de un mes cerrado (descargable). */
+export interface MonthlyArchiveSnapshot {
+  monthKey: string;
+  monthLabel: string;
+  archivedAt: string;
+  closedBy: 'auto' | 'manager';
+  performance: MonthlyPerformanceRecord[];
+  projectsCompleted: CreativeProject[];
+  projectsActive: CreativeProject[];
+  assignments: TaskAssignment[];
+  teamSnapshot: EmployeeTask[];
+  summary: {
+    teamSize: number;
+    projectsCompleted: number;
+    projectsActive: number;
+    assignmentsTotal: number;
+    assignmentsAccepted: number;
+    assignmentsRejected: number;
+    kpiAverage: number;
+  };
+}
+
+export interface MonthlyArchiveStore {
+  snapshots: MonthlyArchiveSnapshot[];
+  /** Mes en curso tras el último reinicio mensual (YYYY-MM). */
+  lastRolloverMonthKey?: string;
+}
+
+/** Captura diaria del avance KPI de cada colaborador. */
+export interface DailyKpiSnapshot {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  dateKey: string;
+  monthKey: string;
+  kpiPercent: number;
+  kpiCurrent: number;
+  kpiTarget: number;
+  status: TaskStatus;
+  /** Avanzó respecto al día anterior (subió KPI o entregó). */
+  progressed: boolean;
+  deltaPercent: number;
+  recordedAt: string;
+}
+
+export interface DailyKpiStore {
+  snapshots: DailyKpiSnapshot[];
+}
+
+export type SocialPlatform = 'tiktok' | 'meta' | 'instagram' | 'youtube' | 'otro';
+
+export type ContentSentiment = 'gusta' | 'regular' | 'no_gusta';
+
+/** Publicación o pieza registrada por community manager. */
+export interface SocialContentEntry {
+  id: string;
+  platform: SocialPlatform;
+  title: string;
+  dateKey: string;
+  monthKey: string;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  sentiment: ContentSentiment;
+  notes: string;
+  createdById: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface SocialMetricsStore {
+  entries: SocialContentEntry[];
+}
+
+export type ActivityKind =
+  | 'project_completed'
+  | 'assignment_sent'
+  | 'assignment_accepted'
+  | 'kpi_objective_sent'
+  | 'kpi_objective_accepted'
+  | 'team_member_added'
+  | 'team_member_removed'
+  | 'project_status';
+
+export interface ActivityEvent {
+  id: string;
+  kind: ActivityKind;
+  message: string;
+  actorName: string;
+  at: string;
+}
+
+export interface TeamRosterState {
+  added: User[];
+  removedUserIds: string[];
+}
+
+/** Personalización de perfil por usuario (login, foto). */
+export interface UserProfileCustomization {
+  username?: string;
+  avatarUrl?: string;
+}
+
+export type UserProfilesStore = Record<string, UserProfileCustomization>;
+
 export interface AppSyncState {
   board: BoardState;
   assignments: TaskAssignment[];
   calendars: CalendarStore;
   passwordOverrides: Record<string, string>;
   performanceHistory?: PerformanceHistoryStore;
+  teamRoster?: TeamRosterState;
   updatedAt: string;
 }

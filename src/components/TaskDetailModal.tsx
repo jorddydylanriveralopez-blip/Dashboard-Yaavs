@@ -3,6 +3,8 @@ import { useApp } from '../context/AppContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { STATUS_COLORS, STATUS_LABELS } from '../constants';
 import { getDeadlineInfo } from '../utils/deadline';
+import { hasActiveKpiObjective } from '../utils/kpiObjectives';
+import { getMonthKey } from '../utils/performanceHistory';
 import { FileAttachmentsEditor, FileAttachmentsList } from './FileAttachments';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
 import type { EmployeeTask, TaskStatus } from '../types';
@@ -14,7 +16,7 @@ interface Props {
 }
 
 export function TaskDetailModal({ taskId, onClose }: Props) {
-  const { board, canEditTask, updateTask, deleteTask, canEditAll } = useApp();
+  const { board, canEditTask, updateTask, deleteTask, canEditAll, user } = useApp();
   const { confirm } = useConfirm();
 
   const task = useMemo(
@@ -29,6 +31,11 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
   if (!task) return null;
 
   const editable = canEditTask(task);
+  const isOwnTask = user?.employeeId === task.employeeId;
+  const lockedKpiFields =
+    isOwnTask && !canEditAll && hasActiveKpiObjective(task, getMonthKey());
+  const canEditObjectiveFields = editable && !lockedKpiFields;
+  const canEditProgressFields = editable;
   const deadline = getDeadlineInfo(task.dueDate, task.status);
 
   return (
@@ -125,7 +132,7 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
 
             <section>
               <label>KPI actual / meta</label>
-              {editable ? (
+              {canEditProgressFields ? (
                 <div className="kpi-row">
                   <input
                     type="number"
@@ -136,14 +143,18 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
                     }
                   />
                   <span>/</span>
-                  <input
-                    type="number"
-                    min={1}
-                    value={task.kpiTarget}
-                    onChange={(e) =>
-                      updateTask(task.id, { kpiTarget: Number(e.target.value) || 100 })
-                    }
-                  />
+                  {canEditObjectiveFields ? (
+                    <input
+                      type="number"
+                      min={1}
+                      value={task.kpiTarget}
+                      onChange={(e) =>
+                        updateTask(task.id, { kpiTarget: Number(e.target.value) || 100 })
+                      }
+                    />
+                  ) : (
+                    <strong>{task.kpiTarget}</strong>
+                  )}
                   <span>%</span>
                 </div>
               ) : (
@@ -151,11 +162,17 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
                   {task.kpiCurrent}% / {task.kpiTarget}%
                 </p>
               )}
+              {lockedKpiFields && task.kpiAssignedByName && (
+                <p className="modal-kpi-lock">
+                  Meta fijada por {task.kpiAssignedByName} para este mes. Actualiza tu avance en
+                  «KPI actual».
+                </p>
+              )}
             </section>
 
             <section>
               <label>Fecha de entrega</label>
-              {editable ? (
+              {canEditObjectiveFields ? (
                 <input
                   type="date"
                   value={task.dueDate}
@@ -172,7 +189,7 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
 
           <section>
             <label>Objetivo del periodo</label>
-            {editable ? (
+            {canEditObjectiveFields ? (
               <SpellCheckInput
                 value={task.objective}
                 onChange={(e) => updateTask(task.id, { objective: e.target.value })}

@@ -1,9 +1,4 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import {
-  loadAssignmentAttachments,
-  loadProjectAttachments,
-} from '../utils/attachmentStore';
-import type { FileAttachment } from '../types';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -12,30 +7,25 @@ import {
 } from '../constants';
 import { AssignmentBriefDetails } from './AssignmentBriefDetails';
 import { FileAttachmentsEditor, FileAttachmentsList } from './FileAttachments';
-import { cloneAttachments } from '../utils/fileAttachments';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
 import { fuzzyIncludes } from '../utils/fuzzyMatch';
-import {
-  assignableMarketingTasks,
-  assignmentPriorityFromProject,
-  assignmentTaskLine,
-  briefFromProject,
-  buildObjectiveFromProject,
-  employeeIdForCollaborator,
-} from '../utils/assignmentBrief';
+import { assignableMarketingTasks, assignmentTaskLine } from '../utils/assignmentBrief';
+import { loadAssignmentAttachments } from '../utils/attachmentStore';
 import {
   filterPendingAssignments,
-  isActiveProject,
   isPendingAssignment,
 } from '../utils/activeItems';
 import {
   BUSINESS_UNITS,
-  COLLABORATORS,
   labelFor,
   PROJECT_TYPES,
   REQUESTING_DEPARTMENTS,
 } from '../data/projectOptions';
-import type { TaskAssignment } from '../types';
+import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
+import { workloadLabel } from '../utils/workloadLimits';
+import { WorkloadLimitsPanel } from './WorkloadLimitsPanel';
+import { WorkloadOverrideModal } from './WorkloadOverrideModal';
+import type { FileAttachment, TaskAssignment } from '../types';
 import './AssignmentsView.css';
 
 export function AssignmentsView() {
@@ -43,11 +33,11 @@ export function AssignmentsView() {
     user,
     board,
     canEditAll,
+    canManageWorkloadLimits,
     activeUsers,
-    projects,
     assignments,
     myPendingAssignments,
-    createAssignment,
+    getWorkloadCheck,
     acceptAssignment,
     rejectAssignment,
     cancelAssignment,
@@ -55,6 +45,7 @@ export function AssignmentsView() {
     setAssignmentSearch,
   } = useApp();
   const toast = useToast();
+  const { override, cancelOverride, confirmOverride, submitAssignment } = useWorkloadGuard();
 
   const [employeeId, setEmployeeId] = useState('');
   const [title, setTitle] = useState('');
@@ -66,7 +57,6 @@ export function AssignmentsView() {
   const [notes, setNotes] = useState('');
   const [attachmentUrl, setAttachmentUrl] = useState('');
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
-  const [linkedProjectId, setLinkedProjectId] = useState('');
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -74,28 +64,6 @@ export function AssignmentsView() {
     () => assignableMarketingTasks(board.tasks, activeUsers),
     [board.tasks, activeUsers],
   );
-
-  const linkableProjects = useMemo(
-    () => projects.filter(isActiveProject),
-    [projects],
-  );
-
-  useEffect(() => {
-    if (!linkedProjectId) return;
-    const proj = linkableProjects.find((p) => p.id === linkedProjectId);
-    if (!proj) return;
-    setTitle(proj.projectName);
-    setObjective(buildObjectiveFromProject(proj));
-    setDueDate(proj.commitmentDate || new Date().toISOString().slice(0, 10));
-    setPriority(assignmentPriorityFromProject(proj.priority));
-    const empId = employeeIdForCollaborator(proj.collaborator, activeUsers);
-    if (empId) setEmployeeId(empId);
-    void loadProjectAttachments(proj.id).then((fromDb) => {
-      const list =
-        fromDb.length > 0 ? fromDb : (proj.attachments?.length ? proj.attachments! : []);
-      setAttachments(cloneAttachments(list));
-    });
-  }, [linkedProjectId, linkableProjects, activeUsers]);
 
   const filterList = (list: TaskAssignment[]) => {
     const q = assignmentSearch.trim();
@@ -140,13 +108,15 @@ export function AssignmentsView() {
     );
   }, [assignments, user?.employeeId, assignmentSearch]);
 
+  const selectedWorkload = useMemo(() => {
+    if (!employeeId) return null;
+    return getWorkloadCheck(employeeId, { addSlots: 1 });
+  }, [employeeId, getWorkloadCheck, assignments]);
+
   const handleSend = (e: FormEvent) => {
     e.preventDefault();
     if (!employeeId || !title.trim()) return;
-    const proj = linkedProjectId
-      ? linkableProjects.find((p) => p.id === linkedProjectId)
-      : undefined;
-    createAssignment({
+    const payload = {
       employeeId,
       title,
       objective,
@@ -155,20 +125,20 @@ export function AssignmentsView() {
       notes,
       attachmentUrl,
       attachments: attachments.length ? attachments : undefined,
-      brief: proj ? briefFromProject(proj) : undefined,
-    });
-    setTitle('');
-    setObjective('');
-    setNotes('');
-    setAttachmentUrl('');
-    setAttachments([]);
-    setLinkedProjectId('');
+    };
     const fileCount = attachments.length;
-    toast.success(
-      fileCount > 0
-        ? `Indicación enviada con ${fileCount} archivo${fileCount > 1 ? 's' : ''} adjunto${fileCount > 1 ? 's' : ''}`
-        : 'Indicación enviada al colaborador (sin archivos adjuntos)',
-    );
+    submitAssignment(payload, () => {
+      setTitle('');
+      setObjective('');
+      setNotes('');
+      setAttachmentUrl('');
+      setAttachments([]);
+      toast.success(
+        fileCount > 0
+          ? `Indicación enviada con ${fileCount} archivo${fileCount > 1 ? 's' : ''} adjunto${fileCount > 1 ? 's' : ''}`
+          : 'Indicación enviada al colaborador (sin archivos adjuntos)',
+      );
+    });
   };
 
   const handleAccept = (id: string) => {
@@ -186,6 +156,8 @@ export function AssignmentsView() {
 
   return (
     <div className="assignments-view">
+      {canManageWorkloadLimits && <WorkloadLimitsPanel />}
+
       <input
         type="search"
         className="assign-search"
@@ -222,24 +194,9 @@ export function AssignmentsView() {
         <section className="assign-section">
           <h2>Enviar indicación al equipo</h2>
           <p className="assign-hint">
-            Vincula un proyecto creativo para que el colaborador vea solicitud, área,
-            unidad de negocio y el resto del contexto.
+            Describe qué debe hacer la persona, la fecha límite y adjunta archivos si hace falta.
           </p>
           <form className="assign-form" onSubmit={handleSend}>
-            <label>
-              Proyecto creativo (origen de la solicitud)
-              <select
-                value={linkedProjectId}
-                onChange={(e) => setLinkedProjectId(e.target.value)}
-              >
-                <option value="">Sin vincular / indicación manual</option>
-                {linkableProjects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.projectName} — {labelFor(COLLABORATORS, p.collaborator)}
-                  </option>
-                ))}
-              </select>
-            </label>
             <label>
               Colaborador
               <select
@@ -248,12 +205,25 @@ export function AssignmentsView() {
                 required
               >
                 <option value="">Selecciona…</option>
-                {assignable.map((t) => (
-                  <option key={t.employeeId} value={t.employeeId}>
-                    {t.employeeName} — {t.roleTitle}
-                  </option>
-                ))}
+                {assignable.map((t) => {
+                  const check = getWorkloadCheck(t.employeeId);
+                  return (
+                    <option key={t.employeeId} value={t.employeeId}>
+                      {t.employeeName} — {check.current.total}/{check.max} trabajos
+                    </option>
+                  );
+                })}
               </select>
+              {selectedWorkload && (
+                <span
+                  className={`assign-workload-hint${selectedWorkload.allowed ? '' : ' assign-workload-hint--full'}`}
+                >
+                  {workloadLabel(selectedWorkload)} tras enviar ·{' '}
+                  {selectedWorkload.current.projects} proy. +{' '}
+                  {selectedWorkload.current.pendingAssignments} indic. pendientes
+                  {!selectedWorkload.allowed && ' — límite alcanzado (pedirá contraseña)'}
+                </span>
+              )}
             </label>
             <div className="assign-attachments-field">
               <span className="assign-attachments-field-label">Archivos e imágenes</span>
@@ -391,6 +361,14 @@ export function AssignmentsView() {
             </div>
           </div>
         </div>
+      )}
+
+      {override && (
+        <WorkloadOverrideModal
+          check={override.check}
+          onClose={cancelOverride}
+          onConfirm={confirmOverride}
+        />
       )}
     </div>
   );

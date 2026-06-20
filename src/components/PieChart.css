@@ -1,0 +1,83 @@
+.pie-chart {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px;
+}
+
+.pie-chart--empty {
+  padding: 32px;
+  justify-content: center;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.pie-chart-ring {
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.pie-chart-hole {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.pie-chart-hole strong {
+  font-size: 1.5rem;
+  line-height: 1.1;
+  color: var(--yaavs-ink);
+}
+
+.pie-chart-hole span {
+  font-size: 0.6875rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pie-chart-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.pie-chart-legend li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pie-chart-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.pie-chart-legend-text strong {
+  display: block;
+  font-size: 0.875rem;
+}
+
+.pie-chart-legend-text span {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}

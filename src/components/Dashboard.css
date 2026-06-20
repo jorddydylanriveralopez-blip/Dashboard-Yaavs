@@ -507,6 +507,51 @@
     font-size: 0.8125rem;
     padding: 12px 14px;
   }
+
+  .mobile-stats-strip {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .mobile-stat {
+    flex: 1;
+    min-width: 72px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 10px 8px;
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(0, 85, 255, 0.12);
+    font-size: 0.625rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .mobile-stat strong {
+    font-size: 1.125rem;
+    color: var(--yaavs-ink);
+    font-weight: 700;
+  }
+
+  .mobile-stat--danger strong {
+    color: #dc2626;
+  }
+
+  .mobile-stat--warn strong {
+    color: var(--accent);
+  }
+}
+
+.mobile-stats-strip {
+  display: none;
 }
 
 @media (max-width: 380px) {

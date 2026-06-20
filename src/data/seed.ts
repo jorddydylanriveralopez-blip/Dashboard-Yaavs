@@ -1,4 +1,4 @@
-import type { BoardState } from '../types';
+import type { BoardState, EmployeeTask } from '../types';
 import { DEFAULT_PROJECTS } from './projectSeed';
 
 export const MARKETING_DEPARTMENT = 'Marketing';
@@ -10,7 +10,49 @@ const addDays = (d: number) => {
   return x.toISOString().slice(0, 10);
 };
 
+function emptyTeamTask(
+  id: string,
+  employeeId: string,
+  employeeName: string,
+  roleTitle: string,
+  avatarColor: string,
+): EmployeeTask {
+  return {
+    id,
+    employeeId,
+    employeeName,
+    department: MARKETING_DEPARTMENT,
+    roleTitle,
+    avatarColor,
+    currentWork: 'Sin tarea asignada — define el trabajo actual',
+    status: 'sin_empezar',
+    kpiTarget: 100,
+    kpiCurrent: 0,
+    objective: 'Objetivo del periodo',
+    dueDate: addDays(30),
+    notes: '',
+    priority: 'media',
+  };
+}
+
+/** Tablero vacío al instalar o tras reset (?fix=1). */
+export const EMPTY_BOARD: BoardState = {
+  companyName: 'Yaavs',
+  projects: [],
+  tasks: [
+    emptyTeamTask('t-orlando', 'emp-orlando', 'Orlando', 'Gerente de Marketing', '#5034ff'),
+    emptyTeamTask('t-juancarlos', 'emp-juancarlos', 'Juan Carlos', 'Mercadotecnia', '#fdab3d'),
+    emptyTeamTask('t-ana', 'emp-ana', 'Ana García', 'Contenido digital', '#579bfc'),
+    emptyTeamTask('t-jorddy', 'emp-jorddy', 'Jorddy Dylan', 'Diseñador UX/UI', '#ff158a'),
+    emptyTeamTask('t-jesus', 'emp-jesus', 'Jesus', 'Diseñador Multimedia', '#784bd1'),
+    emptyTeamTask('t-roberto', 'emp-roberto', 'Roberto', 'Diseñador Gráfico', '#0086c0'),
+    emptyTeamTask('t-andrea', 'emp-andrea', 'Andrea', 'Diseñadora Gráfica', '#9cd326'),
+    emptyTeamTask('t-andres', 'emp-andres', 'Andres', 'Diseñador Gráfico', '#cab641'),
+  ],
+};
+
 export const MARKETING_EMPLOYEE_IDS = [
+  'emp-orlando',
   'emp-juancarlos',
   'emp-ana',
   'emp-jorddy',
@@ -25,11 +67,27 @@ export const DEFAULT_BOARD: BoardState = {
   projects: DEFAULT_PROJECTS,
   tasks: [
     {
+      id: 't-orlando',
+      employeeId: 'emp-orlando',
+      employeeName: 'Orlando',
+      department: MARKETING_DEPARTMENT,
+      roleTitle: 'Gerente de Marketing',
+      avatarColor: '#5034ff',
+      currentWork: 'Dirección del área y priorización de proyectos creativos',
+      status: 'en_progreso',
+      kpiTarget: 100,
+      kpiCurrent: 72,
+      objective: 'Coordinar al equipo, indicaciones y entregas del área',
+      dueDate: addDays(5),
+      notes: 'Administrador del área de Marketing Yaavs.',
+      priority: 'alta',
+    },
+    {
       id: 't-juancarlos',
       employeeId: 'emp-juancarlos',
       employeeName: 'Juan Carlos',
       department: MARKETING_DEPARTMENT,
-      roleTitle: 'Gerente de Marketing',
+      roleTitle: 'Mercadotecnia',
       avatarColor: '#fdab3d',
       currentWork: 'Plan estratégico Q2 y calendario de campañas',
       status: 'en_progreso',
@@ -117,7 +175,7 @@ export const DEFAULT_BOARD: BoardState = {
       kpiCurrent: 10,
       objective: 'Entregar ilustraciones vectoriales listas para impresión',
       dueDate: addDays(8),
-      notes: 'Brief recibido. Definir estilo con Juan Carlos.',
+      notes: 'Brief recibido. Definir estilo con Orlando.',
       priority: 'alta',
     },
     {

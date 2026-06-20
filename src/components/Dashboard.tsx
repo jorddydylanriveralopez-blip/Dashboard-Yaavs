@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { MARKETING_DEPARTMENT } from '../data/seed';
 import { AssignTaskModal, type AssignFormData } from './AssignTaskModal';
+import { WorkloadOverrideModal } from './WorkloadOverrideModal';
+import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
+import { SendKpiObjectiveModal, type KpiObjectiveFormData } from './SendKpiObjectiveModal';
 import { AssignmentsView } from './AssignmentsView';
 import { BrandLogo } from './BrandLogo';
 import { CalendarView } from './CalendarView';
@@ -13,7 +15,10 @@ import { YaavsAssistant } from './YaavsAssistant';
 import { MyDayView } from './MyDayView';
 import { OnboardingTour } from './OnboardingTour';
 import { ProfileModal } from './ProfileModal';
+import { UserAvatar } from './UserAvatar';
 import { ReportsView } from './ReportsView';
+import { CommunityView } from './CommunityView';
+import { MarketingPulseView } from './MarketingPulseView';
 import { MonthlyHistoryView } from './MonthlyHistoryView';
 import { PerformanceAlertBanner, PerformanceAlertBadge } from './PerformanceAlertBanner';
 import { TaskDetailModal } from './TaskDetailModal';
@@ -21,26 +26,18 @@ import { ProjectsBoard } from './ProjectsBoard';
 import { CompletedProjectsView } from './CompletedProjectsView';
 import { MarketingTeamView } from './MarketingTeamView';
 import { ProjectDetailModal } from './ProjectDetailModal';
+import { MobileMoreMenu } from './MobileMoreMenu';
 import { useAssignmentNotifications } from '../hooks/useAssignmentNotifications';
+import { useDashboardRoute } from '../hooks/useDashboardRoute';
 import { usePerformanceStreakAlert } from '../hooks/usePerformanceStreakAlert';
 import { COMPANY_NAME } from '../constants';
-import { projectVisibleToUser } from '../utils/collaboratorMap';
+import type { DashboardView } from '../utils/dashboardRoutes';
 import { countOverdueProjects } from '../utils/projectLink';
 import { fuzzyIncludes } from '../utils/fuzzyMatch';
 import { isActiveProject } from '../utils/activeItems';
+import { takeRolloverNotice } from '../utils/monthlyArchive';
 import type { CreativeProject, EmployeeTask } from '../types';
 import './Dashboard.css';
-
-type DashboardView =
-  | 'home'
-  | 'team'
-  | 'board'
-  | 'completed'
-  | 'assignments'
-  | 'kpis'
-  | 'history'
-  | 'calendar'
-  | 'reports';
 
 const NAV: { id: DashboardView; label: string; icon: string; managerOnly?: boolean }[] = [
   { id: 'home', label: 'Inicio', icon: '⌂' },
@@ -50,9 +47,13 @@ const NAV: { id: DashboardView; label: string; icon: string; managerOnly?: boole
   { id: 'assignments', label: 'Indic.', icon: '✉' },
   { id: 'kpis', label: 'KPIs', icon: '◎' },
   { id: 'history', label: 'Historial', icon: '◷' },
+  { id: 'pulse', label: 'Panorama', icon: '◐', managerOnly: true },
+  { id: 'community', label: 'Redes', icon: '◇' },
   { id: 'calendar', label: 'Agenda', icon: '▣' },
   { id: 'reports', label: 'Reportes', icon: '▤', managerOnly: true },
 ];
+
+const MOBILE_PRIMARY: DashboardView[] = ['home', 'board', 'assignments', 'team'];
 
 export function Dashboard() {
   const {
@@ -62,24 +63,33 @@ export function Dashboard() {
     filter,
     setFilter,
     canEditAll,
+    canSendKpiObjectives,
     activeUsers,
+    marketingTasks,
     addProject,
     projects,
+    visibleProjects,
+    visibleCompletedProjects,
     completedProjects,
     pendingAssignmentsCount,
     myPendingAssignments,
-    createAssignment,
+    myPendingKpiObjectives,
+    createKpiObjective,
     performanceHistory,
     assignments,
   } = useApp();
   const toast = useToast();
+  const { override, cancelOverride, confirmOverride, submitAssignment } = useWorkloadGuard();
 
   const [selected, setSelected] = useState<EmployeeTask | null>(null);
   const [selectedProject, setSelectedProject] = useState<CreativeProject | null>(null);
   const [projectFocusCompletion, setProjectFocusCompletion] = useState(false);
   const [assignTarget, setAssignTarget] = useState<EmployeeTask | null>(null);
+  const [kpiTarget, setKpiTarget] = useState<EmployeeTask | null>(null);
+  const [showKpiModal, setShowKpiModal] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [view, setView] = useState<DashboardView>('home');
+  const { view, setView } = useDashboardRoute('home');
+  const [showMobileMore, setShowMobileMore] = useState(false);
 
   useAssignmentNotifications(myPendingAssignments, !canEditAll && Boolean(user));
   usePerformanceStreakAlert(
@@ -98,10 +108,17 @@ export function Dashboard() {
     }
   }, [canEditAll, myPendingAssignments.length, view]);
 
-  const marketingTasks = useMemo(
-    () => board.tasks.filter((t) => t.department === MARKETING_DEPARTMENT),
-    [board.tasks],
-  );
+  useEffect(() => {
+    if (!canEditAll || !user) return;
+    const months = takeRolloverNotice();
+    if (!months?.length) return;
+    const labels = months.map((m) => m.label).join(', ');
+    toast.success(
+      months.length === 1
+        ? `Mes archivado: ${labels}. KPIs reiniciados para el mes nuevo. Descarga el respaldo en Historial.`
+        : `Meses archivados: ${labels}. KPIs reiniciados. Descarga respaldos en Historial.`,
+    );
+  }, [canEditAll, user, toast]);
 
   const assignable = useMemo(() => {
     const empleadoIds = new Set(
@@ -111,6 +128,11 @@ export function Dashboard() {
     );
     return marketingTasks.filter((t) => empleadoIds.has(t.employeeId));
   }, [marketingTasks, activeUsers]);
+
+  const kpiAssignable = useMemo(
+    () => marketingTasks.filter((t) => t.employeeId !== user?.employeeId),
+    [marketingTasks, user?.employeeId],
+  );
 
   const teamTasks = useMemo(() => {
     const q = filter.trim();
@@ -155,18 +177,12 @@ export function Dashboard() {
   }, [marketingTasks, projects, assignments]);
 
   const displayName = board.companyName || COMPANY_NAME;
-  const navItems = NAV.filter((n) => !n.managerOnly || canEditAll);
-
-  const visibleProjects = useMemo(
-    () => projects.filter((p) => projectVisibleToUser(p.collaborator, user, canEditAll)),
-    [projects, user, canEditAll],
-  );
-
-  const visibleCompletedProjects = useMemo(
-    () =>
-      completedProjects.filter((p) => projectVisibleToUser(p.collaborator, user, canEditAll)),
-    [completedProjects, user, canEditAll],
-  );
+  const navItems = NAV.filter((n) => {
+    if (n.id === 'pulse') return canEditAll || canSendKpiObjectives;
+    return !n.managerOnly || canEditAll;
+  });
+  const mobileMoreItems = navItems.filter((n) => !MOBILE_PRIMARY.includes(n.id));
+  const isMoreViewActive = mobileMoreItems.some((n) => n.id === view);
 
   const headlines: Record<DashboardView, { title: string; sub: string }> = {
     home: {
@@ -200,13 +216,41 @@ export function Dashboard() {
     },
     calendar: { title: 'Mi agenda', sub: 'Pendientes y tiempo' },
     reports: { title: 'Reportes', sub: 'Resumen y exportación' },
+    pulse: {
+      title: 'Panorama Marketing',
+      sub: 'Pastel del equipo, ritmo diario y cierre de mes',
+    },
+    community: {
+      title: 'Redes y contenido',
+      sub: 'TikTok, Meta e Instagram — ¿está gustando?',
+    },
   };
 
   const { title, sub } = headlines[view];
 
+  const openKpiModal = (target: EmployeeTask | null) => {
+    setKpiTarget(target);
+    setShowKpiModal(true);
+  };
+
+  const closeKpiModal = () => {
+    setShowKpiModal(false);
+    setKpiTarget(null);
+  };
+
   const handleAssignSubmit = (data: AssignFormData) => {
-    createAssignment(data);
-    toast.success(`Indicación enviada a ${assignable.find((t) => t.employeeId === data.employeeId)?.employeeName ?? 'colaborador'}`);
+    submitAssignment(data, () => {
+      toast.success(
+        `Indicación enviada a ${assignable.find((t) => t.employeeId === data.employeeId)?.employeeName ?? 'colaborador'}`,
+      );
+    });
+  };
+
+  const handleKpiSubmit = (data: KpiObjectiveFormData) => {
+    createKpiObjective(data);
+    toast.success(
+      `Objetivo KPI enviado a ${kpiAssignable.find((t) => t.employeeId === data.employeeId)?.employeeName ?? 'colaborador'}`,
+    );
   };
 
   if (!user) return null;
@@ -214,7 +258,11 @@ export function Dashboard() {
   return (
     <div className="dashboard">
       {user && (
-        <OnboardingTour userId={user.id} isManager={canEditAll} />
+        <OnboardingTour
+          userId={user.id}
+          isManager={canEditAll}
+          onNavigate={setView}
+        />
       )}
 
       <aside className="sidebar sidebar-desktop">
@@ -228,6 +276,7 @@ export function Dashboard() {
             <button
               key={item.id}
               type="button"
+              data-tour={`nav-${item.id}`}
               className={`nav-item ${view === item.id ? 'active' : ''}`}
               onClick={() => {
                 setView(item.id);
@@ -286,15 +335,10 @@ export function Dashboard() {
             className="sidebar-user-btn"
             onClick={() => setShowProfile(true)}
           >
-            <div
-              className="avatar"
-              style={{ background: user.avatarColor ?? 'var(--accent)' }}
-            >
-              {user.name.charAt(0)}
-            </div>
+            <UserAvatar user={user} size="md" />
             <div className="sidebar-user-info">
               <strong>{user.name}</strong>
-              <span>{roleLabel(user.role)}</span>
+              <span>@{user.username}</span>
             </div>
           </button>
           <button type="button" className="btn-ghost" onClick={logout}>
@@ -321,6 +365,41 @@ export function Dashboard() {
 
         <main className="main">
           <PerformanceAlertBanner />
+          {view !== 'home' && (
+            <div className="mobile-stats-strip" aria-label="Resumen rápido">
+              {canEditAll ? (
+                <>
+                  <div className="mobile-stat mobile-stat--danger">
+                    <strong>{stats.projectOverdue}</strong>
+                    <span>Atrasados</span>
+                  </div>
+                  <div className="mobile-stat mobile-stat--warn">
+                    <strong>{stats.pendingTeam}</strong>
+                    <span>Indic.</span>
+                  </div>
+                  <div className="mobile-stat">
+                    <strong>{stats.urgent}</strong>
+                    <span>Urgentes</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mobile-stat mobile-stat--warn">
+                    <strong>{myPendingAssignments.length}</strong>
+                    <span>Indic.</span>
+                  </div>
+                  <div className="mobile-stat">
+                    <strong>{visibleProjects.filter(isActiveProject).length}</strong>
+                    <span>Proyectos</span>
+                  </div>
+                  <div className="mobile-stat mobile-stat--danger">
+                    <strong>{stats.urgent}</strong>
+                    <span>Urgentes</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <header className="main-header">
             <div>
               <h1>{title}</h1>
@@ -382,6 +461,7 @@ export function Dashboard() {
               onGoCalendar={() => setView('calendar')}
               onGoProjects={() => setView('board')}
               onGoCompleted={() => setView('completed')}
+              onGoKpis={() => setView('kpis')}
               onOpenTask={setSelected}
               onOpenProject={(p) => {
                 setProjectFocusCompletion(false);
@@ -398,7 +478,17 @@ export function Dashboard() {
               tasks={teamTasks}
               onSelect={setSelected}
               onAssign={canEditAll ? setAssignTarget : undefined}
+              onSendKpi={canSendKpiObjectives ? openKpiModal : undefined}
             />
+          )}
+          {view === 'board' && !canEditAll && myPendingKpiObjectives.length > 0 && (
+            <button
+              type="button"
+              className="pending-assign-alert pending-kpi-alert"
+              onClick={() => setView('kpis')}
+            >
+              Tienes un objetivo KPI por aceptar — revisar →
+            </button>
           )}
           {view === 'board' && !canEditAll && myPendingAssignments.length > 0 && (
             <button
@@ -428,10 +518,19 @@ export function Dashboard() {
             />
           )}
           {view === 'assignments' && <AssignmentsView />}
-          {view === 'kpis' && <KpiMonthView tasks={tasks} />}
+          {view === 'kpis' && (
+            <KpiMonthView
+              tasks={tasks}
+              onSendKpi={canSendKpiObjectives ? openKpiModal : undefined}
+              showPersonalPulse={!canEditAll && !canSendKpiObjectives}
+              employeeId={user?.employeeId}
+            />
+          )}
           {view === 'history' && <MonthlyHistoryView />}
           {view === 'calendar' && <CalendarView />}
           {view === 'reports' && <ReportsView />}
+          {view === 'pulse' && <MarketingPulseView />}
+          {view === 'community' && <CommunityView />}
 
           {selected && (
             <TaskDetailModal taskId={selected.id} onClose={() => setSelected(null)} />
@@ -450,24 +549,51 @@ export function Dashboard() {
       </div>
 
       <nav className="mobile-tabbar" aria-label="Navegación">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`tab-item ${view === item.id ? 'active' : ''}`}
-            onClick={() => setView(item.id)}
-          >
-            <span className="tab-icon-wrap">
-              <span className="tab-icon">{item.icon}</span>
-              {item.id === 'assignments' && pendingAssignmentsCount > 0 && (
-                <span className="tab-badge">{pendingAssignmentsCount}</span>
-              )}
-              {item.id === 'history' && <PerformanceAlertBadge />}
-            </span>
-            <span className="tab-label">{item.label}</span>
-          </button>
-        ))}
+        {navItems
+          .filter((item) => MOBILE_PRIMARY.includes(item.id))
+          .map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`tab-item ${view === item.id ? 'active' : ''}`}
+              onClick={() => setView(item.id)}
+            >
+              <span className="tab-icon-wrap">
+                <span className="tab-icon">{item.icon}</span>
+                {item.id === 'assignments' && pendingAssignmentsCount > 0 && (
+                  <span className="tab-badge">{pendingAssignmentsCount}</span>
+                )}
+              </span>
+              <span className="tab-label">{item.label}</span>
+            </button>
+          ))}
+        <button
+          type="button"
+          className={`tab-item ${isMoreViewActive ? 'active' : ''}`}
+          onClick={() => setShowMobileMore(true)}
+          aria-expanded={showMobileMore}
+        >
+          <span className="tab-icon-wrap">
+            <span className="tab-icon">⋯</span>
+            {!isMoreViewActive && <PerformanceAlertBadge />}
+          </span>
+          <span className="tab-label">Más</span>
+        </button>
       </nav>
+
+      {showMobileMore && (
+        <MobileMoreMenu
+          items={mobileMoreItems.map((item) => ({
+            id: item.id,
+            label: item.label,
+            icon: item.icon,
+            badge: item.id === 'assignments' ? pendingAssignmentsCount : undefined,
+          }))}
+          activeId={view}
+          onSelect={(id) => setView(id as DashboardView)}
+          onClose={() => setShowMobileMore(false)}
+        />
+      )}
 
       {assignTarget && (
         <AssignTaskModal
@@ -475,6 +601,21 @@ export function Dashboard() {
           assignable={assignable}
           onClose={() => setAssignTarget(null)}
           onSubmit={handleAssignSubmit}
+        />
+      )}
+      {showKpiModal && canSendKpiObjectives && (
+        <SendKpiObjectiveModal
+          target={kpiTarget}
+          assignable={kpiAssignable}
+          onClose={closeKpiModal}
+          onSubmit={handleKpiSubmit}
+        />
+      )}
+      {override && (
+        <WorkloadOverrideModal
+          check={override.check}
+          onClose={cancelOverride}
+          onConfirm={confirmOverride}
         />
       )}
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}

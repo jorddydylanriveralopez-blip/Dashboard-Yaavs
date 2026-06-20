@@ -9,7 +9,7 @@ export interface ProjectListGroup {
   projects: CreativeProject[];
 }
 
-/** Agrupa proyectos para la vista Proyectos (empleado: míos vs TODOS; gerente: por colaborador). */
+/** Agrupa proyectos para la vista Proyectos (empleado: solo los suyos; gerente: por colaborador). */
 export function groupProjectsForBoard(
   list: CreativeProject[],
   canEditAll: boolean,
@@ -25,7 +25,7 @@ export function groupProjectsForBoard(
         title: c.value === 'todos' ? 'Todo el equipo (TODOS)' : c.label,
         note:
           c.value === 'todos'
-            ? 'Asignados a todo el equipo creativo.'
+            ? 'Solo el gerente los ve aquí hasta asignarlos a una persona.'
             : undefined,
         projects: sortProjectsByUrgency(projects),
       });
@@ -33,25 +33,30 @@ export function groupProjectsForBoard(
     return groups;
   }
 
-  const groups: ProjectListGroup[] = [];
   if (myCollaborator) {
     const mine = list.filter((p) => p.collaborator === myCollaborator);
     if (mine.length > 0) {
-      groups.push({
-        id: 'mine',
-        title: 'Mis proyectos',
-        projects: sortProjectsByUrgency(mine),
-      });
+      return [
+        {
+          id: 'mine',
+          title: 'Mis proyectos',
+          note: 'Solo ves lo que el gerente te asignó a ti.',
+          projects: sortProjectsByUrgency(mine),
+        },
+      ];
     }
   }
-  const team = list.filter((p) => p.collaborator === 'todos');
-  if (team.length > 0) {
-    groups.push({
-      id: 'todos',
-      title: 'Todo el equipo (TODOS)',
-      note: 'Los ve cualquier miembro del equipo; concluye solo si te corresponde.',
-      projects: sortProjectsByUrgency(team),
-    });
+
+  if (list.length > 0) {
+    return [
+      {
+        id: 'mine',
+        title: 'Mis proyectos',
+        note: 'Solo ves lo que el gerente te asignó a ti.',
+        projects: sortProjectsByUrgency(list),
+      },
+    ];
   }
-  return groups;
+
+  return [];
 }

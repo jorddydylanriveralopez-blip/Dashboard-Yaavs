@@ -25,8 +25,8 @@ export function YaavsAssistant() {
   const {
     user,
     canEditAll,
-    projects,
-    completedProjects,
+    visibleProjects,
+    visibleCompletedProjects,
     myPendingAssignments,
     assignments,
     calendar,
@@ -51,8 +51,8 @@ export function YaavsAssistant() {
     return buildAssistantSnapshot(
       user,
       canEditAll,
-      projects,
-      completedProjects,
+      visibleProjects,
+      visibleCompletedProjects,
       myPendingAssignments,
       assignments,
       calendar,
@@ -60,8 +60,8 @@ export function YaavsAssistant() {
   }, [
     user,
     canEditAll,
-    projects,
-    completedProjects,
+    visibleProjects,
+    visibleCompletedProjects,
     myPendingAssignments,
     assignments,
     calendar,

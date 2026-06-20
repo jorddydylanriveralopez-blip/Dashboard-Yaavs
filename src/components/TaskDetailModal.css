@@ -50,6 +50,13 @@
   word-break: break-all;
 }
 
+.modal-kpi-lock {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  color: var(--yaavs-electric);
+  line-height: 1.45;
+}
+
 .modal-header {
   display: flex;
   align-items: center;

@@ -1,11 +1,8 @@
 import { TEAM_ROSTER_STORAGE_KEY } from '../constants';
 import { USERS } from '../data/users';
-import type { User } from '../types';
+import type { TeamRosterState, User } from '../types';
 
-export interface TeamRosterState {
-  added: User[];
-  removedUserIds: string[];
-}
+export type { TeamRosterState };
 
 export interface AddTeamMemberInput {
   name: string;

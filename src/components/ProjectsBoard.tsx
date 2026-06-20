@@ -16,6 +16,7 @@ import { formatShortDate } from '../utils/formatDate';
 import { fuzzyIncludes } from '../utils/fuzzyMatch';
 import { isActiveProject } from '../utils/activeItems';
 import { calcProjectDurationDays, formatDuration } from '../utils/projectDuration';
+import { ProjectsKanban } from './ProjectsKanban';
 import type { CreativeProject, ProjectStatus } from '../types';
 import './ProjectsBoard.css';
 
@@ -33,6 +34,7 @@ interface Props {
 export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Props) {
   const { user, canEditAll, addProject } = useApp();
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
+  const [layoutMode, setLayoutMode] = useState<'cards' | 'kanban'>('cards');
   const myCollaborator = collaboratorForUser(user);
 
   const activeProjects = useMemo(
@@ -55,6 +57,18 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
         fuzzyIncludes(labelFor(BUSINESS_UNITS, p.businessUnit), q),
     );
   }, [activeProjects, filter, statusFilter]);
+
+  const kanbanList = useMemo(() => {
+    const q = filter.trim();
+    if (!q) return activeProjects;
+    return activeProjects.filter(
+      (p) =>
+        fuzzyIncludes(p.projectName, q) ||
+        fuzzyIncludes(p.requestedBy, q) ||
+        fuzzyIncludes(labelFor(COLLABORATORS, p.collaborator), q) ||
+        fuzzyIncludes(labelFor(BUSINESS_UNITS, p.businessUnit), q),
+    );
+  }, [activeProjects, filter]);
 
   const projectGroups = useMemo(
     () => groupProjectsForBoard(filtered, canEditAll, myCollaborator),
@@ -82,18 +96,48 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
   return (
     <div className="projects-board">
       <p className="projects-hint">
-        Solo proyectos en curso. Al marcar <strong>Trabajo concluido</strong> (con foto de
-        prueba), el proyecto sale de aquí y pasa a{' '}
-        {onGoCompleted ? (
-          <button type="button" className="projects-hint-link" onClick={onGoCompleted}>
-            Concluidos ✓
-          </button>
+        {canEditAll ? (
+          <>
+            Solo proyectos en curso. Al marcar <strong>Trabajo concluido</strong> (con foto de
+            prueba), el proyecto sale de aquí y pasa a{' '}
+            {onGoCompleted ? (
+              <button type="button" className="projects-hint-link" onClick={onGoCompleted}>
+                Concluidos ✓
+              </button>
+            ) : (
+              <strong>Concluidos</strong>
+            )}
+            .
+          </>
         ) : (
-          <strong>Concluidos</strong>
+          <>
+            Solo ves proyectos <strong>asignados a ti</strong>. Los de otros colaboradores no
+            aparecen aquí.
+          </>
         )}
-        .
       </p>
 
+      <div className="projects-layout-toggle">
+        <button
+          type="button"
+          className={`projects-layout-btn ${layoutMode === 'cards' ? 'active' : ''}`}
+          onClick={() => setLayoutMode('cards')}
+        >
+          Tarjetas
+        </button>
+        <button
+          type="button"
+          className={`projects-layout-btn ${layoutMode === 'kanban' ? 'active' : ''}`}
+          onClick={() => setLayoutMode('kanban')}
+        >
+          Kanban
+        </button>
+      </div>
+
+      {layoutMode === 'kanban' ? (
+        <ProjectsKanban projects={kanbanList} onSelect={onSelect} />
+      ) : (
+        <>
       <div className="projects-filters">
         {visibleFilters.map(({ id, count }) => (
           <button
@@ -124,7 +168,30 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
       )}
 
       {filtered.length === 0 ? (
-        <p className="projects-empty">No hay proyectos activos con ese filtro.</p>
+        activeProjects.length === 0 ? (
+          <div className="projects-empty projects-empty--start">
+            <span className="projects-empty-icon" aria-hidden="true">
+              ◆
+            </span>
+            <p className="projects-empty-title">Aún no hay proyectos</p>
+            <p className="projects-empty-sub">
+              {canEditAll
+                ? 'El tablero está limpio. Pulsa el botón de abajo para crear tu primera solicitud creativa.'
+                : 'Cuando el gerente te asigne un proyecto, aparecerá aquí.'}
+            </p>
+            {canEditAll && (
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => onSelect(addProject())}
+              >
+                + Crear primer proyecto
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="projects-empty">No hay proyectos activos con ese filtro.</p>
+        )
       ) : (
         <div className="projects-sections">
           {projectGroups.map((group) => {
@@ -153,6 +220,8 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );

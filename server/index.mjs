@@ -16,6 +16,7 @@ const defaultState = () => ({
   assignments: [],
   calendars: {},
   passwordOverrides: {},
+  teamRoster: { added: [], removedUserIds: [] },
   updatedAt: new Date().toISOString(),
 });
 
@@ -58,6 +59,7 @@ app.put('/api/state', (req, res) => {
     assignments: body.assignments ?? [],
     calendars: body.calendars ?? {},
     passwordOverrides: body.passwordOverrides ?? {},
+    teamRoster: body.teamRoster ?? { added: [], removedUserIds: [] },
     updatedAt: new Date().toISOString(),
   });
   res.json({ ok: true });

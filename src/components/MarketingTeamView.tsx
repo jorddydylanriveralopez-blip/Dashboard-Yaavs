@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useToast } from '../context/ToastContext';
 import { AddTeamMemberModal } from './AddTeamMemberModal';
 import { TeamBoard } from './TeamBoard';
 import type { EmployeeTask } from '../types';
@@ -9,10 +10,12 @@ interface Props {
   tasks: EmployeeTask[];
   onSelect: (task: EmployeeTask) => void;
   onAssign?: (task: EmployeeTask) => void;
+  onSendKpi?: (task: EmployeeTask) => void;
 }
 
-export function MarketingTeamView({ tasks, onSelect, onAssign }: Props) {
-  const { canEditAll, addTeamMember } = useApp();
+export function MarketingTeamView({ tasks, onSelect, onAssign, onSendKpi }: Props) {
+  const { canEditAll, canSendKpiObjectives, addTeamMember } = useApp();
+  const toast = useToast();
   const [showAdd, setShowAdd] = useState(false);
 
   return (
@@ -32,12 +35,23 @@ export function MarketingTeamView({ tasks, onSelect, onAssign }: Props) {
         </div>
       )}
 
-      <TeamBoard tasks={tasks} onSelect={onSelect} onAssign={onAssign} />
+      <TeamBoard
+        tasks={tasks}
+        onSelect={onSelect}
+        onAssign={onAssign}
+        onSendKpi={canSendKpiObjectives ? onSendKpi : undefined}
+      />
 
       {showAdd && (
         <AddTeamMemberModal
           onClose={() => setShowAdd(false)}
-          onSubmit={(input) => addTeamMember(input)}
+          onSubmit={(input) => {
+            const result = addTeamMember(input);
+            if (result.ok) {
+              toast.success(`${input.name} se agregó al equipo.`);
+            }
+            return result;
+          }}
         />
       )}
     </div>

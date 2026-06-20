@@ -10,7 +10,6 @@ import { AssignmentBriefDetails } from './AssignmentBriefDetails';
 import { FileAttachmentsList } from './FileAttachments';
 import { assignmentTaskLine } from '../utils/assignmentBrief';
 import { isActiveProject } from '../utils/activeItems';
-import { collaboratorForUser } from '../utils/collaboratorMap';
 import { formatShortDate } from '../utils/formatDate';
 import { getDeadlineInfo } from '../utils/deadline';
 import {
@@ -18,6 +17,8 @@ import {
   sortProjectsByUrgency,
   taskDuplicatesProject,
 } from '../utils/projectLink';
+import { ActivityFeedPanel } from './ActivityFeedPanel';
+import { KpiObjectiveInbox } from './KpiObjectiveInbox';
 import type { CreativeProject, EmployeeTask } from '../types';
 import './MyDayView.css';
 
@@ -26,6 +27,7 @@ interface Props {
   onGoCalendar: () => void;
   onGoProjects: () => void;
   onGoCompleted: () => void;
+  onGoKpis: () => void;
   onOpenTask: (task: EmployeeTask) => void;
   onOpenProject: (project: CreativeProject) => void;
   onCompleteProject: (project: CreativeProject) => void;
@@ -36,6 +38,7 @@ export function MyDayView({
   onGoCalendar,
   onGoProjects,
   onGoCompleted,
+  onGoKpis,
   onOpenTask,
   onOpenProject,
   onCompleteProject,
@@ -43,79 +46,61 @@ export function MyDayView({
   const {
     user,
     board,
-    projects,
+    visibleProjects,
     myPendingAssignments,
+    myPendingKpiObjectives,
     calendar,
+    activityFeed,
   } = useApp();
+
+  const myActivity = useMemo(
+    () =>
+      activityFeed.filter(
+        (e) =>
+          e.actorName === user?.name ||
+          e.message.includes(user?.name ?? '___') ||
+          e.kind === 'assignment_sent',
+      ),
+    [activityFeed, user?.name],
+  );
 
   const myTask = useMemo(
     () => board.tasks.find((t) => t.employeeId === user?.employeeId),
     [board.tasks, user?.employeeId],
   );
 
-  const myCollaborator = collaboratorForUser(user);
-
-  /** Solo proyectos asignados a ti por nombre (Jorddy, Roberto, etc.). */
-  const myProjectsDirect = useMemo(
-    () =>
-      sortProjectsByUrgency(
-        projects.filter(
-          (p) =>
-            isActiveProject(p) &&
-            myCollaborator !== null &&
-            p.collaborator === myCollaborator,
-        ),
-      ),
-    [projects, myCollaborator],
-  );
-
-  /** Proyectos con colaborador «TODOS»: los ve todo el equipo en Inicio. */
-  const myProjectsTeam = useMemo(
-    () =>
-      sortProjectsByUrgency(
-        projects.filter(
-          (p) => isActiveProject(p) && p.collaborator === 'todos' && myCollaborator !== null,
-        ),
-      ),
-    [projects, myCollaborator],
-  );
-
-  const allMyPending = useMemo(
-    () => [...myProjectsDirect, ...myProjectsTeam],
-    [myProjectsDirect, myProjectsTeam],
+  const myProjects = useMemo(
+    () => sortProjectsByUrgency(visibleProjects.filter(isActiveProject)),
+    [visibleProjects],
   );
 
   const daySummary = useMemo(() => {
     let overdue = 0;
     let dueSoon = 0;
-    for (const p of allMyPending) {
+    for (const p of myProjects) {
       const d = getDeadlineInfo(p.commitmentDate, 'en_progreso');
       if (d.tone === 'overdue') overdue += 1;
       else if (d.tone === 'urgent' || d.tone === 'soon') dueSoon += 1;
     }
     return {
-      total: allMyPending.length,
+      total: myProjects.length,
       overdue,
       dueSoon,
       assignments: myPendingAssignments.length,
+      kpiObjectives: myPendingKpiObjectives.length,
     };
-  }, [allMyPending, myPendingAssignments.length]);
+  }, [myProjects, myPendingAssignments.length, myPendingKpiObjectives.length]);
 
   const taskSummary = myTask ? assignmentTaskLine(myTask.objective) : '';
 
-  const activeVisible = useMemo(
-    () => projects.filter(isActiveProject),
-    [projects],
-  );
-
   const linkedProject = useMemo(
-    () => (myTask ? findProjectForTask(myTask, activeVisible) : undefined),
-    [myTask, activeVisible],
+    () => (myTask ? findProjectForTask(myTask, myProjects) : undefined),
+    [myTask, myProjects],
   );
 
   const hideTaskSection = useMemo(
-    () => taskDuplicatesProject(myTask, allMyPending),
-    [myTask, allMyPending],
+    () => taskDuplicatesProject(myTask, myProjects),
+    [myTask, myProjects],
   );
 
   const todayKey = new Date().toISOString().slice(0, 10);
@@ -127,10 +112,74 @@ export function MyDayView({
     [calendar.events, todayKey],
   );
 
+  const nextAction = useMemo(() => {
+    if (myPendingKpiObjectives.length > 0) {
+      const k = myPendingKpiObjectives[0];
+      return {
+        kind: 'kpi' as const,
+        title: 'Objetivo KPI del mes',
+        detail: `${k.assignedByName} te asignó una meta para cumplir antes del ${formatShortDate(k.dueDate)}`,
+        actionLabel: 'Aceptar objetivo',
+        onAction: onGoKpis,
+      };
+    }
+    if (myPendingAssignments.length > 0) {
+      const a = myPendingAssignments[0];
+      return {
+        kind: 'assignment' as const,
+        title: a.title,
+        detail: `Indicación del gerente · vence ${formatShortDate(a.dueDate)}`,
+        actionLabel: 'Revisar y aceptar',
+        onAction: onGoAssignments,
+      };
+    }
+    const overdue = myProjects.find(
+      (p) => getDeadlineInfo(p.commitmentDate, 'en_progreso').tone === 'overdue',
+    );
+    if (overdue) {
+      return {
+        kind: 'project' as const,
+        title: overdue.projectName.trim() || 'Proyecto sin nombre',
+        detail: 'Tiene retraso — prioriza la entrega con foto',
+        actionLabel: 'Entregar ahora',
+        onAction: () => onCompleteProject(overdue),
+      };
+    }
+    if (myProjects.length > 0) {
+      const p = myProjects[0];
+      return {
+        kind: 'project' as const,
+        title: p.projectName.trim() || 'Proyecto sin nombre',
+        detail: `Compromiso ${formatShortDate(p.commitmentDate)}`,
+        actionLabel: 'Ver proyecto',
+        onAction: () => onOpenProject(p),
+      };
+    }
+    return null;
+  }, [myPendingKpiObjectives, myPendingAssignments, myProjects, onGoKpis, onGoAssignments, onCompleteProject, onOpenProject]);
+
   return (
     <div className="my-day">
-      {daySummary.total > 0 || daySummary.assignments > 0 ? (
+      <KpiObjectiveInbox compact onGoKpis={onGoKpis} />
+
+      {nextAction && (
+        <section className="my-day-next" aria-label="Siguiente paso">
+          <span className="my-day-next-label">Tu siguiente paso</span>
+          <h2>{nextAction.title}</h2>
+          <p>{nextAction.detail}</p>
+          <button type="button" className="btn-primary" onClick={nextAction.onAction}>
+            {nextAction.actionLabel}
+          </button>
+        </section>
+      )}
+
+      {daySummary.total > 0 || daySummary.assignments > 0 || daySummary.kpiObjectives > 0 ? (
         <div className="my-day-summary" role="status">
+          {daySummary.kpiObjectives > 0 && (
+            <span className="my-day-summary-chip my-day-summary-chip--warn">
+              Objetivo KPI por aceptar
+            </span>
+          )}
           {daySummary.assignments > 0 && (
             <span className="my-day-summary-chip my-day-summary-chip--warn">
               {daySummary.assignments} indicación
@@ -195,13 +244,12 @@ export function MyDayView({
           </div>
         </div>
         <p className="my-day-section-sub">
-          Aquí solo aparecen proyectos <strong>sin entregar</strong>. La barra verde de antes era un{' '}
-          <strong>botón</strong> para cerrar el trabajo (con foto), no significa que ya esté hecho.
-          Cuando entregas, el proyecto desaparece de aquí y pasa a <strong>Concluidos ✓</strong>. El
-          rojo es <strong>retraso</strong> de fecha, no “terminado”.
+          Solo aparecen proyectos <strong>asignados a ti</strong>. La barra verde es el botón para
+          cerrar el trabajo (con foto), no significa que ya esté hecho. Cuando entregas, el proyecto
+          pasa a <strong>Concluidos ✓</strong>.
         </p>
 
-        {myProjectsDirect.length === 0 && myProjectsTeam.length === 0 ? (
+        {myProjects.length === 0 ? (
           <div className="my-day-empty-block">
             <p className="my-day-empty">No tienes proyectos pendientes por entregar.</p>
             <button type="button" className="btn-ghost" onClick={onGoCompleted}>
@@ -209,41 +257,16 @@ export function MyDayView({
             </button>
           </div>
         ) : (
-          <>
-            {myProjectsDirect.length > 0 && (
-              <>
-                <h3 className="my-day-subheading">Asignados a ti</h3>
-                <ul className="my-day-project-list">
-                  {myProjectsDirect.map((p) => (
-                    <MyDayProjectCard
-                      key={p.id}
-                      project={p}
-                      onOpenProject={onOpenProject}
-                      onCompleteProject={onCompleteProject}
-                    />
-                  ))}
-                </ul>
-              </>
-            )}
-            {myProjectsTeam.length > 0 && (
-              <>
-                <h3 className="my-day-subheading">Todo el equipo (colaborador TODOS)</h3>
-                <p className="my-day-team-note">
-                  Estos los ve cualquier miembro del equipo; concluye solo si te corresponde.
-                </p>
-                <ul className="my-day-project-list">
-                  {myProjectsTeam.map((p) => (
-                    <MyDayProjectCard
-                      key={p.id}
-                      project={p}
-                      onOpenProject={onOpenProject}
-                      onCompleteProject={onCompleteProject}
-                    />
-                  ))}
-                </ul>
-              </>
-            )}
-          </>
+          <ul className="my-day-project-list">
+            {myProjects.map((p) => (
+              <MyDayProjectCard
+                key={p.id}
+                project={p}
+                onOpenProject={onOpenProject}
+                onCompleteProject={onCompleteProject}
+              />
+            ))}
+          </ul>
         )}
       </section>
 
@@ -321,6 +344,17 @@ export function MyDayView({
           Ver calendario completo
         </button>
       </section>
+
+      {myActivity.length > 0 && (
+        <section className="my-day-block">
+          <ActivityFeedPanel
+            events={myActivity}
+            limit={5}
+            title="Actividad que te involucra"
+            emptyMessage=""
+          />
+        </section>
+      )}
     </div>
   );
 }

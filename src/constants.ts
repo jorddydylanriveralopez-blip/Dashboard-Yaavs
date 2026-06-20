@@ -22,7 +22,7 @@ export const STATUS_COLORS: Record<TaskStatus, string> = {
 };
 
 /** Súbelo cuando cambies seed/usuarios para forzar migración en clientes antiguos. */
-export const BOARD_SCHEMA_VERSION = 10;
+export const BOARD_SCHEMA_VERSION = 11;
 
 /** Nombres viejos del proyecto (TeamBoard / Mi Empresa) → Yaavs */
 export const LEGACY_COMPANY_NAMES = [
@@ -51,10 +51,17 @@ export const PASSWORD_OVERRIDES_KEY = 'empresa-board-passwords';
 export const SESSION_EXPIRY_KEY = 'empresa-board-session-expiry';
 export const ONBOARDING_KEY = 'empresa-board-onboarding-done';
 export const LAST_ASSIGNMENT_CHECK_KEY = 'empresa-board-last-asg-check';
+export const SOCIAL_METRICS_KEY = 'empresa-board-social-metrics-v1';
+export const DAILY_KPI_SNAPSHOTS_KEY = 'empresa-board-daily-kpi-v1';
+export const KPI_OBJECTIVES_KEY = 'empresa-board-kpi-objectives-v1';
+export const WORKLOAD_LIMITS_KEY = 'empresa-board-workload-limits-v1';
+export const USER_PROFILES_KEY = 'empresa-board-user-profiles-v1';
 export const PERFORMANCE_HISTORY_KEY = 'empresa-board-performance-history-v1';
+export const MONTHLY_ARCHIVES_KEY = 'empresa-board-monthly-archives-v1';
 export const PERFORMANCE_ALERT_KEY = 'empresa-board-performance-alert';
 export const EMPLOYEE_PHONES_KEY = 'empresa-board-employee-phones';
 export const TEAM_ROSTER_STORAGE_KEY = 'empresa-board-team-roster-v1';
+export const ACTIVITY_FEED_KEY = 'empresa-board-activity-v1';
 
 /** KPI ≥ este % = calificación positiva (aprobado). */
 export const KPI_POSITIVE_THRESHOLD = 75;
@@ -62,6 +69,12 @@ export const KPI_POSITIVE_THRESHOLD = 75;
 export const KPI_NEGATIVE_THRESHOLD = 50;
 /** Meses seguidos en negativo antes de alerta al empleado. */
 export const NEGATIVE_STREAK_ALERT_MONTHS = 3;
+
+/** Trabajos activos máximos por colaborador (proyectos + indicaciones pendientes). */
+export const DEFAULT_WORKLOAD_MAX = 10;
+
+/** Tamaño máximo de foto de perfil (data URL en localStorage). */
+export const MAX_PROFILE_AVATAR_BYTES = 2 * 1024 * 1024;
 
 export const SESSION_HOURS = 8;
 

@@ -9,6 +9,12 @@ import {
   projectedCurrentMonth,
   recordsForMonth,
 } from '../utils/performanceHistory';
+import {
+  exportMonthCsv,
+  exportMonthJson,
+  getSnapshotForMonth,
+  listArchivedMonthKeys,
+} from '../utils/monthlyArchive';
 import { CloseMonthModal } from './CloseMonthModal';
 import { openPerformanceWhatsApp } from '../utils/whatsappPerformance';
 import type { MonthlyPerformanceRecord, PerformanceRating } from '../types';
@@ -25,17 +31,25 @@ export function MonthlyHistoryView() {
     user,
     canEditAll,
     performanceHistory,
+    monthlyArchives,
     marketingTasks,
     assignments,
     employeePhones,
   } = useApp();
   const toast = useToast();
 
-  const months = useMemo(() => listMonthKeys(performanceHistory), [performanceHistory]);
+  const months = useMemo(() => {
+    const keys = new Set([
+      ...listMonthKeys(performanceHistory),
+      ...listArchivedMonthKeys(monthlyArchives),
+    ]);
+    return [...keys].sort((a, b) => b.localeCompare(a));
+  }, [performanceHistory, monthlyArchives]);
   const [monthKey, setMonthKey] = useState(() => getMonthKey());
   const [showCloseModal, setShowCloseModal] = useState(false);
   const currentMonth = getMonthKey();
   const isCurrentMonth = monthKey === currentMonth;
+  const archivedSnapshot = getSnapshotForMonth(monthlyArchives, monthKey);
 
   const historyRows = useMemo(() => {
     if (!isCurrentMonth) {
@@ -77,6 +91,47 @@ export function MonthlyHistoryView() {
     return { positive, negative, total: historyRows.length };
   }, [historyRows]);
 
+  const canDownload = Boolean(archivedSnapshot) || (!isCurrentMonth && historyRows.length > 0);
+
+  const handleDownloadCsv = () => {
+    if (archivedSnapshot) {
+      exportMonthCsv(archivedSnapshot);
+      return;
+    }
+    if (!isCurrentMonth && historyRows.length > 0) {
+      exportMonthCsv({
+        monthKey,
+        monthLabel: formatMonthLabel(monthKey),
+        archivedAt: new Date().toISOString(),
+        closedBy: 'auto',
+        performance: historyRows,
+        projectsCompleted: [],
+        projectsActive: [],
+        assignments: assignments.filter(
+          (a) => a.createdAt.slice(0, 7) === monthKey,
+        ),
+        teamSnapshot: [],
+        summary: {
+          teamSize: historyRows.length,
+          projectsCompleted: 0,
+          projectsActive: 0,
+          assignmentsTotal: 0,
+          assignmentsAccepted: 0,
+          assignmentsRejected: 0,
+          kpiAverage: Math.round(
+            historyRows.reduce((s, r) => s + r.kpiPercent, 0) / historyRows.length,
+          ),
+        },
+      });
+    }
+  };
+
+  const handleDownloadJson = () => {
+    if (archivedSnapshot) {
+      exportMonthJson(archivedSnapshot);
+    }
+  };
+
   return (
     <div className="monthly-history">
       {showCloseModal && (
@@ -107,7 +162,29 @@ export function MonthlyHistoryView() {
             Cerrar mes (editar mensajes)
           </button>
         )}
+
+        {canDownload && (
+          <>
+            <button type="button" className="btn-ghost" onClick={handleDownloadCsv}>
+              Descargar CSV
+            </button>
+            {archivedSnapshot && (
+              <button type="button" className="btn-ghost" onClick={handleDownloadJson}>
+                Descargar JSON
+              </button>
+            )}
+          </>
+        )}
       </div>
+
+      {archivedSnapshot && (
+        <div className="history-archive-summary" role="status">
+          <span>Respaldo guardado el {archivedSnapshot.archivedAt.slice(0, 10)}</span>
+          <span>{archivedSnapshot.summary.projectsCompleted} proyectos concluidos</span>
+          <span>{archivedSnapshot.summary.assignmentsTotal} indicaciones</span>
+          <span>KPI promedio {archivedSnapshot.summary.kpiAverage}%</span>
+        </div>
+      )}
 
       {canEditAll && (
         <div className="history-summary">
@@ -119,8 +196,8 @@ export function MonthlyHistoryView() {
 
       <p className="history-hint">
         {isCurrentMonth
-          ? 'Al cerrar mes puedes editar cada mensaje y enviarlo por WhatsApp.'
-          : 'Registro guardado al cerrar ese mes.'}{' '}
+          ? 'Al cambiar de mes, Yaavs archiva el mes anterior y reinicia los KPI del equipo. También puedes cerrar el mes manualmente para editar mensajes.'
+          : 'Registro guardado al cerrar ese mes. Descarga CSV o JSON para respaldo.'}{' '}
         Aprobado: KPI ≥ 75%. Por mejorar: KPI &lt; 50%.
       </p>
 

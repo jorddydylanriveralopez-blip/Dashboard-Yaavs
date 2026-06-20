@@ -33,6 +33,7 @@ import { calcProjectDurationDays, formatDuration } from '../utils/projectDuratio
 import {
   canEmployeeCompleteProject,
   canEmployeeSetCommitmentDate,
+  projectVisibleToUser,
 } from '../utils/collaboratorMap';
 import { FileAttachmentsEditor, FileAttachmentsList } from './FileAttachments';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
@@ -49,6 +50,8 @@ import {
   isImageAttachment,
   readFileAsAttachment,
 } from '../utils/fileAttachments';
+import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
+import { WorkloadOverrideModal } from './WorkloadOverrideModal';
 import type { CreativeProject, FileAttachment } from '../types';
 import './ProjectDetailModal.css';
 
@@ -70,11 +73,12 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     board,
     updateProject,
     deleteProject,
-    createAssignment,
     activeUsers,
   } = useApp();
   const { confirm } = useConfirm();
   const toast = useToast();
+  const { override, cancelOverride, confirmOverride, submitAssignment, assignProjectCollaborator } =
+    useWorkloadGuard();
   const [assignToId, setAssignToId] = useState('');
   const [projectAttachments, setProjectAttachments] = useState<FileAttachment[]>([]);
   const [completionProof, setCompletionProof] = useState<FileAttachment | null>(null);
@@ -88,6 +92,15 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     () => (board.projects ?? []).find((x) => x.id === projectId),
     [board.projects, projectId],
   );
+
+  const canView = useMemo(
+    () => (p ? projectVisibleToUser(p, user, canEditAll, activeUsers) : false),
+    [p, user, canEditAll, activeUsers],
+  );
+
+  useEffect(() => {
+    if (p && !canView) onClose();
+  }, [p, canView, onClose]);
 
   const assignable = useMemo(
     () => assignableMarketingTasks(board.tasks, activeUsers),
@@ -145,7 +158,9 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     })();
   };
 
-  const canCompleteWorkFlag = p ? canEmployeeCompleteProject(p, user, canEditAll) : false;
+  const canCompleteWorkFlag = p
+    ? canEmployeeCompleteProject(p, user, canEditAll, activeUsers)
+    : false;
 
   useEffect(() => {
     if (!focusCompletion || !p || !canCompleteWorkFlag) return;
@@ -158,7 +173,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   if (!p) return null;
 
   const managerEditable = canEditAll;
-  const canSetCommitment = canEmployeeSetCommitmentDate(p, user, canEditAll);
+  const canSetCommitment = canEmployeeSetCommitmentDate(p, user, canEditAll, activeUsers);
   const canCompleteWork = canCompleteWorkFlag;
   const isFinished = p.status === 'terminado';
 
@@ -502,11 +517,13 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
               managerEditable ? (
                 <select
                   value={p.collaborator}
-                  onChange={(e) =>
-                    updateProject(p.id, {
-                      collaborator: e.target.value as CreativeProject['collaborator'],
-                    })
-                  }
+                  onChange={(e) => {
+                    const next = e.target.value as CreativeProject['collaborator'];
+                    if (next === p.collaborator) return;
+                    assignProjectCollaborator(p.id, next, () => {
+                      toast.success('Colaborador del proyecto actualizado');
+                    });
+                  }}
                 >
                   {COLLABORATORS.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -707,27 +724,31 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                     return;
                   }
                   const recipient = assignable.find((t) => t.employeeId === assignToId);
-                  createAssignment({
-                    employeeId: assignToId,
-                    title: p.projectName.trim() || 'Proyecto creativo',
-                    objective: buildObjectiveFromProject(p),
-                    dueDate: p.commitmentDate,
-                    priority: assignmentPriorityFromProject(p.priority),
-                    notes: '',
-                    brief: briefFromProject(p),
-                    attachments: cloneAttachments(projectAttachments),
-                  });
-                  const fileCount = projectAttachments.length;
-                  const fileNote =
-                    fileCount > 0
-                      ? ` con ${fileCount} archivo${fileCount > 1 ? 's' : ''} adjunto${fileCount > 1 ? 's' : ''}`
-                      : '';
-                  toast.success(
-                    recipient
-                      ? `Indicación enviada a ${recipient.employeeName}${fileNote}`
-                      : `Indicación enviada${fileNote}`,
+                  submitAssignment(
+                    {
+                      employeeId: assignToId,
+                      title: p.projectName.trim() || 'Proyecto creativo',
+                      objective: buildObjectiveFromProject(p),
+                      dueDate: p.commitmentDate,
+                      priority: assignmentPriorityFromProject(p.priority),
+                      notes: '',
+                      brief: briefFromProject(p),
+                      attachments: cloneAttachments(projectAttachments),
+                    },
+                    () => {
+                      const fileCount = projectAttachments.length;
+                      const fileNote =
+                        fileCount > 0
+                          ? ` con ${fileCount} archivo${fileCount > 1 ? 's' : ''} adjunto${fileCount > 1 ? 's' : ''}`
+                          : '';
+                      toast.success(
+                        recipient
+                          ? `Indicación enviada a ${recipient.employeeName}${fileNote}`
+                          : `Indicación enviada${fileNote}`,
+                      );
+                      onClose();
+                    },
                   );
-                  onClose();
                 }}
               >
                 Enviar indicación
@@ -759,6 +780,13 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
           </button>
         </footer>
       </div>
+      {override && (
+        <WorkloadOverrideModal
+          check={override.check}
+          onClose={cancelOverride}
+          onConfirm={confirmOverride}
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useApp } from '../context/AppContext';
 import { STATUS_COLORS, STATUS_LABELS } from '../constants';
 import {
   KPI_BUCKET_LABELS,
@@ -7,11 +8,18 @@ import {
   kpiPercent,
   type KpiBucket,
 } from '../utils/kpiStats';
+import { getMonthKey } from '../utils/performanceHistory';
+import { hasActiveKpiObjective } from '../utils/kpiObjectives';
+import { KpiObjectiveInbox } from './KpiObjectiveInbox';
+import { MarketingPulseView } from './MarketingPulseView';
 import type { EmployeeTask } from '../types';
 import './KpiMonthView.css';
 
 interface Props {
   tasks: EmployeeTask[];
+  onSendKpi?: (task: EmployeeTask | null) => void;
+  showPersonalPulse?: boolean;
+  employeeId?: string;
 }
 
 const BUCKET_ORDER: KpiBucket[] = ['excelente', 'en_camino', 'atencion', 'critico'];
@@ -23,7 +31,15 @@ const BUCKET_COLORS: Record<KpiBucket, string> = {
   critico: '#e2445c',
 };
 
-export function KpiMonthView({ tasks }: Props) {
+export function KpiMonthView({ tasks, onSendKpi, showPersonalPulse, employeeId }: Props) {
+  const { canSendKpiObjectives, kpiObjectives, cancelKpiObjective } = useApp();
+  const monthKey = getMonthKey();
+
+  const pendingSent = useMemo(
+    () => kpiObjectives.filter((k) => k.status === 'pending' && k.monthKey === monthKey),
+    [kpiObjectives, monthKey],
+  );
+
   const summary = useMemo(() => buildKpiMonthSummary(tasks), [tasks]);
 
   if (tasks.length === 0) {
@@ -36,6 +52,42 @@ export function KpiMonthView({ tasks }: Props) {
 
   return (
     <div className="kpi-month">
+      <KpiObjectiveInbox />
+
+      {showPersonalPulse && employeeId && (
+        <MarketingPulseView employeeId={employeeId} />
+      )}
+
+      {canSendKpiObjectives && onSendKpi && (
+        <div className="kpi-toolbar">
+          <p className="kpi-toolbar-hint">
+            Asigna un objetivo mensual por persona. Deben aceptarlo para que cuente en su KPI.
+          </p>
+          <button type="button" className="btn-primary" onClick={() => onSendKpi(null)}>
+            + Enviar objetivo KPI
+          </button>
+        </div>
+      )}
+
+      {canSendKpiObjectives && pendingSent.length > 0 && (
+        <section className="kpi-pending-sent">
+          <h2>Esperando aceptación ({pendingSent.length})</h2>
+          <ul>
+            {pendingSent.map((k) => (
+              <li key={k.id}>
+                <div>
+                  <strong>{k.employeeName}</strong>
+                  <span>{k.objective}</span>
+                </div>
+                <button type="button" className="btn-ghost" onClick={() => cancelKpiObjective(k.id)}>
+                  Cancelar
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="kpi-hero">
         <div className="kpi-hero-card kpi-hero-main">
           <span className="kpi-hero-label">Promedio del equipo</span>
@@ -104,6 +156,7 @@ export function KpiMonthView({ tasks }: Props) {
 function KpiPersonCard({ task }: { task: EmployeeTask }) {
   const pct = kpiPercent(task);
   const bucket = kpiBucket(pct);
+  const hasObjective = hasActiveKpiObjective(task);
 
   return (
     <article className="kpi-person-card">
@@ -117,6 +170,9 @@ function KpiPersonCard({ task }: { task: EmployeeTask }) {
         <div className="kpi-person-info">
           <strong>{task.employeeName}</strong>
           <span>{task.roleTitle ?? task.department}</span>
+          {task.kpiAssignedByName && (
+            <span className="kpi-person-assigned">Objetivo de {task.kpiAssignedByName}</span>
+          )}
         </div>
         <span className="kpi-person-pct">{pct}%</span>
       </div>
@@ -126,7 +182,9 @@ function KpiPersonCard({ task }: { task: EmployeeTask }) {
           style={{ width: `${pct}%`, background: BUCKET_COLORS[bucket] }}
         />
       </div>
-      <p className="kpi-person-objective">{task.objective}</p>
+      <p className="kpi-person-objective">
+        {hasObjective ? task.objective : task.objective || 'Sin objetivo asignado este mes'}
+      </p>
       <div className="kpi-person-footer">
         <span
           className="status-pill"

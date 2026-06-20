@@ -8,13 +8,14 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { DEFAULT_PROJECTS } from '../data/projectSeed';
 import {
-  DEFAULT_BOARD,
+  EMPTY_BOARD,
   MARKETING_DEPARTMENT,
 } from '../data/seed';
+import { USERS } from '../data/users';
 import {
   canRemoveTeamMember,
+  defaultTeamRoster,
   findUserById,
   getActiveUsers,
   getRemovedEmployeeIds,
@@ -38,8 +39,14 @@ import {
   BOARD_SCHEMA_VERSION,
   CALENDAR_STORAGE_KEY,
   EMPLOYEE_PHONES_KEY,
-  normalizeCompanyName,
   PASSWORD_OVERRIDES_KEY,
+  SOCIAL_METRICS_KEY,
+  USER_PROFILES_KEY,
+  WORKLOAD_LIMITS_KEY,
+  DAILY_KPI_SNAPSHOTS_KEY,
+  KPI_OBJECTIVES_KEY,
+  MONTHLY_ARCHIVES_KEY,
+  normalizeCompanyName,
   PERFORMANCE_HISTORY_KEY,
   SESSION_EXPIRY_KEY,
   SESSION_HOURS,
@@ -50,15 +57,45 @@ import {
 import {
   applyMonthClose,
   buildMonthlyRecord,
-  ensurePreviousMonthClosed,
+  formatMonthLabel,
   getMonthKey,
 } from '../utils/performanceHistory';
+import { canSendKpiObjectives, canManageWorkloadLimits } from '../utils/kpiPermissions';
+import { recordDailySnapshots } from '../utils/dailyKpiSnapshots';
+import {
+  buildMonthSnapshot,
+  ensureMonthlyRollover,
+  stashRolloverNotice,
+  upsertSnapshot,
+} from '../utils/monthlyArchive';
 import {
   clearedTaskWork,
   filterActiveProjects,
   filterCompletedProjects,
 } from '../utils/activeItems';
+import {
+  loadActivityFeed,
+  prependActivity,
+} from '../utils/activityFeed';
+import {
+  findUserByLoginName,
+  loadUserProfiles,
+  mergeProfilePatch,
+  validateUsernameChange,
+  withUserProfile,
+} from '../utils/userProfiles';
+import {
+  buildWorkloadCheck,
+  normalizeWorkloadLimits,
+  EMPTY_WORKLOAD_LIMITS,
+} from '../utils/workloadLimits';
+import {
+  employeeIdForCollaboratorSlug,
+  projectVisibleToUser,
+  resolveProjectAssignee,
+} from '../utils/collaboratorMap';
 import type {
+  ActivityEvent,
   AppSyncState,
   BoardState,
   CalendarEvent,
@@ -66,12 +103,22 @@ import type {
   CreativeProject,
   EmployeeTask,
   MonthlyPerformanceRecord,
+  MonthlyArchiveStore,
   PerformanceHistoryStore,
   AssignmentBrief,
   FileAttachment,
+  DailyKpiStore,
+  ContentSentiment,
+  SocialPlatform,
+  SocialMetricsStore,
+  KpiObjectiveAssignment,
   TaskAssignment,
   User,
   UserCalendarState,
+  WorkloadActionResult,
+  WorkloadCheckResult,
+  WorkloadLimitsStore,
+  UserProfilesStore,
 } from '../types';
 
 interface AppContextValue {
@@ -81,6 +128,16 @@ interface AppContextValue {
   login: (username: string, password: string) => boolean;
   logout: () => void;
   canEditAll: boolean;
+  canSendKpiObjectives: boolean;
+  canManageWorkloadLimits: boolean;
+  workloadLimits: WorkloadLimitsStore;
+  getWorkloadCheck: (
+    employeeId: string,
+    options?: { excludeProjectId?: string; addSlots?: number },
+  ) => WorkloadCheckResult;
+  setDefaultWorkloadLimit: (max: number) => void;
+  setEmployeeWorkloadLimit: (employeeId: string, max: number) => void;
+  verifyManagerPassword: (password: string) => boolean;
   canEditTask: (task: EmployeeTask) => boolean;
   updateTask: (id: string, patch: Partial<EmployeeTask>) => void;
   addTask: () => void;
@@ -103,35 +160,79 @@ interface AppContextValue {
   assignments: TaskAssignment[];
   myPendingAssignments: TaskAssignment[];
   pendingAssignmentsCount: number;
-  createAssignment: (input: {
-    employeeId: string;
-    title: string;
-    objective: string;
-    dueDate: string;
-    priority: 'baja' | 'media' | 'alta';
-    notes: string;
-    attachmentUrl?: string;
-    attachments?: FileAttachment[];
-    brief?: AssignmentBrief;
-  }) => void;
+  createAssignment: (
+    input: {
+      employeeId: string;
+      title: string;
+      objective: string;
+      dueDate: string;
+      priority: 'baja' | 'media' | 'alta';
+      notes: string;
+      attachmentUrl?: string;
+      attachments?: FileAttachment[];
+      brief?: AssignmentBrief;
+    },
+    options?: { overridePassword?: string },
+  ) => WorkloadActionResult;
   acceptAssignment: (id: string) => void;
   rejectAssignment: (id: string, reason?: string) => void;
   cancelAssignment: (id: string) => void;
   changePassword: (current: string, next: string) => boolean;
+  updateProfile: (input: {
+    username?: string;
+    avatarUrl?: string | null;
+    currentPassword?: string;
+    newPassword?: string;
+  }) => { ok: true } | { ok: false; error: string };
   syncOnline: boolean;
   assignmentSearch: string;
   setAssignmentSearch: (q: string) => void;
   performanceHistory: PerformanceHistoryStore;
+  monthlyArchives: MonthlyArchiveStore;
   closeCurrentMonth: () => void;
   closeCurrentMonthWithRecords: (records: MonthlyPerformanceRecord[]) => void;
   marketingTasks: EmployeeTask[];
   projects: CreativeProject[];
   completedProjects: CreativeProject[];
+  visibleProjects: CreativeProject[];
+  visibleCompletedProjects: CreativeProject[];
   addProject: () => CreativeProject;
-  updateProject: (id: string, patch: Partial<CreativeProject>) => void;
+  updateProject: (
+    id: string,
+    patch: Partial<CreativeProject>,
+    options?: { overridePassword?: string },
+  ) => WorkloadActionResult;
   deleteProject: (id: string) => void;
   employeePhones: Record<string, string>;
   setEmployeePhone: (employeeId: string, phone: string) => void;
+  activityFeed: ActivityEvent[];
+  kpiObjectives: KpiObjectiveAssignment[];
+  myPendingKpiObjectives: KpiObjectiveAssignment[];
+  pendingKpiObjectivesCount: number;
+  createKpiObjective: (input: {
+    employeeId: string;
+    objective: string;
+    kpiTarget: number;
+    dueDate: string;
+    notes: string;
+  }) => void;
+  acceptKpiObjective: (id: string) => void;
+  rejectKpiObjective: (id: string, reason?: string) => void;
+  cancelKpiObjective: (id: string) => void;
+  dailyKpiStore: DailyKpiStore;
+  socialMetrics: SocialMetricsStore;
+  addSocialEntry: (input: {
+    platform: SocialPlatform;
+    title: string;
+    dateKey: string;
+    views: number;
+    likes: number;
+    comments: number;
+    shares: number;
+    sentiment: ContentSentiment;
+    notes: string;
+  }) => void;
+  deleteSocialEntry: (id: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -151,7 +252,7 @@ function migrateMarketingBoard(
   );
   const savedByEmp = new Map(savedMarketing.map((t) => [t.employeeId, t]));
 
-  const defaultMerged = DEFAULT_BOARD.tasks
+  const defaultMerged = EMPTY_BOARD.tasks
     .filter((t) => !removedEmpIds.has(t.employeeId))
     .map((def) => {
       const existing = savedByEmp.get(def.employeeId);
@@ -170,10 +271,7 @@ function migrateMarketingBoard(
   const tasks = [...defaultMerged, ...customTasks];
 
   const companyName = normalizeCompanyName(saved.companyName);
-  const rawProjects =
-    Array.isArray(saved.projects) && saved.projects.length > 0
-      ? saved.projects
-      : DEFAULT_PROJECTS;
+  const rawProjects = Array.isArray(saved.projects) ? saved.projects : [];
   const projects = filterActiveProjects(rawProjects);
 
   return { companyName, tasks, projects };
@@ -182,7 +280,7 @@ function migrateMarketingBoard(
 function mergeWithSeed(saved: BoardState, removedEmpIds: Set<string>): BoardState {
   const migrated = migrateMarketingBoard(saved, removedEmpIds);
   const savedIds = new Set(migrated.tasks.map((t) => t.id));
-  const missing = DEFAULT_BOARD.tasks.filter(
+  const missing = EMPTY_BOARD.tasks.filter(
     (t) => !savedIds.has(t.id) && !removedEmpIds.has(t.employeeId),
   );
   const tasks =
@@ -198,7 +296,7 @@ function loadBoard(roster: TeamRosterState): BoardState {
 
     if (storedVersion < BOARD_SCHEMA_VERSION) {
       localStorage.setItem(VERSION_KEY, String(BOARD_SCHEMA_VERSION));
-      if (!raw) return migrateMarketingBoard(DEFAULT_BOARD, removedEmpIds);
+      if (!raw) return migrateMarketingBoard(EMPTY_BOARD, removedEmpIds);
       if (storedVersion < 4) {
         return migrateMarketingBoard(JSON.parse(raw) as BoardState, removedEmpIds);
       }
@@ -214,7 +312,7 @@ function loadBoard(roster: TeamRosterState): BoardState {
     /* ignore */
   }
   localStorage.setItem(VERSION_KEY, String(BOARD_SCHEMA_VERSION));
-  return migrateMarketingBoard(DEFAULT_BOARD, removedEmpIds);
+  return migrateMarketingBoard(EMPTY_BOARD, removedEmpIds);
 }
 
 function loadCalendarStore(): CalendarStore {
@@ -257,6 +355,55 @@ function loadEmployeePhones(): Record<string, string> {
   return {};
 }
 
+function loadSocialMetrics(): SocialMetricsStore {
+  try {
+    const raw = localStorage.getItem(SOCIAL_METRICS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as SocialMetricsStore;
+      if (Array.isArray(parsed.entries)) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return { entries: [] };
+}
+
+function loadDailyKpiStore(): DailyKpiStore {
+  try {
+    const raw = localStorage.getItem(DAILY_KPI_SNAPSHOTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as DailyKpiStore;
+      if (Array.isArray(parsed.snapshots)) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return { snapshots: [] };
+}
+
+function loadKpiObjectives(): KpiObjectiveAssignment[] {
+  try {
+    const raw = localStorage.getItem(KPI_OBJECTIVES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as KpiObjectiveAssignment[];
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+function loadWorkloadLimits(): WorkloadLimitsStore {
+  try {
+    const raw = localStorage.getItem(WORKLOAD_LIMITS_KEY);
+    if (raw) return normalizeWorkloadLimits(JSON.parse(raw));
+  } catch {
+    /* ignore */
+  }
+  return { ...EMPTY_WORKLOAD_LIMITS };
+}
+
 function loadPerformanceHistory(): PerformanceHistoryStore {
   try {
     const raw = localStorage.getItem(PERFORMANCE_HISTORY_KEY);
@@ -268,6 +415,19 @@ function loadPerformanceHistory(): PerformanceHistoryStore {
     /* ignore */
   }
   return { records: [] };
+}
+
+function loadMonthlyArchives(): MonthlyArchiveStore {
+  try {
+    const raw = localStorage.getItem(MONTHLY_ARCHIVES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as MonthlyArchiveStore;
+      if (Array.isArray(parsed.snapshots)) return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return { snapshots: [] };
 }
 
 function filterMarketingTasks(tasks: EmployeeTask[]): EmployeeTask[] {
@@ -295,7 +455,10 @@ function loadSession(roster: TeamRosterState): User | null {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const id = JSON.parse(raw) as string;
-    return getActiveUsers(roster).find((u) => u.id === id) ?? null;
+    const base = findUserById(id, roster);
+    if (!base) return null;
+    const profiles = loadUserProfiles(localStorage.getItem(USER_PROFILES_KEY));
+    return withUserProfile(base, profiles);
   } catch {
     return null;
   }
@@ -312,13 +475,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [assignmentSearch, setAssignmentSearch] = useState('');
   const [performanceHistory, setPerformanceHistory] =
     useState<PerformanceHistoryStore>(loadPerformanceHistory);
+  const [monthlyArchives, setMonthlyArchives] =
+    useState<MonthlyArchiveStore>(loadMonthlyArchives);
+  const [kpiObjectives, setKpiObjectives] =
+    useState<KpiObjectiveAssignment[]>(loadKpiObjectives);
+  const [dailyKpiStore, setDailyKpiStore] = useState<DailyKpiStore>(loadDailyKpiStore);
+  const [socialMetrics, setSocialMetrics] = useState<SocialMetricsStore>(loadSocialMetrics);
+  const [workloadLimits, setWorkloadLimits] = useState<WorkloadLimitsStore>(loadWorkloadLimits);
+  const [userProfiles, setUserProfiles] = useState<UserProfilesStore>(() =>
+    loadUserProfiles(localStorage.getItem(USER_PROFILES_KEY)),
+  );
   const [employeePhones, setEmployeePhones] =
     useState<Record<string, string>>(loadEmployeePhones);
+  const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>(loadActivityFeed);
   const [syncOnline, setSyncOnline] = useState(false);
   const lastRemoteAt = useRef('');
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const userKey = user?.id ?? '';
+
+  const logActivity = useCallback(
+    (kind: ActivityEvent['kind'], message: string, actorName?: string) => {
+      const actor = actorName ?? user?.name ?? 'Sistema';
+      setActivityFeed((prev) => prependActivity(prev, kind, message, actor));
+    },
+    [user?.name],
+  );
 
   const calendar = useMemo(
     () => calendarStore[userKey] ?? emptyCalendar(),
@@ -357,7 +539,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [board]);
 
-  const activeUsers = useMemo(() => getActiveUsers(teamRoster), [teamRoster]);
+  const activeUsers = useMemo(
+    () => getActiveUsers(teamRoster).map((u) => withUserProfile(u, userProfiles)),
+    [teamRoster, userProfiles],
+  );
 
   useEffect(() => {
     localStorage.setItem(ASSIGNMENTS_STORAGE_KEY, JSON.stringify(assignments));
@@ -372,8 +557,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [performanceHistory]);
 
   useEffect(() => {
+    localStorage.setItem(MONTHLY_ARCHIVES_KEY, JSON.stringify(monthlyArchives));
+  }, [monthlyArchives]);
+
+  useEffect(() => {
+    localStorage.setItem(KPI_OBJECTIVES_KEY, JSON.stringify(kpiObjectives));
+  }, [kpiObjectives]);
+
+  useEffect(() => {
+    localStorage.setItem(DAILY_KPI_SNAPSHOTS_KEY, JSON.stringify(dailyKpiStore));
+  }, [dailyKpiStore]);
+
+  useEffect(() => {
+    localStorage.setItem(SOCIAL_METRICS_KEY, JSON.stringify(socialMetrics));
+  }, [socialMetrics]);
+
+  useEffect(() => {
+    localStorage.setItem(WORKLOAD_LIMITS_KEY, JSON.stringify(workloadLimits));
+  }, [workloadLimits]);
+
+  useEffect(() => {
+    localStorage.setItem(USER_PROFILES_KEY, JSON.stringify(userProfiles));
+  }, [userProfiles]);
+
+  useEffect(() => {
     localStorage.setItem(EMPLOYEE_PHONES_KEY, JSON.stringify(employeePhones));
   }, [employeePhones]);
+
+  useEffect(() => {
+    if (!activeUsers.length) return;
+    setBoard((prev) => {
+      let changed = false;
+      const nextProjects = (prev.projects ?? []).map((p) => {
+        if (p.assignedEmployeeId || p.collaborator === 'todos') return p;
+        const assignee = employeeIdForCollaboratorSlug(p.collaborator, activeUsers);
+        if (!assignee) return p;
+        changed = true;
+        return { ...p, assignedEmployeeId: assignee };
+      });
+      return changed ? { ...prev, projects: nextProjects } : prev;
+    });
+  }, [activeUsers]);
 
   const setEmployeePhone = useCallback((employeeId: string, phone: string) => {
     setEmployeePhones((prev) => {
@@ -387,23 +611,79 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const marketingTasks = useMemo(
-    () => filterMarketingTasks(board.tasks),
-    [board.tasks],
-  );
+  const marketingTasks = useMemo(() => {
+    const removed = getRemovedEmployeeIds(teamRoster);
+    return filterMarketingTasks(board.tasks).filter(
+      (t) => !removed.has(t.employeeId),
+    );
+  }, [board.tasks, teamRoster]);
+
+  useEffect(() => {
+    const removed = getRemovedEmployeeIds(teamRoster);
+    setBoard((prev) => {
+      const nextTasks = prev.tasks.filter((t) => !removed.has(t.employeeId));
+      if (nextTasks.length === prev.tasks.length) return prev;
+      return { ...prev, tasks: nextTasks };
+    });
+  }, [teamRoster]);
 
   useEffect(() => {
     if (marketingTasks.length === 0) return;
-    setPerformanceHistory((prev) =>
-      ensurePreviousMonthClosed(prev, marketingTasks, assignments),
+    const currentKey = getMonthKey();
+    if (monthlyArchives.lastRolloverMonthKey === currentKey) return;
+
+    const result = ensureMonthlyRollover(
+      monthlyArchives,
+      performanceHistory,
+      board,
+      assignments,
+      marketingTasks,
     );
-  }, [marketingTasks, assignments]);
+
+    setMonthlyArchives(result.archiveStore);
+    setPerformanceHistory(result.performanceHistory);
+    if (result.didRollover) {
+      setBoard(result.board);
+      stashRolloverNotice(result.archivedMonths);
+    }
+  }, [
+    marketingTasks,
+    assignments,
+    board,
+    monthlyArchives,
+    performanceHistory,
+  ]);
+
+  useEffect(() => {
+    if (marketingTasks.length === 0) return;
+    setDailyKpiStore((prev) => recordDailySnapshots(prev, marketingTasks));
+  }, [marketingTasks]);
 
   const closeCurrentMonthWithRecords = useCallback(
     (records: MonthlyPerformanceRecord[]) => {
-      setPerformanceHistory((prev) => applyMonthClose(prev, records));
+      const monthKey = getMonthKey();
+      setPerformanceHistory((prevPerf) => {
+        const nextPerf = applyMonthClose(prevPerf, records);
+        const snapshot = buildMonthSnapshot(
+          monthKey,
+          board,
+          assignments,
+          marketingTasks,
+          nextPerf,
+          'manager',
+        );
+        setMonthlyArchives((prevArch) =>
+          upsertSnapshot(prevArch, {
+            ...snapshot,
+            performance: records,
+            closedBy: 'manager',
+            archivedAt: new Date().toISOString(),
+          }),
+        );
+        return nextPerf;
+      });
     },
-    [],
+    [board, assignments, marketingTasks],
   );
 
   const closeCurrentMonth = useCallback(() => {
@@ -434,9 +714,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       calendars: calendarStore,
       passwordOverrides,
       performanceHistory,
+      teamRoster,
       updatedAt: new Date().toISOString(),
     };
-  }, [board, assignments, calendarStore, passwordOverrides, performanceHistory]);
+  }, [board, assignments, calendarStore, passwordOverrides, performanceHistory, teamRoster]);
 
   const schedulePush = useCallback(() => {
     if (!isApiEnabled()) return;
@@ -449,6 +730,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const applyRemote = useCallback((remote: AppSyncState) => {
     if (remote.updatedAt <= lastRemoteAt.current) return;
     lastRemoteAt.current = remote.updatedAt;
+
+    const remoteRoster = remote.teamRoster ?? defaultTeamRoster();
+    const removedEmpIds = getRemovedEmployeeIds(remoteRoster);
+    setTeamRoster(remoteRoster);
+
     setBoard((prev) => {
       const remoteProjects = remote.board.projects ?? [];
       const localById = new Map((prev.projects ?? []).map((p) => [p.id, p]));
@@ -464,11 +750,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           projects.push(lp);
         }
       }
-      return { ...remote.board, projects };
+      const tasks = (remote.board.tasks ?? []).filter(
+        (t) => !removedEmpIds.has(t.employeeId),
+      );
+      return { ...remote.board, tasks, projects };
     });
     setAssignments((prev) => {
       const remoteList = remote.assignments ?? [];
-      return remoteList.map((ra) => {
+      const filtered = remoteList.filter((a) => !removedEmpIds.has(a.employeeId));
+      return filtered.map((ra) => {
         const local = prev.find((a) => a.id === ra.id);
         if (local?.attachments?.length && !ra.attachments?.length) {
           return { ...ra, attachments: local.attachments };
@@ -514,9 +804,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     schedulePush();
-  }, [board, assignments, calendarStore, passwordOverrides, schedulePush]);
+  }, [board, assignments, calendarStore, passwordOverrides, teamRoster, schedulePush]);
 
   const canEditAll = user?.role === 'admin' || user?.role === 'lider';
+  const userCanSendKpiObjectives = canSendKpiObjectives(user);
+  const userCanManageWorkloadLimits = canManageWorkloadLimits(user);
+
+  const getWorkloadCheck = useCallback(
+    (
+      employeeId: string,
+      options?: { excludeProjectId?: string; addSlots?: number },
+    ): WorkloadCheckResult => {
+      const employee = board.tasks.find((t) => t.employeeId === employeeId);
+      return buildWorkloadCheck(
+        employeeId,
+        employee?.employeeName ?? 'Colaborador',
+        board.projects ?? [],
+        assignments,
+        activeUsers,
+        workloadLimits,
+        options,
+      );
+    },
+    [board.tasks, board.projects, assignments, activeUsers, workloadLimits],
+  );
+
+  const verifyManagerPassword = useCallback(
+    (password: string) => {
+      if (!user) return false;
+      return getPasswordForUser(user.id, passwordOverrides, teamRoster) === password;
+    },
+    [user, passwordOverrides, teamRoster],
+  );
+
+  const setDefaultWorkloadLimit = useCallback((max: number) => {
+    const n = Math.max(1, Math.round(max));
+    setWorkloadLimits((prev) => ({ ...prev, defaultMax: n }));
+  }, []);
+
+  const setEmployeeWorkloadLimit = useCallback((employeeId: string, max: number) => {
+    const n = Math.max(1, Math.round(max));
+    setWorkloadLimits((prev) => ({
+      ...prev,
+      byEmployee: { ...prev.byEmployee, [employeeId]: n },
+    }));
+  }, []);
+
+  const myPendingKpiObjectives = useMemo(() => {
+    if (!user?.employeeId) return [];
+    return kpiObjectives.filter(
+      (k) => k.employeeId === user.employeeId && k.status === 'pending',
+    );
+  }, [kpiObjectives, user?.employeeId]);
+
+  const pendingKpiObjectivesCount = useMemo(() => {
+    if (userCanSendKpiObjectives) {
+      return kpiObjectives.filter((k) => k.status === 'pending').length;
+    }
+    return myPendingKpiObjectives.length;
+  }, [kpiObjectives, userCanSendKpiObjectives, myPendingKpiObjectives.length]);
 
   const myPendingAssignments = useMemo(() => {
     if (!user?.employeeId) return [];
@@ -543,13 +889,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     (username: string, password: string) => {
-      const found = activeUsers.find(
-        (u) => u.username.toLowerCase() === username.trim().toLowerCase(),
-      );
+      const rosterUsers = getActiveUsers(teamRoster);
+      const found = findUserByLoginName(username, rosterUsers, userProfiles);
       if (!found) return false;
+      const resolved = withUserProfile(found, userProfiles);
       const expected = getPasswordForUser(found.id, passwordOverrides, teamRoster);
       if (password !== expected) return false;
-      setUser(found);
+      setUser(resolved);
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(found.id));
       sessionStorage.setItem(
         SESSION_EXPIRY_KEY,
@@ -557,7 +903,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       return true;
     },
-    [passwordOverrides, activeUsers, teamRoster],
+    [passwordOverrides, teamRoster, userProfiles],
   );
 
   const logout = useCallback(() => {
@@ -575,6 +921,90 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true;
     },
     [user, passwordOverrides, teamRoster],
+  );
+
+  const updateProfile = useCallback(
+    (input: {
+      username?: string;
+      avatarUrl?: string | null;
+      currentPassword?: string;
+      newPassword?: string;
+    }): { ok: true } | { ok: false; error: string } => {
+      if (!user) return { ok: false, error: 'Sesión no válida.' };
+
+      const rosterUsers = getActiveUsers(teamRoster);
+      let nextProfiles = userProfiles;
+      let nextRoster = teamRoster;
+
+      if (input.username !== undefined) {
+        const normalized = normalizeUsername(input.username);
+        const usernameError = validateUsernameChange(
+          normalized,
+          rosterUsers.map((u) => withUserProfile(u, userProfiles)),
+          userProfiles,
+          user.id,
+        );
+        if (usernameError) return { ok: false, error: usernameError };
+
+        const isAdded = teamRoster.added.some((u) => u.id === user.id);
+        if (isAdded) {
+          nextRoster = {
+            ...teamRoster,
+            added: teamRoster.added.map((u) =>
+              u.id === user.id ? { ...u, username: normalized } : u,
+            ),
+          };
+        } else {
+          nextProfiles = mergeProfilePatch(userProfiles, user.id, { username: normalized });
+        }
+      }
+
+      if (input.avatarUrl !== undefined) {
+        if (input.avatarUrl === null || input.avatarUrl === '') {
+          const prev = nextProfiles[user.id] ?? {};
+          const { avatarUrl: _removed, ...rest } = prev;
+          if (Object.keys(rest).length === 0) {
+            const { [user.id]: _drop, ...others } = nextProfiles;
+            nextProfiles = others;
+          } else {
+            nextProfiles = { ...nextProfiles, [user.id]: rest };
+          }
+        } else {
+          nextProfiles = mergeProfilePatch(nextProfiles, user.id, {
+            avatarUrl: input.avatarUrl,
+          });
+        }
+      }
+
+      if (input.newPassword) {
+        if (!input.currentPassword) {
+          return { ok: false, error: 'Escribe tu contraseña actual para cambiarla.' };
+        }
+        if (input.newPassword.length < 6) {
+          return { ok: false, error: 'La nueva contraseña debe tener al menos 6 caracteres.' };
+        }
+        if (getPasswordForUser(user.id, passwordOverrides, teamRoster) !== input.currentPassword) {
+          return { ok: false, error: 'Contraseña actual incorrecta.' };
+        }
+        setPasswordOverrides((prev) => ({ ...prev, [user.id]: input.newPassword! }));
+      }
+
+      if (nextRoster !== teamRoster) {
+        setTeamRoster(nextRoster);
+        saveTeamRoster(nextRoster);
+      }
+      if (nextProfiles !== userProfiles) {
+        setUserProfiles(nextProfiles);
+      }
+
+      const base = findUserById(user.id, nextRoster);
+      if (base) {
+        setUser(withUserProfile(base, nextProfiles));
+      }
+
+      return { ok: true };
+    },
+    [user, userProfiles, teamRoster, passwordOverrides],
   );
 
   const updateTask = useCallback((id: string, patch: Partial<EmployeeTask>) => {
@@ -704,9 +1134,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sessionStorage.removeItem(SESSION_EXPIRY_KEY);
       }
 
+      logActivity(
+        'team_member_removed',
+        `${targetUser.name} fue dado de baja del equipo`,
+        user.name,
+      );
+
       return { ok: true };
     },
-    [user, canEditAll, activeUsers],
+    [user, canEditAll, activeUsers, logActivity],
   );
 
   const addTeamMember = useCallback(
@@ -724,6 +1160,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const exists = activeUsers.some((u) => u.username === username);
       if (exists) {
         return { ok: false, error: 'Ese nombre de usuario ya está en uso.' };
+      }
+
+      const dormantDefault = USERS.find(
+        (u) => u.username === username && teamRoster.removedUserIds.includes(u.id),
+      );
+      if (dormantDefault?.employeeId) {
+        setTeamRoster((prev) => ({
+          ...prev,
+          removedUserIds: prev.removedUserIds.filter((id) => id !== dormantDefault.id),
+        }));
+
+        const defaultTask = EMPTY_BOARD.tasks.find(
+          (t) => t.employeeId === dormantDefault.employeeId,
+        );
+        if (defaultTask) {
+          setBoard((prev) => ({
+            ...prev,
+            tasks: [
+              defaultTask,
+              ...prev.tasks.filter((t) => t.employeeId !== dormantDefault.employeeId),
+            ],
+          }));
+        }
+
+        if (input.password !== dormantDefault.password) {
+          setPasswordOverrides((prev) => ({
+            ...prev,
+            [dormantDefault.id]: input.password,
+          }));
+        }
+
+        if (input.phone?.trim()) {
+          setEmployeePhones((prev) => ({
+            ...prev,
+            [dormantDefault.employeeId!]: input.phone!.trim(),
+          }));
+        }
+
+        logActivity(
+          'team_member_added',
+          `${input.name.trim()} volvió al equipo de Marketing`,
+          user.name,
+        );
+
+        return { ok: true };
       }
 
       const stamp = Date.now();
@@ -764,9 +1245,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }));
       }
 
+      logActivity(
+        'team_member_added',
+        `${input.name.trim()} se unió al equipo de Marketing`,
+        user.name,
+      );
+
       return { ok: true };
     },
-    [user, canEditAll, activeUsers, teamRoster.added.length, board.tasks.length],
+    [user, canEditAll, activeUsers, teamRoster.removedUserIds, teamRoster.added.length, board.tasks.length, logActivity],
   );
 
   const projects = useMemo(
@@ -777,6 +1264,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const completedProjects = useMemo(
     () => filterCompletedProjects(board.projects ?? []),
     [board.projects],
+  );
+
+  const visibleProjects = useMemo(
+    () =>
+      projects.filter((p) => projectVisibleToUser(p, user, canEditAll, activeUsers)),
+    [projects, user, canEditAll, activeUsers],
+  );
+
+  const visibleCompletedProjects = useMemo(
+    () =>
+      completedProjects.filter((p) =>
+        projectVisibleToUser(p, user, canEditAll, activeUsers),
+      ),
+    [completedProjects, user, canEditAll, activeUsers],
   );
 
   const addProject = useCallback((): CreativeProject => {
@@ -807,9 +1308,56 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateProject = useCallback(
-    (id: string, patch: Partial<CreativeProject>) => {
-      if (patch.status === 'terminado') {
+    (
+      id: string,
+      patch: Partial<CreativeProject>,
+      options?: { overridePassword?: string },
+    ): WorkloadActionResult => {
+      const current = board.projects?.find((p) => p.id === id);
+      if (!current) return { ok: false, reason: 'forbidden' };
+
+      let nextPatch = patch;
+      if (patch.collaborator !== undefined) {
+        nextPatch = {
+          ...patch,
+          assignedEmployeeId: employeeIdForCollaboratorSlug(
+            patch.collaborator,
+            activeUsers,
+          ),
+        };
+
+        if (patch.collaborator !== 'todos' && canEditAll) {
+          const prevAssignee = resolveProjectAssignee(current, activeUsers);
+          const nextAssignee = nextPatch.assignedEmployeeId;
+          if (nextAssignee && nextAssignee !== prevAssignee) {
+            const check = getWorkloadCheck(nextAssignee, {
+              excludeProjectId: id,
+              addSlots: 1,
+            });
+            if (!check.allowed) {
+              if (
+                !options?.overridePassword ||
+                !verifyManagerPassword(options.overridePassword)
+              ) {
+                return options?.overridePassword
+                  ? { ok: false, reason: 'invalid_override' }
+                  : { ok: false, reason: 'workload_limit', status: check };
+              }
+              const employee = board.tasks.find((t) => t.employeeId === nextAssignee);
+              logActivity(
+                'assignment_sent',
+                `Asignación extra autorizada: proyecto a ${employee?.employeeName ?? 'colaborador'} (${check.current.total + 1}/${check.max})`,
+                user?.name ?? 'Gerente',
+              );
+            }
+          }
+        }
+      }
+
+      if (nextPatch.status === 'terminado') {
         const today = new Date().toISOString().slice(0, 10);
+        const name = current.projectName?.trim() || 'Proyecto';
+        const who = nextPatch.completedByName ?? user?.name ?? 'Colaborador';
         setBoard((prev) => ({
           ...prev,
           projects: (prev.projects ?? []).map((p) =>
@@ -817,15 +1365,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
               ? p
               : {
                   ...p,
-                  ...patch,
+                  ...nextPatch,
                   status: 'terminado',
-                  finishedDate: patch.finishedDate ?? p.finishedDate ?? today,
+                  finishedDate: nextPatch.finishedDate ?? p.finishedDate ?? today,
                   updatedAt: new Date().toISOString(),
                 },
           ),
         }));
-        return;
+        logActivity('project_completed', `${who} entregó «${name}»`, who);
+        return { ok: true };
       }
+
       setBoard((prev) => ({
         ...prev,
         projects: (prev.projects ?? []).map((p) => {
@@ -833,16 +1383,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (
             !canEditAll &&
             p.commitmentDateLocked &&
-            patch.commitmentDate !== undefined &&
-            patch.commitmentDate !== p.commitmentDate
+            nextPatch.commitmentDate !== undefined &&
+            nextPatch.commitmentDate !== p.commitmentDate
           ) {
             return p;
           }
-          return { ...p, ...patch, updatedAt: new Date().toISOString() };
+          return { ...p, ...nextPatch, updatedAt: new Date().toISOString() };
         }),
       }));
+      return { ok: true };
     },
-    [canEditAll],
+    [
+      canEditAll,
+      activeUsers,
+      board.projects,
+      board.tasks,
+      user?.name,
+      logActivity,
+      getWorkloadCheck,
+      verifyManagerPassword,
+    ],
   );
 
   const deleteProject = useCallback((id: string) => {
@@ -954,20 +1514,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createAssignment = useCallback(
-    (input: {
-      employeeId: string;
-      title: string;
-      objective: string;
-      dueDate: string;
-      priority: 'baja' | 'media' | 'alta';
-      notes: string;
-      attachmentUrl?: string;
-      attachments?: FileAttachment[];
-      brief?: AssignmentBrief;
-    }) => {
-      if (!user || !canEditAll) return;
+    (
+      input: {
+        employeeId: string;
+        title: string;
+        objective: string;
+        dueDate: string;
+        priority: 'baja' | 'media' | 'alta';
+        notes: string;
+        attachmentUrl?: string;
+        attachments?: FileAttachment[];
+        brief?: AssignmentBrief;
+      },
+      options?: { overridePassword?: string },
+    ): WorkloadActionResult => {
+      if (!user || !canEditAll) return { ok: false, reason: 'forbidden' };
       const employee = board.tasks.find((t) => t.employeeId === input.employeeId);
-      if (!employee) return;
+      if (!employee) return { ok: false, reason: 'forbidden' };
+
+      const check = getWorkloadCheck(input.employeeId, { addSlots: 1 });
+      if (!check.allowed) {
+        if (!options?.overridePassword || !verifyManagerPassword(options.overridePassword)) {
+          return options?.overridePassword
+            ? { ok: false, reason: 'invalid_override' }
+            : { ok: false, reason: 'workload_limit', status: check };
+        }
+        logActivity(
+          'assignment_sent',
+          `Indicación extra autorizada para ${employee.employeeName} (${check.current.total + 1}/${check.max})`,
+          user.name,
+        );
+      }
 
       const assignment: TaskAssignment = {
         id: `asg-${Date.now()}`,
@@ -991,8 +1568,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (input.attachments?.length) {
         void saveAssignmentAttachments(assignment.id, input.attachments);
       }
+      logActivity(
+        'assignment_sent',
+        `Indicación «${assignment.title}» enviada a ${employee.employeeName}`,
+        user.name,
+      );
+      return { ok: true };
     },
-    [user, canEditAll, board.tasks],
+    [user, canEditAll, board.tasks, logActivity, getWorkloadCheck, verifyManagerPassword],
   );
 
   const acceptAssignment = useCallback(
@@ -1035,8 +1618,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       setAssignments((prev) => prev.filter((a) => a.id !== id));
+      logActivity(
+        'assignment_accepted',
+        `${user?.name ?? assignment.employeeName} aceptó «${assignment.title}»`,
+        user?.name ?? assignment.employeeName,
+      );
     },
-    [assignments, board.tasks, user?.employeeId, canEditAll],
+    [assignments, board.tasks, user?.employeeId, user?.name, canEditAll, logActivity],
   );
 
   const rejectAssignment = useCallback(
@@ -1058,6 +1646,195 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [canEditAll],
   );
 
+  const createKpiObjective = useCallback(
+    (input: {
+      employeeId: string;
+      objective: string;
+      kpiTarget: number;
+      dueDate: string;
+      notes: string;
+    }) => {
+      if (!user || !userCanSendKpiObjectives) return;
+      const employee = board.tasks.find((t) => t.employeeId === input.employeeId);
+      if (!employee) return;
+
+      const monthKey = getMonthKey();
+      const item: KpiObjectiveAssignment = {
+        id: `kpi-${Date.now()}`,
+        employeeId: input.employeeId,
+        employeeName: employee.employeeName,
+        assignedById: user.id,
+        assignedByName: user.name,
+        monthKey,
+        monthLabel: formatMonthLabel(monthKey),
+        objective: input.objective.trim(),
+        kpiTarget: Math.max(1, input.kpiTarget),
+        dueDate: input.dueDate,
+        notes: input.notes.trim(),
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+      };
+
+      setKpiObjectives((prev) => [
+        item,
+        ...prev.filter(
+          (k) =>
+            !(
+              k.employeeId === input.employeeId &&
+              k.monthKey === monthKey &&
+              k.status === 'pending'
+            ),
+        ),
+      ]);
+      logActivity(
+        'kpi_objective_sent',
+        `Objetivo KPI de ${item.monthLabel} enviado a ${employee.employeeName}`,
+        user.name,
+      );
+    },
+    [user, userCanSendKpiObjectives, board.tasks, logActivity],
+  );
+
+  const acceptKpiObjective = useCallback(
+    (id: string) => {
+      const item = kpiObjectives.find((k) => k.id === id);
+      if (!item || item.status !== 'pending') return;
+      if (user?.employeeId !== item.employeeId) return;
+
+      const task = board.tasks.find((t) => t.employeeId === item.employeeId);
+      const now = new Date().toISOString();
+      if (task) {
+        const noteLine = item.notes
+          ? `${item.notes} (Objetivo KPI de ${item.assignedByName})`
+          : `Objetivo KPI aceptado — ${item.assignedByName}`;
+        setBoard((prev) => ({
+          ...prev,
+          tasks: prev.tasks.map((t) =>
+            t.id === task.id
+              ? {
+                  ...t,
+                  objective: item.objective,
+                  kpiTarget: item.kpiTarget,
+                  kpiCurrent: 0,
+                  dueDate: item.dueDate,
+                  currentWork: `Objetivo del mes: ${item.objective}`,
+                  notes: noteLine,
+                  status: 'en_progreso',
+                  kpiObjectiveMonthKey: item.monthKey,
+                  kpiAssignedByName: item.assignedByName,
+                  kpiAssignedAt: now,
+                }
+              : t,
+          ),
+        }));
+      }
+
+      setKpiObjectives((prev) =>
+        prev.map((k) =>
+          k.id === id ? { ...k, status: 'accepted', respondedAt: now } : k,
+        ),
+      );
+      logActivity(
+        'kpi_objective_accepted',
+        `${item.employeeName} aceptó el objetivo KPI de ${item.monthLabel}`,
+        user?.name ?? item.employeeName,
+      );
+    },
+    [kpiObjectives, board.tasks, user?.employeeId, user?.name, userCanSendKpiObjectives, logActivity],
+  );
+
+  const rejectKpiObjective = useCallback(
+    (id: string, reason?: string) => {
+      const item = kpiObjectives.find((k) => k.id === id);
+      if (!item || item.status !== 'pending') return;
+      if (user?.employeeId !== item.employeeId) return;
+
+      setKpiObjectives((prev) =>
+        prev.map((k) =>
+          k.id === id
+            ? {
+                ...k,
+                status: 'rejected',
+                respondedAt: new Date().toISOString(),
+                rejectReason: reason?.trim() || undefined,
+              }
+            : k,
+        ),
+      );
+    },
+    [kpiObjectives, user?.employeeId, userCanSendKpiObjectives],
+  );
+
+  const cancelKpiObjective = useCallback(
+    (id: string) => {
+      if (!userCanSendKpiObjectives) return;
+      const item = kpiObjectives.find((k) => k.id === id);
+      if (!item || item.status !== 'pending') return;
+      if (item.assignedById !== user?.id && !canEditAll) return;
+      setKpiObjectives((prev) => prev.filter((k) => k.id !== id));
+    },
+    [kpiObjectives, userCanSendKpiObjectives, user?.id, canEditAll],
+  );
+
+  useEffect(() => {
+    const current = getMonthKey();
+    setKpiObjectives((prev) => {
+      let changed = false;
+      const next = prev.map((k) => {
+        if (k.status === 'pending' && k.monthKey < current) {
+          changed = true;
+          return {
+            ...k,
+            status: 'cancelled' as const,
+            respondedAt: new Date().toISOString(),
+          };
+        }
+        return k;
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
+  const addSocialEntry = useCallback(
+    (input: {
+      platform: SocialPlatform;
+      title: string;
+      dateKey: string;
+      views: number;
+      likes: number;
+      comments: number;
+      shares: number;
+      sentiment: ContentSentiment;
+      notes: string;
+    }) => {
+      if (!user) return;
+      const monthKey = input.dateKey.slice(0, 7);
+      const entry = {
+        id: `social-${Date.now()}`,
+        ...input,
+        monthKey,
+        createdById: user.id,
+        createdByName: user.name,
+        createdAt: new Date().toISOString(),
+      };
+      setSocialMetrics((prev) => ({
+        entries: [entry, ...prev.entries],
+      }));
+      logActivity(
+        'project_status',
+        `Contenido en ${input.platform}: «${input.title}» registrado`,
+        user.name,
+      );
+    },
+    [user, logActivity],
+  );
+
+  const deleteSocialEntry = useCallback((id: string) => {
+    setSocialMetrics((prev) => ({
+      entries: prev.entries.filter((e) => e.id !== id),
+    }));
+  }, []);
+
   const value = useMemo(
     () => ({
       user,
@@ -1066,6 +1843,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       canEditAll,
+      canSendKpiObjectives: userCanSendKpiObjectives,
+      canManageWorkloadLimits: userCanManageWorkloadLimits,
+      workloadLimits,
+      getWorkloadCheck,
+      setDefaultWorkloadLimit,
+      setEmployeeWorkloadLimit,
+      verifyManagerPassword,
       canEditTask,
       updateTask,
       addTask,
@@ -1093,20 +1877,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
       rejectAssignment,
       cancelAssignment,
       changePassword,
+      updateProfile,
       syncOnline,
       assignmentSearch,
       setAssignmentSearch,
       performanceHistory,
+      monthlyArchives,
       closeCurrentMonth,
       closeCurrentMonthWithRecords,
       marketingTasks,
       projects,
       completedProjects,
+      visibleProjects,
+      visibleCompletedProjects,
       addProject,
       updateProject,
       deleteProject,
       employeePhones,
       setEmployeePhone,
+      activityFeed,
+      kpiObjectives,
+      myPendingKpiObjectives,
+      pendingKpiObjectivesCount,
+      createKpiObjective,
+      acceptKpiObjective,
+      rejectKpiObjective,
+      cancelKpiObjective,
+      dailyKpiStore,
+      socialMetrics,
+      addSocialEntry,
+      deleteSocialEntry,
     }),
     [
       user,
@@ -1115,6 +1915,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       canEditAll,
+      userCanSendKpiObjectives,
+      userCanManageWorkloadLimits,
+      workloadLimits,
+      getWorkloadCheck,
+      setDefaultWorkloadLimit,
+      setEmployeeWorkloadLimit,
+      verifyManagerPassword,
       canEditTask,
       updateTask,
       addTask,
@@ -1141,19 +1948,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       rejectAssignment,
       cancelAssignment,
       changePassword,
+      updateProfile,
       syncOnline,
       assignmentSearch,
       performanceHistory,
+      monthlyArchives,
       closeCurrentMonth,
       closeCurrentMonthWithRecords,
       marketingTasks,
       projects,
       completedProjects,
+      visibleProjects,
+      visibleCompletedProjects,
       addProject,
       updateProject,
       deleteProject,
       employeePhones,
       setEmployeePhone,
+      activityFeed,
+      kpiObjectives,
+      myPendingKpiObjectives,
+      pendingKpiObjectivesCount,
+      createKpiObjective,
+      acceptKpiObjective,
+      rejectKpiObjective,
+      cancelKpiObjective,
+      dailyKpiStore,
+      socialMetrics,
+      addSocialEntry,
+      deleteSocialEntry,
     ],
   );
 

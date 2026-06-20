@@ -20,6 +20,7 @@ export const SPELL_CUSTOM_WORDS = [
   'andres',
   'andrés',
   'juancarlos',
+  'orlando',
   'canva',
   'meta',
   'google',

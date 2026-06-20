@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { COMPANY_NAME } from '../constants';
+import { FRESH_START_KEY } from '../utils/clearAppData';
 import { useApp } from '../context/AppContext';
 import { buildForgotPasswordWhatsAppUrl } from '../utils/whatsappSupport';
 import { BrandLogo } from './BrandLogo';
@@ -12,10 +13,12 @@ export function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [freshStart] = useState(() => sessionStorage.getItem(FRESH_START_KEY) === '1');
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    sessionStorage.removeItem(FRESH_START_KEY);
     if (!login(username, password)) {
       setError('Usuario o contraseña incorrectos');
     }
@@ -38,6 +41,12 @@ export function LoginPage() {
         </div>
 
         <DevMobileHint />
+
+        {freshStart && (
+          <p className="login-fresh-notice" role="status">
+            Tablero reiniciado: sin proyectos de demo. Entra con tu usuario para empezar desde cero.
+          </p>
+        )}
 
         <form onSubmit={handleSubmit} className="login-form">
           <label>

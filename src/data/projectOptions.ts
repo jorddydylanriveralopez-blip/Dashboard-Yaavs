@@ -61,7 +61,8 @@ export const COLLABORATORS: { value: Collaborator; label: string }[] = [
   { value: 'jorddy', label: 'Jorddy' },
   { value: 'andres', label: 'Andres' },
   { value: 'jesus', label: 'Jesus' },
-  { value: 'carlos', label: 'Carlos' },
+  { value: 'ana', label: 'Ana García' },
+  { value: 'carlos', label: 'Juan Carlos' },
   { value: 'todos', label: 'TODOS' },
 ];
 

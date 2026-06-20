@@ -1,53 +1,124 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 import { ONBOARDING_KEY } from '../constants';
+import type { DashboardView } from '../utils/dashboardRoutes';
 import './OnboardingTour.css';
 
-const STEPS_EMPLEADO = [
+interface Step {
+  title: string;
+  body: string;
+  target?: string;
+  view?: DashboardView;
+}
+
+const STEPS_EMPLEADO: Step[] = [
   {
     title: 'Bienvenido a Yaavs',
-    body: 'Empieza en Mi día: ahí ves cuántos proyectos tienes por entregar y si hay retraso.',
+    body: 'Empieza en Inicio: ahí ves tu siguiente paso y cuántos proyectos tienes por entregar.',
+    target: '[data-tour="nav-home"]',
+    view: 'home',
   },
   {
-    title: 'Proyectos y entrega',
-    body: 'En Proyectos está el detalle. Para cerrar un trabajo: abre el proyecto, sube una foto de prueba y pulsa Trabajo concluido. Pasará a Concluidos ✓.',
+    title: 'Tus proyectos',
+    body: 'En Proyectos está el detalle. Puedes ver tarjetas o tablero Kanban y arrastrar para cambiar estado.',
+    target: '[data-tour="nav-board"]',
+    view: 'board',
   },
   {
     title: 'Indicaciones del gerente',
-    body: 'Si te llega una indicación nueva, acéptala en Indicaciones. Si viene de un proyecto, lo verás vinculado en Mi día — no hace falta duplicar el trabajo.',
+    body: 'Si te llega una indicación nueva, acéptala aquí. El badge naranja te avisa.',
+    target: '[data-tour="nav-assignments"]',
+    view: 'assignments',
   },
   {
     title: 'Tu agenda',
-    body: 'En Agenda anotas pendientes personales, activas recordatorios y registras tu tiempo.',
+    body: 'En Agenda (menú Más en celular) anotas pendientes y activas recordatorios.',
+    target: '[data-tour="nav-calendar"]',
+    view: 'calendar',
   },
 ];
 
-const STEPS_GERENTE = [
+const STEPS_GERENTE: Step[] = [
   {
     title: 'Centro de mando',
-    body: 'Inicio muestra proyectos atrasados, indicaciones sin aceptar y últimas entregas con prueba. Los números del menú lateral también reflejan retrasos del equipo.',
+    body: 'Inicio muestra prioridades, carga del equipo y actividad reciente del área.',
+    target: '[data-tour="nav-home"]',
+    view: 'home',
   },
   {
     title: 'Proyectos e indicaciones',
-    body: 'Crea y edita en Proyectos. Envía indicaciones desde ahí o desde Indicaciones / Equipo; al vincular un proyecto, el colaborador lo verá una sola vez en Por entregar.',
+    body: 'Crea proyectos aquí. Asigna colaborador para que solo esa persona lo vea.',
+    target: '[data-tour="nav-board"]',
+    view: 'board',
   },
   {
-    title: 'KPIs y reportes',
-    body: 'Historial ◷ es el cierre mensual de KPIs. Concluidos ✓ lista proyectos terminados con foto. Reportes exporta resúmenes para reuniones.',
+    title: 'Equipo',
+    body: 'Gestiona personas, asigna indicaciones y da de baja miembros si hace falta.',
+    target: '[data-tour="nav-team"]',
+    view: 'team',
+  },
+  {
+    title: 'Reportes y concluidos',
+    body: 'Concluidos ✓ tiene entregas con foto. Reportes muestra tendencias y exporta CSV.',
+    target: '[data-tour="nav-reports"]',
+    view: 'reports',
   },
 ];
+
+interface Spotlight {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
 
 interface Props {
   userId: string;
   isManager: boolean;
+  onNavigate: (view: DashboardView) => void;
 }
 
-export function OnboardingTour({ userId, isManager }: Props) {
+export function OnboardingTour({ userId, isManager, onNavigate }: Props) {
   const key = `${ONBOARDING_KEY}-${userId}`;
   const [visible, setVisible] = useState(() => !localStorage.getItem(key));
   const [step, setStep] = useState(0);
+  const [spot, setSpot] = useState<Spotlight | null>(null);
 
   const steps = isManager ? STEPS_GERENTE : STEPS_EMPLEADO;
   const current = steps[step];
+
+  useEffect(() => {
+    if (!visible || !current?.view) return;
+    onNavigate(current.view);
+  }, [visible, step, current?.view, onNavigate]);
+
+  useLayoutEffect(() => {
+    if (!visible || !current?.target) {
+      setSpot(null);
+      return;
+    }
+    const update = () => {
+      const el = document.querySelector(current.target!);
+      if (!el) {
+        setSpot(null);
+        return;
+      }
+      const r = el.getBoundingClientRect();
+      setSpot({
+        top: r.top - 6,
+        left: r.left - 6,
+        width: r.width + 12,
+        height: r.height + 12,
+      });
+    };
+    const t = window.setTimeout(update, 120);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [visible, step, current?.target]);
 
   if (!visible || !current) return null;
 
@@ -57,8 +128,19 @@ export function OnboardingTour({ userId, isManager }: Props) {
   };
 
   return (
-    <div className="onboarding-backdrop">
-      <div className="onboarding-card">
+    <div className="onboarding-backdrop onboarding-backdrop--spotlight">
+      {spot && (
+        <div
+          className="onboarding-spotlight"
+          style={{
+            top: spot.top,
+            left: spot.left,
+            width: spot.width,
+            height: spot.height,
+          }}
+        />
+      )}
+      <div className="onboarding-card onboarding-card--floating">
         <span className="onboarding-step">
           {step + 1} / {steps.length}
         </span>
