@@ -1,56 +1,120 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback, lazy, Suspense } from 'react';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { AssignTaskModal, type AssignFormData } from './AssignTaskModal';
 import { WorkloadOverrideModal } from './WorkloadOverrideModal';
 import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
 import { SendKpiObjectiveModal, type KpiObjectiveFormData } from './SendKpiObjectiveModal';
-import { AssignmentsView } from './AssignmentsView';
 import { BrandLogo } from './BrandLogo';
-import { CalendarView } from './CalendarView';
-import { KpiMonthView } from './KpiMonthView';
-import { ManagerHomeView } from './ManagerHomeView';
+import { InstallPwaSidebarButton } from './InstallPwaSidebarButton';
 import { TechAmbience } from './TechAmbience';
 import { YaavsAssistant } from './YaavsAssistant';
-import { MyDayView } from './MyDayView';
 import { OnboardingTour } from './OnboardingTour';
 import { ProfileModal } from './ProfileModal';
 import { UserAvatar } from './UserAvatar';
-import { ReportsView } from './ReportsView';
-import { CommunityView } from './CommunityView';
-import { MarketingPulseView } from './MarketingPulseView';
-import { MonthlyHistoryView } from './MonthlyHistoryView';
 import { PerformanceAlertBanner, PerformanceAlertBadge } from './PerformanceAlertBanner';
 import { TaskDetailModal } from './TaskDetailModal';
-import { ProjectsBoard } from './ProjectsBoard';
-import { CompletedProjectsView } from './CompletedProjectsView';
-import { MarketingTeamView } from './MarketingTeamView';
-import { ProjectDetailModal } from './ProjectDetailModal';
+import { goToCompletedProjects } from '../utils/projectsTab';
 import { MobileMoreMenu } from './MobileMoreMenu';
+import { ProjectDetailModal } from './ProjectDetailModal';
+import { NotificationBell } from './NotificationBell';
+import {
+  EmployeeWorkStatsStrip,
+  type EmployeeStatDetail,
+  type EmployeeStatKey,
+} from './EmployeeWorkStatsStrip';
+import { NavIcon, type NavIconId } from './NavIcon';
 import { useAssignmentNotifications } from '../hooks/useAssignmentNotifications';
 import { useDashboardRoute } from '../hooks/useDashboardRoute';
 import { usePerformanceStreakAlert } from '../hooks/usePerformanceStreakAlert';
 import { COMPANY_NAME } from '../constants';
 import type { DashboardView } from '../utils/dashboardRoutes';
 import { countOverdueProjects } from '../utils/projectLink';
+import {
+  computeEmployeeWorkStats,
+  projectsAssignedToEmployee,
+} from '../utils/employeeWorkStats';
+import {
+  buildEmployeeNotifications,
+  countUnreadNotifications,
+  type NotificationTarget,
+} from '../utils/employeeNotifications';
+import { buildPersonalObservationForEmployee } from '../utils/personalObservations';
+import { getMonthKey } from '../utils/performanceHistory';
 import { fuzzyIncludes } from '../utils/fuzzyMatch';
+import { navigateToTeamTab, setTeamTab, type TeamTab } from '../utils/teamTab';
 import { isActiveProject } from '../utils/activeItems';
+import { getDeadlineInfo } from '../utils/deadline';
 import { takeRolloverNotice } from '../utils/monthlyArchive';
 import type { CreativeProject, EmployeeTask } from '../types';
 import './Dashboard.css';
 
-const NAV: { id: DashboardView; label: string; icon: string; managerOnly?: boolean }[] = [
-  { id: 'home', label: 'Inicio', icon: '⌂' },
-  { id: 'team', label: 'Equipo', icon: '◉' },
-  { id: 'board', label: 'Proyectos', icon: '◆' },
-  { id: 'completed', label: 'Concluidos', icon: '✓' },
-  { id: 'assignments', label: 'Indic.', icon: '✉' },
-  { id: 'kpis', label: 'KPIs', icon: '◎' },
-  { id: 'history', label: 'Historial', icon: '◷' },
-  { id: 'pulse', label: 'Panorama', icon: '◐', managerOnly: true },
-  { id: 'community', label: 'Redes', icon: '◇' },
-  { id: 'calendar', label: 'Agenda', icon: '▣' },
-  { id: 'reports', label: 'Reportes', icon: '▤', managerOnly: true },
+const ManagerHomeView = lazy(() =>
+  import('./ManagerHomeView').then((m) => ({ default: m.ManagerHomeView })),
+);
+const MyDayView = lazy(() =>
+  import('./MyDayView').then((m) => ({ default: m.MyDayView })),
+);
+const MarketingTeamView = lazy(() =>
+  import('./MarketingTeamView').then((m) => ({ default: m.MarketingTeamView })),
+);
+const TeamChatView = lazy(() =>
+  import('./TeamChatView').then((m) => ({ default: m.TeamChatView })),
+);
+const ProjectsHub = lazy(() =>
+  import('./ProjectsHub').then((m) => ({ default: m.ProjectsHub })),
+);
+const AttendanceView = lazy(() =>
+  import('./AttendanceView').then((m) => ({ default: m.AttendanceView })),
+);
+const AssignmentsView = lazy(() =>
+  import('./AssignmentsView').then((m) => ({ default: m.AssignmentsView })),
+);
+const MarketingPulseView = lazy(() =>
+  import('./MarketingPulseView').then((m) => ({ default: m.MarketingPulseView })),
+);
+const CommunityView = lazy(() =>
+  import('./CommunityView').then((m) => ({ default: m.CommunityView })),
+);
+const ImageLibraryView = lazy(() =>
+  import('./ImageLibraryView').then((m) => ({ default: m.ImageLibraryView })),
+);
+const CalendarView = lazy(() =>
+  import('./CalendarView').then((m) => ({ default: m.CalendarView })),
+);
+
+function ViewFallback() {
+  return (
+    <div className="dashboard-view-fallback" role="status" aria-live="polite">
+      Cargando…
+    </div>
+  );
+}
+
+// Redes solo para Orlando, Carlos (Juan Carlos) y Yared.
+const COMMUNITY_ALLOWED_EMPLOYEE_IDS = ['emp-orlando', 'emp-juancarlos', 'emp-yared'];
+// Asistencia solo para Orlando y Carlos (Juan Carlos).
+const ATTENDANCE_ALLOWED_EMPLOYEE_IDS = ['emp-orlando', 'emp-juancarlos'];
+// Vista de equipo completa solo para Orlando y Carlos; los demás ven "Mi perfil".
+const FULL_TEAM_ALLOWED_EMPLOYEE_IDS = ['emp-orlando', 'emp-juancarlos'];
+
+const NAV: {
+  id: DashboardView;
+  label: string;
+  icon: NavIconId;
+  managerOnly?: boolean;
+  allowEmployeeIds?: string[];
+}[] = [
+  { id: 'home', label: 'Inicio', icon: 'home' },
+  { id: 'team', label: 'Equipo', icon: 'team' },
+  { id: 'chat', label: 'Chat', icon: 'chat' },
+  { id: 'board', label: 'Proyectos', icon: 'board' },
+  { id: 'attendance', label: 'Asistencia', icon: 'attendance', allowEmployeeIds: ATTENDANCE_ALLOWED_EMPLOYEE_IDS },
+  { id: 'assignments', label: 'Indicaciones', icon: 'assignments' },
+  { id: 'pulse', label: 'Panorama', icon: 'pulse', managerOnly: true },
+  { id: 'community', label: 'Redes', icon: 'community', allowEmployeeIds: COMMUNITY_ALLOWED_EMPLOYEE_IDS },
+  { id: 'library', label: 'Biblioteca', icon: 'library' },
+  { id: 'calendar', label: 'Agenda', icon: 'calendar' },
 ];
 
 const MOBILE_PRIMARY: DashboardView[] = ['home', 'board', 'assignments', 'team'];
@@ -63,13 +127,14 @@ export function Dashboard() {
     filter,
     setFilter,
     canEditAll,
+    spyMode,
+    exitSpyMode,
     canSendKpiObjectives,
     activeUsers,
     marketingTasks,
     addProject,
     projects,
     visibleProjects,
-    visibleCompletedProjects,
     completedProjects,
     pendingAssignmentsCount,
     myPendingAssignments,
@@ -77,6 +142,11 @@ export function Dashboard() {
     createKpiObjective,
     performanceHistory,
     assignments,
+    allProjects,
+    activityFeed,
+    getManagerObservation,
+    dailyKpiStore,
+    attendanceStore,
   } = useApp();
   const toast = useToast();
   const { override, cancelOverride, confirmOverride, submitAssignment } = useWorkloadGuard();
@@ -90,12 +160,45 @@ export function Dashboard() {
   const [showProfile, setShowProfile] = useState(false);
   const { view, setView } = useDashboardRoute('home');
   const [showMobileMore, setShowMobileMore] = useState(false);
+  const [teamTabHint, setTeamTabHint] = useState<TeamTab | undefined>();
+  const [notificationSeenTick, setNotificationSeenTick] = useState(0);
 
-  useAssignmentNotifications(myPendingAssignments, !canEditAll && Boolean(user));
+  const isAllowedByEmployee = (ids?: string[]) =>
+    !ids ||
+    user?.role === 'admin' ||
+    (!!user?.employeeId && ids.includes(user.employeeId));
+  const canSeeCommunity = isAllowedByEmployee(COMMUNITY_ALLOWED_EMPLOYEE_IDS);
+  const canSeeAttendance = isAllowedByEmployee(ATTENDANCE_ALLOWED_EMPLOYEE_IDS);
+  const canSeeFullTeam = isAllowedByEmployee(FULL_TEAM_ALLOWED_EMPLOYEE_IDS);
+
+  const goToTeamTab = useCallback(
+    (tab: TeamTab) => {
+      navigateToTeamTab(tab, setView);
+      setTeamTabHint(tab);
+    },
+    [setView],
+  );
+
+  const openTeam = useCallback(() => {
+    setTeamTab('cards');
+    setTeamTabHint(undefined);
+    setView('team');
+  }, [setView]);
+
+  useEffect(() => {
+    if (view !== 'team') setTeamTabHint(undefined);
+  }, [view]);
+
+  useEffect(() => {
+    if (view === 'community' && !canSeeCommunity) setView('home');
+    if (view === 'attendance' && !canSeeAttendance) setView('home');
+  }, [view, canSeeCommunity, canSeeAttendance, setView]);
+
+  useAssignmentNotifications(myPendingAssignments, Boolean(user?.employeeId));
   usePerformanceStreakAlert(
     user?.employeeId,
     performanceHistory,
-    !canEditAll && Boolean(user),
+    Boolean(user?.employeeId),
   );
 
   useEffect(() => {
@@ -162,6 +265,211 @@ export function Dashboard() {
     );
   }, [marketingTasks, filter, canEditAll, user?.employeeId]);
 
+  const showPersonalWorkStats = Boolean(user?.employeeId && !canEditAll);
+
+  const personalWorkStats = useMemo(() => {
+    if (!user?.employeeId) {
+      return {
+        active: 0,
+        completed: 0,
+        urgent: 0,
+        notDelivered: 0,
+        dueSoon: 0,
+        pendingAssignments: 0,
+      };
+    }
+    return computeEmployeeWorkStats({
+      employeeId: user.employeeId,
+      activeUsers,
+      allProjects,
+      completedProjects,
+      pendingAssignments: myPendingAssignments,
+    });
+  }, [
+    user?.employeeId,
+    activeUsers,
+    allProjects,
+    completedProjects,
+    myPendingAssignments,
+  ]);
+
+  const handleNotificationNavigate = useCallback(
+    (target: NotificationTarget) => {
+      switch (target) {
+        case 'assignments':
+          setView('assignments');
+          break;
+        case 'team-kpis':
+          goToTeamTab('kpis');
+          break;
+        case 'team':
+          openTeam();
+          break;
+        case 'projects':
+          setProjectFocusCompletion(false);
+          setView('board');
+          break;
+        case 'projects-completed':
+          goToCompletedProjects();
+          setView('board');
+          break;
+        case 'calendar':
+          setView('calendar');
+          break;
+        case 'attendance':
+          setView('attendance');
+          break;
+        case 'home':
+        default:
+          setView('home');
+          break;
+      }
+    },
+    [setView, goToTeamTab, openTeam],
+  );
+
+  const personalImprovementTips = useMemo(() => {
+    if (!user?.employeeId) return [];
+    const observation = buildPersonalObservationForEmployee(user.employeeId, {
+      tasks: marketingTasks,
+      dailyKpiStore,
+      allProjects,
+      attendanceStore,
+      activeProjects: visibleProjects.filter(isActiveProject),
+    });
+    return observation?.tips ?? [];
+  }, [
+    user?.employeeId,
+    marketingTasks,
+    dailyKpiStore,
+    allProjects,
+    attendanceStore,
+    visibleProjects,
+  ]);
+
+  const managerNoteForUser = useMemo(() => {
+    if (!user?.employeeId) return undefined;
+    return getManagerObservation(user.employeeId, getMonthKey());
+  }, [user?.employeeId, getManagerObservation, notificationSeenTick]);
+
+  const employeeNotifications = useMemo(() => {
+    if (!user?.employeeId) return [];
+    return buildEmployeeNotifications({
+      userName: user.name,
+      employeeId: user.employeeId,
+      activeUsers,
+      allProjects,
+      pendingAssignments: myPendingAssignments,
+      pendingKpiObjectives: myPendingKpiObjectives,
+      activityFeed,
+      performanceHistory,
+      improvementTips: personalImprovementTips,
+      managerNote: managerNoteForUser?.text,
+      managerNoteUpdatedAt: managerNoteForUser?.updatedAt,
+      limit: 30,
+    });
+  }, [
+    user?.employeeId,
+    user?.name,
+    activeUsers,
+    allProjects,
+    myPendingAssignments,
+    myPendingKpiObjectives,
+    activityFeed,
+    performanceHistory,
+    personalImprovementTips,
+    managerNoteForUser,
+    notificationSeenTick,
+  ]);
+
+  const unreadNotificationCount = useMemo(
+    () => countUnreadNotifications(employeeNotifications),
+    [employeeNotifications],
+  );
+
+  const personalStatDetails = useMemo<
+    Partial<Record<EmployeeStatKey, EmployeeStatDetail[]>>
+  >(() => {
+    if (!user?.employeeId) return {};
+
+    const mineActive = projectsAssignedToEmployee(
+      allProjects,
+      user.employeeId,
+      activeUsers,
+    ).filter(isActiveProject);
+    const mineCompleted = projectsAssignedToEmployee(
+      completedProjects,
+      user.employeeId,
+      activeUsers,
+    );
+
+    const projectDetail = (project: CreativeProject): EmployeeStatDetail => {
+      const deadline = getDeadlineInfo(project.commitmentDate, project.status);
+      return {
+        id: project.id,
+        projectId: project.id,
+        title: project.projectName.trim() || 'Proyecto sin nombre',
+        meta: `${deadline.label} · Estado: ${project.status.replaceAll('_', ' ')}`,
+      };
+    };
+
+    return {
+      active: mineActive.map(projectDetail),
+      completed: mineCompleted.map(projectDetail),
+      urgent: mineActive
+        .filter((project) => {
+          const tone = getDeadlineInfo(project.commitmentDate, project.status).tone;
+          return tone === 'overdue' || tone === 'urgent';
+        })
+        .map(projectDetail),
+      notDelivered: mineActive.map(projectDetail),
+      dueSoon: mineActive
+        .filter(
+          (project) =>
+            getDeadlineInfo(project.commitmentDate, project.status).tone === 'soon',
+        )
+        .map(projectDetail),
+      pendingAssignments: myPendingAssignments.map((assignment) => ({
+        id: assignment.id,
+        title: assignment.title,
+        meta: `Entrega: ${assignment.dueDate} · De: ${assignment.assignedByName}`,
+        target: 'assignments',
+      })),
+      notifications: employeeNotifications
+        .filter((notification) => notification.unread)
+        .map((notification) => ({
+          id: notification.id,
+          title: notification.title,
+          meta: notification.detail,
+          target: notification.target,
+        })),
+    };
+  }, [
+    user,
+    allProjects,
+    completedProjects,
+    activeUsers,
+    myPendingAssignments,
+    employeeNotifications,
+  ]);
+
+  const handleStatDetailOpen = useCallback(
+    (detail: EmployeeStatDetail) => {
+      if (detail.projectId) {
+        const project = allProjects.find((item) => item.id === detail.projectId);
+        if (project) {
+          setProjectFocusCompletion(false);
+          setSelectedProject(project);
+          return;
+        }
+      }
+      if (detail.target) {
+        handleNotificationNavigate(detail.target as NotificationTarget);
+      }
+    },
+    [allProjects, handleNotificationNavigate],
+  );
+
   const stats = useMemo(() => {
     const urgent = marketingTasks.filter((t) => {
       if (t.status === 'completado') return false;
@@ -179,21 +487,28 @@ export function Dashboard() {
   const displayName = board.companyName || COMPANY_NAME;
   const navItems = NAV.filter((n) => {
     if (n.id === 'pulse') return canEditAll || canSendKpiObjectives;
+    if (n.allowEmployeeIds) return isAllowedByEmployee(n.allowEmployeeIds);
     return !n.managerOnly || canEditAll;
   });
   const mobileMoreItems = navItems.filter((n) => !MOBILE_PRIMARY.includes(n.id));
   const isMoreViewActive = mobileMoreItems.some((n) => n.id === view);
-
+  const navLabelFor = (item: { id: DashboardView; label: string }) =>
+    item.id === 'team' && !canSeeFullTeam ? 'Mi perfil' : item.label;
   const headlines: Record<DashboardView, { title: string; sub: string }> = {
     home: {
       title: canEditAll ? 'Centro de mando' : 'Mi día',
-      sub: canEditAll
-        ? 'Retrasos, indicaciones y entregas del equipo'
-        : 'Tu resumen de hoy',
+      sub:
+        canEditAll
+          ? 'Retrasos, indicaciones y entregas del equipo'
+          : 'Tu resumen de hoy',
     },
     team: {
-      title: 'Equipo de Marketing',
-      sub: canEditAll ? 'Colaboradores del área' : 'Quiénes trabajan contigo',
+      title: canSeeFullTeam ? 'Equipo de Marketing' : 'Mi perfil',
+      sub: canSeeFullTeam ? 'Colaboradores y KPIs del mes' : 'Tu avance y KPIs del mes',
+    },
+    chat: {
+      title: 'Chat de ayuda',
+      sub: 'Mensajes compartidos para coordinarse entre todos',
     },
     board: {
       title: 'Proyectos creativos',
@@ -209,20 +524,28 @@ export function Dashboard() {
       title: 'Indicaciones',
       sub: canEditAll ? 'Asigna y da seguimiento' : 'Del gerente',
     },
-    kpis: { title: 'KPIs del mes', sub: canEditAll ? 'Equipo' : 'Tu avance' },
     history: {
-      title: 'Historial mensual',
+      title: 'Resultados del mes',
       sub: canEditAll ? 'Logros y calificaciones del equipo' : 'Tus meses anteriores',
     },
     calendar: { title: 'Mi agenda', sub: 'Pendientes y tiempo' },
-    reports: { title: 'Reportes', sub: 'Resumen y exportación' },
     pulse: {
-      title: 'Panorama Marketing',
-      sub: 'Pastel del equipo, ritmo diario y cierre de mes',
+      title: 'Panorama',
+      sub: 'Avance del equipo, reportes y exportación',
     },
     community: {
       title: 'Redes y contenido',
       sub: 'TikTok, Meta e Instagram — ¿está gustando?',
+    },
+    attendance: {
+      title: 'Asistencia del área',
+      sub: 'Asistencias, faltas y enfermedades del equipo',
+    },
+    library: {
+      title: 'Biblioteca de imágenes',
+      sub: canEditAll
+        ? 'Almacén compartido con link público y API para programación'
+        : 'Imágenes del equipo — copia URL o úsalas en proyectos',
     },
   };
 
@@ -239,9 +562,19 @@ export function Dashboard() {
   };
 
   const handleAssignSubmit = (data: AssignFormData) => {
+    const count = data.employeeIds?.length ?? (data.employeeId ? 1 : 0);
     submitAssignment(data, () => {
+      const names =
+        data.employeeIds
+          ?.map((id) => assignable.find((t) => t.employeeId === id)?.employeeName)
+          .filter(Boolean)
+          .join(', ') ??
+        assignable.find((t) => t.employeeId === data.employeeId)?.employeeName ??
+        'colaborador';
       toast.success(
-        `Indicación enviada a ${assignable.find((t) => t.employeeId === data.employeeId)?.employeeName ?? 'colaborador'}`,
+        count > 1
+          ? `Indicación enviada a ${count} colaboradores`
+          : `Indicación enviada a ${names}`,
       );
     });
   };
@@ -257,6 +590,17 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
+      {spyMode && (
+        <button
+          type="button"
+          className="spy-indicator"
+          onClick={() => exitSpyMode()}
+          title="Vista espejo activa · clic para salir"
+          aria-label="Salir de la vista espejo"
+        >
+          <span className="spy-indicator-dot" aria-hidden />
+        </button>
+      )}
       {user && (
         <OnboardingTour
           userId={user.id}
@@ -279,14 +623,20 @@ export function Dashboard() {
               data-tour={`nav-${item.id}`}
               className={`nav-item ${view === item.id ? 'active' : ''}`}
               onClick={() => {
-                setView(item.id);
+                if (item.id === 'team') {
+                  openTeam();
+                } else {
+                  setView(item.id);
+                }
                 if (item.id === 'board') {
                   setProjectFocusCompletion(false);
                 }
               }}
             >
-              <span className="nav-icon">{item.icon}</span>
-              {item.label}
+              <span className="nav-icon">
+                <NavIcon id={item.icon} size={18} />
+              </span>
+              {navLabelFor(item)}
               {item.id === 'assignments' && pendingAssignmentsCount > 0 && (
                 <span className="nav-badge">{pendingAssignmentsCount}</span>
               )}
@@ -295,6 +645,15 @@ export function Dashboard() {
           ))}
         </nav>
 
+        {showPersonalWorkStats ? (
+          <EmployeeWorkStatsStrip
+            variant="sidebar"
+            stats={personalWorkStats}
+            notificationCount={unreadNotificationCount}
+            details={personalStatDetails}
+            onOpenDetail={handleStatDetailOpen}
+          />
+        ) : (
         <div className="sidebar-stats">
           {canEditAll ? (
             <>
@@ -328,6 +687,9 @@ export function Dashboard() {
             </>
           )}
         </div>
+        )}
+
+        <InstallPwaSidebarButton />
 
         <div className="sidebar-user">
           <button
@@ -358,14 +720,34 @@ export function Dashboard() {
             <strong>{user.name}</strong>
             <span>{roleLabel(user.role)}</span>
           </div>
-          <button type="button" className="btn-ghost mobile-logout" onClick={logout}>
-            Salir
-          </button>
+          <div className="mobile-topbar-actions">
+            {showPersonalWorkStats && (
+              <NotificationBell
+                notifications={employeeNotifications}
+                onNavigate={handleNotificationNavigate}
+                onMarkedSeen={() => setNotificationSeenTick((n) => n + 1)}
+              />
+            )}
+            <button type="button" className="btn-ghost mobile-logout" onClick={logout}>
+              Salir
+            </button>
+          </div>
         </header>
 
         <main className="main">
           <PerformanceAlertBanner />
-          {view !== 'home' && (
+          {showPersonalWorkStats && view !== 'home' && (
+            <div className="mobile-stats-strip" aria-label="Resumen de tus trabajos">
+              <EmployeeWorkStatsStrip
+                variant="mobile"
+                stats={personalWorkStats}
+                notificationCount={unreadNotificationCount}
+                details={personalStatDetails}
+                onOpenDetail={handleStatDetailOpen}
+              />
+            </div>
+          )}
+          {!showPersonalWorkStats && view !== 'home' && (
             <div className="mobile-stats-strip" aria-label="Resumen rápido">
               {canEditAll ? (
                 <>
@@ -400,55 +782,71 @@ export function Dashboard() {
               )}
             </div>
           )}
-          <header className="main-header">
+          <header
+            className={`main-header dashboard-page-header${view === 'home' ? ' main-header--home' : ''}`}
+          >
             <div>
               <h1>{title}</h1>
               <p className="subtitle">{sub}</p>
             </div>
-            {view === 'team' && (
-              <div className="header-actions">
-                <input
-                  type="search"
-                  className="search-input"
-                  placeholder="Buscar por nombre o puesto…"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
+            <div className="main-header-actions">
+              {showPersonalWorkStats && (
+                <NotificationBell
+                  notifications={employeeNotifications}
+                  onNavigate={handleNotificationNavigate}
+                  onMarkedSeen={() => setNotificationSeenTick((n) => n + 1)}
                 />
-              </div>
-            )}
-            {(view === 'board' || view === 'completed') && (
-              <div className="header-actions">
-                <input
-                  type="search"
-                  className="search-input"
-                  placeholder="Buscar proyecto, colaborador…"
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                />
-                {view === 'board' && canEditAll && (
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    onClick={() => {
-                      setProjectFocusCompletion(false);
-                      setSelectedProject(addProject());
-                    }}
-                  >
-                    + Proyecto
-                  </button>
-                )}
-              </div>
-            )}
+              )}
+              {view === 'team' && (
+                <div className="header-actions">
+                  <input
+                    type="search"
+                    className="search-input"
+                    placeholder="Buscar por nombre o puesto…"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  />
+                </div>
+              )}
+              {(view === 'board' || view === 'completed' || view === 'history') && (
+                <div className="header-actions">
+                  <input
+                    type="search"
+                    className="search-input"
+                    placeholder="Buscar proyecto, colaborador…"
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                  />
+                  {view === 'board' && canEditAll && (
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => {
+                        setProjectFocusCompletion(false);
+                        setSelectedProject(addProject());
+                      }}
+                    >
+                      + Proyecto
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </header>
 
+          <div className="dashboard-page" key={view}>
+          <Suspense fallback={<ViewFallback />}>
           {view === 'home' && canEditAll && (
             <ManagerHomeView
               projects={projects}
               completedProjects={completedProjects}
               onGoProjects={() => setView('board')}
               onGoAssignments={() => setView('assignments')}
-              onGoCompleted={() => setView('completed')}
-              onGoTeam={() => setView('team')}
+              onGoCompleted={() => {
+                goToCompletedProjects();
+                setView('board');
+              }}
+              onGoTeam={openTeam}
               onOpenProject={(p) => {
                 setProjectFocusCompletion(false);
                 setSelectedProject(p);
@@ -460,8 +858,11 @@ export function Dashboard() {
               onGoAssignments={() => setView('assignments')}
               onGoCalendar={() => setView('calendar')}
               onGoProjects={() => setView('board')}
-              onGoCompleted={() => setView('completed')}
-              onGoKpis={() => setView('kpis')}
+              onGoCompleted={() => {
+                goToCompletedProjects();
+                setView('board');
+              }}
+              onGoKpis={() => goToTeamTab('kpis')}
               onOpenTask={setSelected}
               onOpenProject={(p) => {
                 setProjectFocusCompletion(false);
@@ -476,16 +877,27 @@ export function Dashboard() {
           {view === 'team' && (
             <MarketingTeamView
               tasks={teamTasks}
+              kpiTasks={tasks}
               onSelect={setSelected}
               onAssign={canEditAll ? setAssignTarget : undefined}
               onSendKpi={canSendKpiObjectives ? openKpiModal : undefined}
+              onSendKpiObjective={canSendKpiObjectives ? openKpiModal : undefined}
+              onOpenProject={(p) => {
+                setProjectFocusCompletion(false);
+                setSelectedProject(p);
+              }}
+              showPersonalPulse={!canEditAll && !canSendKpiObjectives}
+              employeeId={user?.employeeId}
+              personalOnly={!canSeeFullTeam}
+              initialTab={teamTabHint}
             />
           )}
+          {view === 'chat' && <TeamChatView />}
           {view === 'board' && !canEditAll && myPendingKpiObjectives.length > 0 && (
             <button
               type="button"
               className="pending-assign-alert pending-kpi-alert"
-              onClick={() => setView('kpis')}
+              onClick={() => goToTeamTab('kpis')}
             >
               Tienes un objetivo KPI por aceptar — revisar →
             </button>
@@ -499,38 +911,26 @@ export function Dashboard() {
               Tienes {myPendingAssignments.length} indicación nueva — revisar →
             </button>
           )}
-          {view === 'board' && (
-            <ProjectsBoard
-              projects={visibleProjects}
+          {(view === 'board' || view === 'completed' || view === 'history') && (
+            <ProjectsHub
               filter={filter}
+              initialTab={
+                view === 'completed' ? 'completed' : view === 'history' ? 'history' : undefined
+              }
               onSelect={(p) => {
                 setProjectFocusCompletion(false);
                 setSelectedProject(p);
               }}
-              onGoCompleted={() => setView('completed')}
             />
           )}
-          {view === 'completed' && (
-            <CompletedProjectsView
-              projects={visibleCompletedProjects}
-              filter={filter}
-              onSelect={setSelectedProject}
-            />
-          )}
+          {view === 'attendance' && canSeeAttendance && <AttendanceView />}
           {view === 'assignments' && <AssignmentsView />}
-          {view === 'kpis' && (
-            <KpiMonthView
-              tasks={tasks}
-              onSendKpi={canSendKpiObjectives ? openKpiModal : undefined}
-              showPersonalPulse={!canEditAll && !canSendKpiObjectives}
-              employeeId={user?.employeeId}
-            />
-          )}
-          {view === 'history' && <MonthlyHistoryView />}
           {view === 'calendar' && <CalendarView />}
-          {view === 'reports' && <ReportsView />}
           {view === 'pulse' && <MarketingPulseView />}
-          {view === 'community' && <CommunityView />}
+          {view === 'community' && canSeeCommunity && <CommunityView />}
+          {view === 'library' && <ImageLibraryView />}
+          </Suspense>
+          </div>
 
           {selected && (
             <TaskDetailModal taskId={selected.id} onClose={() => setSelected(null)} />
@@ -556,15 +956,20 @@ export function Dashboard() {
               key={item.id}
               type="button"
               className={`tab-item ${view === item.id ? 'active' : ''}`}
-              onClick={() => setView(item.id)}
+              onClick={() => {
+                if (item.id === 'team') openTeam();
+                else setView(item.id);
+              }}
             >
               <span className="tab-icon-wrap">
-                <span className="tab-icon">{item.icon}</span>
+                <span className="tab-icon">
+                  <NavIcon id={item.icon} size={22} />
+                </span>
                 {item.id === 'assignments' && pendingAssignmentsCount > 0 && (
                   <span className="tab-badge">{pendingAssignmentsCount}</span>
                 )}
               </span>
-              <span className="tab-label">{item.label}</span>
+              <span className="tab-label">{navLabelFor(item)}</span>
             </button>
           ))}
         <button
@@ -574,7 +979,9 @@ export function Dashboard() {
           aria-expanded={showMobileMore}
         >
           <span className="tab-icon-wrap">
-            <span className="tab-icon">⋯</span>
+            <span className="tab-icon">
+              <NavIcon id="more" size={22} />
+            </span>
             {!isMoreViewActive && <PerformanceAlertBadge />}
           </span>
           <span className="tab-label">Más</span>
@@ -585,12 +992,15 @@ export function Dashboard() {
         <MobileMoreMenu
           items={mobileMoreItems.map((item) => ({
             id: item.id,
-            label: item.label,
-            icon: item.icon,
+            label: navLabelFor(item),
+            iconId: item.icon,
             badge: item.id === 'assignments' ? pendingAssignmentsCount : undefined,
           }))}
           activeId={view}
-          onSelect={(id) => setView(id as DashboardView)}
+          onSelect={(id) => {
+            if (id === 'team') openTeam();
+            else setView(id as DashboardView);
+          }}
           onClose={() => setShowMobileMore(false)}
         />
       )}

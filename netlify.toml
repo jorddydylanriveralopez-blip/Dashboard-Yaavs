@@ -1,0 +1,31 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  node_bundler = "esbuild"
+  # Los handlers /api/*.mjs no son funciones Netlify por sí mismos: se importan
+  # desde netlify/functions/api.mjs. Se incluyen para que esbuild los empaquete.
+  included_files = ["api/**", "server/**"]
+  # Solo @google-analytics/data (gRPC/protobuf) se deja externo; el resto se
+  # empaqueta con esbuild sin problemas.
+  external_node_modules = ["@google-analytics/data"]
+
+# Las funciones /api/* se enrutan de forma nativa con `export const config`
+# (path = "/api/*") dentro de netlify/functions/api.mjs, que tiene precedencia
+# sobre este comodín SPA.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    Service-Worker-Allowed = "/"
+
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json"

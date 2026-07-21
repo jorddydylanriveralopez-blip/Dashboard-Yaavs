@@ -4,6 +4,7 @@ import { useToast } from '../context/ToastContext';
 import { MAX_PROFILE_AVATAR_BYTES } from '../constants';
 import { readProfileImageFile } from '../utils/userProfiles';
 import { isValidUsername, normalizeUsername } from '../utils/teamRoster';
+import { pushPermission } from '../api/pushClient';
 import { UserAvatar } from './UserAvatar';
 import './ProfileModal.css';
 
@@ -12,9 +13,13 @@ interface Props {
 }
 
 export function ProfileModal({ onClose }: Props) {
-  const { user, updateProfile, syncOnline } = useApp();
+  const { user, updateProfile, syncOnline, enablePushNotifications } = useApp();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [pushState, setPushState] = useState<NotificationPermission | 'unsupported'>(() =>
+    pushPermission(),
+  );
+  const [pushBusy, setPushBusy] = useState(false);
 
   const [username, setUsername] = useState(user?.username ?? '');
   const [avatarPreview, setAvatarPreview] = useState<string | null>(user?.avatarUrl ?? null);
@@ -35,6 +40,23 @@ export function ProfileModal({ onClose }: Props) {
       ? `@${normalizeUsername(username)}`
       : '3–24 caracteres: letras, números, . _ -'
     : '';
+
+  const handleEnablePush = async () => {
+    if (pushBusy) return;
+    setPushBusy(true);
+    const result = await enablePushNotifications();
+    setPushState(pushPermission());
+    setPushBusy(false);
+    if (result.ok) {
+      toast.success('Notificaciones activadas en este dispositivo');
+    } else if (result.reason === 'denied') {
+      toast.error('Permiso bloqueado. Actívalo en los ajustes del navegador.');
+    } else if (result.reason === 'unsupported') {
+      toast.error('Este dispositivo no soporta notificaciones. En iPhone, instala la app primero.');
+    } else {
+      toast.error('No se pudieron activar las notificaciones.');
+    }
+  };
 
   const handlePickPhoto = () => fileRef.current?.click();
 
@@ -163,6 +185,40 @@ export function ProfileModal({ onClose }: Props) {
               </div>
               {usernameHint && <span className="profile-field-hint">{usernameHint}</span>}
             </label>
+          </section>
+
+          <section className="profile-section">
+            <h3>Notificaciones al celular</h3>
+            {pushState === 'granted' ? (
+              <p className="profile-push-status profile-push-status--on">
+                ● Activadas en este dispositivo. Recibirás avisos de indicaciones y mensajes.
+              </p>
+            ) : pushState === 'unsupported' ? (
+              <p className="profile-push-status">
+                Para recibir avisos en iPhone, primero agrega la app a la pantalla de inicio
+                (Compartir → «Agregar a inicio») y vuelve a abrirla.
+              </p>
+            ) : (
+              <>
+                <p className="profile-push-status">
+                  Activa los avisos para enterarte de nuevas indicaciones y mensajes del equipo,
+                  aunque tengas la app cerrada.
+                </p>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={handleEnablePush}
+                  disabled={pushBusy}
+                >
+                  {pushBusy ? 'Activando…' : 'Activar notificaciones'}
+                </button>
+                {pushState === 'denied' && (
+                  <span className="profile-field-hint">
+                    Están bloqueadas. Habilítalas en los ajustes del navegador para este sitio.
+                  </span>
+                )}
+              </>
+            )}
           </section>
 
           <section className="profile-section">

@@ -19,7 +19,7 @@ const STEPS_EMPLEADO: Step[] = [
   },
   {
     title: 'Tus proyectos',
-    body: 'En Proyectos está el detalle. Puedes ver tarjetas o tablero Kanban y arrastrar para cambiar estado.',
+    body: 'En Proyectos está el detalle. Puedes ver la lista de proyectos o el estatus (urgentes y terminados).',
     target: '[data-tour="nav-board"]',
     view: 'board',
   },
@@ -52,15 +52,15 @@ const STEPS_GERENTE: Step[] = [
   },
   {
     title: 'Equipo',
-    body: 'Gestiona personas, asigna indicaciones y da de baja miembros si hace falta.',
+    body: 'Gestiona personas, KPIs del mes, indicaciones y da de baja miembros si hace falta.',
     target: '[data-tour="nav-team"]',
     view: 'team',
   },
   {
-    title: 'Reportes y concluidos',
-    body: 'Concluidos ✓ tiene entregas con foto. Reportes muestra tendencias y exporta CSV.',
-    target: '[data-tour="nav-reports"]',
-    view: 'reports',
+    title: 'Panorama',
+    body: 'Aquí ves avance del equipo, tendencias, indicaciones y descargas el reporte completo.',
+    target: '[data-tour="nav-pulse"]',
+    view: 'pulse',
   },
 ];
 

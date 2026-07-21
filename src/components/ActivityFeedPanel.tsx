@@ -5,13 +5,19 @@ import './ActivityFeedPanel.css';
 
 const KIND_ICON: Record<ActivityKind, string> = {
   project_completed: '✓',
+  project_hours_exceeded: '⚠',
+  project_early_delivery: '🎉',
   assignment_sent: '✉',
   assignment_accepted: '↩',
+  assignment_rejected: '✕',
   kpi_objective_sent: '◎',
   kpi_objective_accepted: '✓',
   team_member_added: '+',
   team_member_removed: '−',
   project_status: '◆',
+  project_progress: '📝',
+  project_accepted: '✓',
+  project_declined: '✕',
 };
 
 interface Props {

@@ -4,6 +4,8 @@ import { useToast } from '../context/ToastContext';
 import {
   colorForPlatform,
   labelForPlatform,
+  LINKABLE_PLATFORMS,
+  normalizeSocialInput,
   SENTIMENT_OPTIONS,
   SOCIAL_PLATFORMS,
 } from '../data/socialPlatforms';
@@ -18,7 +20,9 @@ import {
 } from '../utils/socialMetrics';
 import { formatMonthLabel, getMonthKey } from '../utils/performanceHistory';
 import { PieChart } from './PieChart';
-import type { ContentSentiment, SocialPlatform } from '../types';
+import { GoogleAnalyticsPanel } from './GoogleAnalyticsPanel';
+import { MetaAdsPanel } from './MetaAdsPanel';
+import type { ContentSentiment, SocialAccountsStore, SocialPlatform } from '../types';
 import './CommunityView.css';
 
 const SHOWCASE_PLATFORMS: SocialPlatform[] = ['tiktok', 'meta', 'instagram', 'youtube'];
@@ -53,8 +57,10 @@ function ChartEmpty({ icon, title, hint }: { icon: string; title: string; hint: 
 }
 
 export function CommunityView() {
-  const { user, socialMetrics, addSocialEntry, deleteSocialEntry } = useApp();
+  const { user, socialMetrics, addSocialEntry, deleteSocialEntry, socialAccounts, setSocialAccount } =
+    useApp();
   const toast = useToast();
+  const canManageAccounts = user?.role === 'admin' || user?.role === 'lider';
 
   const currentMonth = getMonthKey();
   const [monthKey, setMonthKey] = useState(currentMonth);
@@ -211,6 +217,19 @@ export function CommunityView() {
         </article>
       </section>
 
+      <ConnectedAccountsCard
+        accounts={socialAccounts}
+        canManage={canManageAccounts}
+        onSave={(platform, link) => {
+          setSocialAccount(platform, link);
+          toast.success(link ? 'Red vinculada' : 'Red desvinculada');
+        }}
+      />
+
+      <MetaAdsPanel />
+
+      <GoogleAnalyticsPanel monthKey={monthKey} />
+
       <div className="community-layout">
         <div className="community-main">
           <div className="community-charts-row">
@@ -316,29 +335,39 @@ export function CommunityView() {
                 role="img"
                 aria-label="Tendencia diaria por red"
               >
-                {dailyTrend.map((day) => {
+                {dailyTrend.map((day, dayIdx) => {
                   const total = day.tiktok + day.meta + day.instagram + day.other;
+                  const barStyle = { ['--bar-i' as string]: dayIdx };
                   return (
                     <div key={day.dateKey} className="community-trend-col">
                       <div className="community-trend-bars">
                         {day.tiktok > 0 && (
                           <div
-                            className="community-trend-bar community-trend-bar--tiktok"
-                            style={{ height: `${(day.tiktok / maxTrend) * 100}%` }}
+                            className="community-trend-bar community-trend-bar--tiktok chart-bar-rise"
+                            style={{
+                              height: `${(day.tiktok / maxTrend) * 100}%`,
+                              ...barStyle,
+                            }}
                             title={`TikTok ${day.tiktok}%`}
                           />
                         )}
                         {day.meta > 0 && (
                           <div
-                            className="community-trend-bar community-trend-bar--meta"
-                            style={{ height: `${(day.meta / maxTrend) * 100}%` }}
+                            className="community-trend-bar community-trend-bar--meta chart-bar-rise"
+                            style={{
+                              height: `${(day.meta / maxTrend) * 100}%`,
+                              ...barStyle,
+                            }}
                             title={`Meta ${day.meta}%`}
                           />
                         )}
                         {day.instagram > 0 && (
                           <div
-                            className="community-trend-bar community-trend-bar--ig"
-                            style={{ height: `${(day.instagram / maxTrend) * 100}%` }}
+                            className="community-trend-bar community-trend-bar--ig chart-bar-rise"
+                            style={{
+                              height: `${(day.instagram / maxTrend) * 100}%`,
+                              ...barStyle,
+                            }}
                             title={`Instagram ${day.instagram}%`}
                           />
                         )}
@@ -554,5 +583,149 @@ export function CommunityView() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function ConnectedAccountsCard({
+  accounts,
+  canManage,
+  onSave,
+}: {
+  accounts: SocialAccountsStore;
+  canManage: boolean;
+  onSave: (platform: SocialPlatform, link: { handle: string; url: string } | null) => void;
+}) {
+  const [editing, setEditing] = useState<SocialPlatform | null>(null);
+  const [draft, setDraft] = useState('');
+
+  const startEdit = (platform: SocialPlatform) => {
+    setEditing(platform);
+    setDraft(accounts[platform]?.url ?? accounts[platform]?.handle ?? '');
+  };
+
+  const save = (platform: SocialPlatform) => {
+    const link = normalizeSocialInput(platform, draft);
+    onSave(platform, link);
+    setEditing(null);
+    setDraft('');
+  };
+
+  return (
+    <section className="community-panel community-accounts">
+      <div className="community-panel-head">
+        <h2>Redes conectadas</h2>
+        <p>
+          {canManage
+            ? 'Vincula las cuentas del equipo para abrirlas con un clic desde el dashboard.'
+            : 'Cuentas oficiales del equipo. Ábrelas con un clic.'}
+        </p>
+      </div>
+
+      <div className="community-accounts-grid">
+        {LINKABLE_PLATFORMS.map((meta) => {
+          const account = accounts[meta.value];
+          const isEditing = editing === meta.value;
+          const glyph: Record<string, string> = { instagram: '◎', tiktok: '♪', meta: 'f' };
+          return (
+            <article
+              key={meta.value}
+              className={`community-account community-account--${meta.value}`}
+              style={{ '--platform-color': meta.color } as CSSProperties}
+            >
+              <div className="community-account-top">
+                <span className={`community-glyph community-glyph--${meta.value}`}>
+                  {glyph[meta.value] ?? '◇'}
+                </span>
+                <div className="community-account-id">
+                  <strong>{meta.label}</strong>
+                  {account ? (
+                    <span className="community-account-handle">{account.handle}</span>
+                  ) : (
+                    <span className="community-account-empty">Sin vincular</span>
+                  )}
+                </div>
+              </div>
+
+              {isEditing ? (
+                <div className="community-account-edit">
+                  <input
+                    type="text"
+                    value={draft}
+                    autoFocus
+                    placeholder={meta.placeholder}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') save(meta.value);
+                      if (e.key === 'Escape') {
+                        setEditing(null);
+                        setDraft('');
+                      }
+                    }}
+                  />
+                  <div className="community-account-edit-actions">
+                    <button type="button" className="btn-primary btn-sm" onClick={() => save(meta.value)}>
+                      Guardar
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-ghost btn-sm"
+                      onClick={() => {
+                        setEditing(null);
+                        setDraft('');
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="community-account-actions">
+                  {account ? (
+                    <>
+                      <a
+                        className="btn-primary btn-sm"
+                        href={account.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Abrir
+                      </a>
+                      {canManage && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn-ghost btn-sm"
+                            onClick={() => startEdit(meta.value)}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-ghost btn-sm community-account-unlink"
+                            onClick={() => onSave(meta.value, null)}
+                          >
+                            Quitar
+                          </button>
+                        </>
+                      )}
+                    </>
+                  ) : canManage ? (
+                    <button
+                      type="button"
+                      className="btn-primary btn-sm"
+                      onClick={() => startEdit(meta.value)}
+                    >
+                      Vincular
+                    </button>
+                  ) : (
+                    <span className="community-account-muted">Aún no vinculada</span>
+                  )}
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }

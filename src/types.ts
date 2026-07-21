@@ -14,6 +14,8 @@ export interface User {
   name: string;
   role: UserRole;
   avatarColor: string;
+  /** Correo para recordatorios de agenda. */
+  email?: string;
   /** Foto de perfil (data URL). */
   avatarUrl?: string;
   employeeId?: string;
@@ -30,6 +32,52 @@ export interface FileAttachment {
   createdAt: string;
   /** Si true, el binario está en IndexedDB (store blobs), no en dataUrl. */
   blobStored?: boolean;
+  /** Referencia a imagen en la biblioteca compartida. */
+  libraryAssetId?: string;
+}
+
+/** Imagen almacenada en la biblioteca compartida del equipo. */
+export interface LibraryImage {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  url: string;
+  uploadedBy: string;
+  uploadedByName: string;
+  uploadedAt: string;
+  width?: number | null;
+  height?: number | null;
+}
+
+/** Respuesta enriquecida del CDN para programación. */
+export interface LibraryImageApiItem {
+  id: string;
+  name: string;
+  url: string;
+  downloadUrl: string | null;
+  apiUrl: string | null;
+  mimeType: string;
+  format: string;
+  extension: string;
+  size: number;
+  sizeLabel: string;
+  width: number | null;
+  height: number | null;
+  dimensions: string | null;
+  uploadedAt: string;
+  uploadedBy: string;
+  uploadedByName: string;
+}
+
+export interface MediaCatalogResponse {
+  name: string;
+  version: string;
+  publicPage: string | null;
+  listUrl: string | null;
+  count: number;
+  updatedAt: string;
+  items: LibraryImageApiItem[];
 }
 
 export interface EmployeeTask {
@@ -61,7 +109,16 @@ export interface EmployeeTask {
   kpiAssignedAt?: string;
 }
 
-export type BusinessUnit = 'prepago' | 'pospago' | 'silemi' | 'yaavs_shop';
+export type BusinessUnit =
+  | 'yaavs_general'
+  | 'prepago'
+  | 'prepago_centro'
+  | 'prepago_foraneo'
+  | 'pospago'
+  | 'silemi'
+  | 'yaavs_shop'
+  | 'arregla_mx'
+  | 'academia_yaavs';
 
 export type RequestingDepartment =
   | 'direccion_comercial'
@@ -71,7 +128,9 @@ export type RequestingDepartment =
   | 'rh'
   | 'almacen'
   | 'capacitacion'
-  | 'ti';
+  | 'ti'
+  | 'marketing'
+  | 'ventas';
 
 export type ProjectType =
   | 'campana_creativa'
@@ -87,14 +146,10 @@ export type ProjectType =
 export type ProjectPriority = 'baja' | 'media' | 'alta_urgente';
 
 export type InternalArea =
+  | 'diseno_grafico'
   | 'diseno_web'
-  | 'diseno_corporativo'
-  | 'diseno_editorial'
   | 'diseno_audiovisual'
-  | 'community_manager'
-  | 'produccion'
-  | 'mercadotecnia'
-  | 'diseno_grafico';
+  | 'redes_sociales';
 
 export type Collaborator =
   | 'andrea'
@@ -103,7 +158,7 @@ export type Collaborator =
   | 'andres'
   | 'jesus'
   | 'carlos'
-  | 'ana'
+  | 'yared'
   | 'todos';
 
 export type ProjectStatus =
@@ -130,20 +185,60 @@ export interface CreativeProject {
   commitmentDateLocked?: boolean;
   internalArea: InternalArea;
   collaborator: Collaborator;
+  /** Varios colaboradores asignados; incluye "todos" para todo el equipo. */
+  collaborators?: Collaborator[];
   /** Empleado al que se asignó el proyecto (para privacidad entre colaboradores). */
   assignedEmployeeId?: string;
+  /**
+   * Aceptación del colaborador asignado.
+   * pending = esperando respuesta; accepted/declined = ya respondió.
+   */
+  acceptanceStatus?: 'pending' | 'accepted' | 'declined';
+  acceptedAt?: string;
+  acceptedByName?: string;
+  declinedReason?: string;
   status: ProjectStatus;
   finishedDate?: string;
   comments: string;
   attachments?: FileAttachment[];
   /** Resumen ligero para la UI cuando los archivos viven en IndexedDB. */
   attachmentCount?: number;
-  /** El colaborador subió foto de entrega al marcar trabajo concluido. */
+  /** El colaborador subió evidencia de entrega al marcar trabajo concluido. */
   hasCompletionProof?: boolean;
   completedAt?: string;
   completedByName?: string;
+  /** Horas presupuestadas para el proyecto (p. ej. 24 h). */
+  estimatedHours?: number;
+  /** Minutos registrados trabajando en el proyecto. */
+  trackedMinutes?: number;
+  /** Historial de registros de tiempo (cronómetro o manual). */
+  timeLogs?: ProjectTimeLog[];
+  /** Bitácora de avances del colaborador (texto + evidencia). */
+  progressUpdates?: ProjectProgressUpdate[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** Avance registrado por el colaborador: qué hizo y su evidencia. */
+export interface ProjectProgressUpdate {
+  id: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  /** Compatibilidad con evidencias antiguas guardadas como imágenes. */
+  images?: { name: string; dataUrl: string }[];
+  /** Evidencias actuales: imágenes, videos, PDF, documentos u otros archivos. */
+  files?: FileAttachment[];
+  createdAt: string;
+}
+
+export interface ProjectTimeLog {
+  id: string;
+  minutes: number;
+  loggedAt: string;
+  loggedByName: string;
+  source: 'timer' | 'manual';
+  note?: string;
 }
 
 export interface BoardState {
@@ -164,6 +259,8 @@ export interface CalendarEvent {
   done: boolean;
   notes: string;
   remindedAt?: string;
+  /** Correo de recordatorio ya enviado. */
+  emailRemindedAt?: string;
 }
 
 export interface ActiveTimer {
@@ -193,6 +290,7 @@ export interface AssignmentBrief {
   commitmentDate: string;
   internalArea: InternalArea;
   collaborator: Collaborator;
+  collaborators?: Collaborator[];
   projectStatus?: ProjectStatus;
   projectComments?: string;
 }
@@ -237,7 +335,7 @@ export interface KpiObjectiveAssignment {
   rejectReason?: string;
 }
 
-/** Límite de trabajos activos por colaborador (proyectos + indicaciones pendientes). */
+/** Límite de proyectos activos por colaborador. */
 export interface WorkloadLimitsStore {
   /** Máximo por defecto si no hay límite individual. */
   defaultMax: number;
@@ -372,13 +470,19 @@ export interface SocialMetricsStore {
 
 export type ActivityKind =
   | 'project_completed'
+  | 'project_hours_exceeded'
+  | 'project_early_delivery'
   | 'assignment_sent'
   | 'assignment_accepted'
+  | 'assignment_rejected'
   | 'kpi_objective_sent'
   | 'kpi_objective_accepted'
   | 'team_member_added'
   | 'team_member_removed'
-  | 'project_status';
+  | 'project_status'
+  | 'project_progress'
+  | 'project_accepted'
+  | 'project_declined';
 
 export interface ActivityEvent {
   id: string;
@@ -386,6 +490,17 @@ export interface ActivityEvent {
   message: string;
   actorName: string;
   at: string;
+}
+
+export interface TeamChatMessage {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorRole: UserRole;
+  authorAvatarColor: string;
+  authorAvatarUrl?: string;
+  text: string;
+  createdAt: string;
 }
 
 export interface TeamRosterState {
@@ -401,12 +516,82 @@ export interface UserProfileCustomization {
 
 export type UserProfilesStore = Record<string, UserProfileCustomization>;
 
+export type AttendanceStatus = 'present' | 'absent' | 'sick' | 'late' | 'vacation';
+
+export interface AttendanceRecord {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  dateKey: string;
+  monthKey: string;
+  status: AttendanceStatus;
+  notes: string;
+  recordedById: string;
+  recordedByName: string;
+  updatedAt: string;
+}
+
+export interface AttendanceStore {
+  records: AttendanceRecord[];
+}
+
+/** Nota personal del gerente para un colaborador en un mes. */
+export interface ManagerEmployeeObservation {
+  id: string;
+  employeeId: string;
+  monthKey: string;
+  text: string;
+  updatedAt: string;
+  authorId: string;
+  authorName: string;
+}
+
+export interface ManagerObservationsStore {
+  items: ManagerEmployeeObservation[];
+}
+
+export interface SocialAccountLink {
+  handle: string;
+  url: string;
+  updatedByName?: string;
+  updatedAt?: string;
+}
+
+export type SocialAccountsStore = Partial<Record<SocialPlatform, SocialAccountLink>>;
+
+/** Trabajo extra que el colaborador registra aparte de los proyectos oficiales. */
+export interface ExtraProjectEntry {
+  id: string;
+  /** Colaborador principal (compatibilidad con registros antiguos). */
+  employeeId: string;
+  employeeName: string;
+  /** Todos los colaboradores que participaron. */
+  employeeIds?: string[];
+  employeeNames?: string[];
+  projectName: string;
+  /** Minutos invertidos; es opcional. */
+  minutes?: number;
+  /** Fecha de compromiso (YYYY-MM-DD). */
+  doneDate: string;
+  notes?: string;
+  /** Proyecto activo creado automáticamente al registrar este extra. */
+  linkedProjectId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AppSyncState {
   board: BoardState;
   assignments: TaskAssignment[];
+  chatMessages?: TeamChatMessage[];
   calendars: CalendarStore;
   passwordOverrides: Record<string, string>;
   performanceHistory?: PerformanceHistoryStore;
   teamRoster?: TeamRosterState;
+  socialAccounts?: SocialAccountsStore;
+  /** Proyectos eliminados: id → ISO deletedAt (tombstones anti-resurrección en sync). */
+  deletedProjectIds?: Record<string, string>;
+  /** Bitácora de proyectos extra por colaborador. */
+  extraProjects?: ExtraProjectEntry[];
   updatedAt: string;
 }

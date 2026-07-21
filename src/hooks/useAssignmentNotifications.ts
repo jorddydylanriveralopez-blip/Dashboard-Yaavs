@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { COMPANY_NAME, LAST_ASSIGNMENT_CHECK_KEY } from '../constants';
 import { assignmentBriefNotificationLine } from '../utils/assignmentBrief';
+import { showLocalNotification } from '../api/pushClient';
 import type { TaskAssignment } from '../types';
 
 export function useAssignmentNotifications(
@@ -22,16 +23,14 @@ export function useAssignmentNotifications(
       isNew ||
       (!lastCheck && pending.length > 0 && prevCount.current === 0)
     ) {
-      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        const first = pending[0];
-        const context = first.brief
-          ? ` · ${assignmentBriefNotificationLine(first.brief)}`
-          : '';
-        new Notification(`${COMPANY_NAME} — Nueva indicación`, {
-          body: `${first.assignedByName}: ${first.title}${context}`,
-          tag: first.id,
-        });
-      }
+      const first = pending[0];
+      const context = first.brief
+        ? ` · ${assignmentBriefNotificationLine(first.brief)}`
+        : '';
+      void showLocalNotification(`${COMPANY_NAME} — Nueva indicación`, {
+        body: `${first.assignedByName}: ${first.title}${context}`,
+        tag: first.id,
+      });
     }
 
     prevCount.current = pending.length;

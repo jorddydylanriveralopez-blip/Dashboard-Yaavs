@@ -1,0 +1,127 @@
+.panorama-monthly-trend {
+  margin-top: 0.5rem;
+}
+
+.panorama-trend-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e6eaf2;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.panorama-trend-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.panorama-trend-table th,
+.panorama-trend-table td {
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid #edf0f6;
+  vertical-align: top;
+  text-align: left;
+}
+
+.panorama-trend-table thead th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #5c6b88;
+  background: #f7f9fc;
+  white-space: nowrap;
+}
+
+.panorama-trend-table tbody tr:last-child td,
+.panorama-trend-table tbody tr:last-child th {
+  border-bottom: none;
+}
+
+.panorama-trend-table tbody tr.is-current {
+  background: #f8fbff;
+}
+
+.panorama-trend-table tbody tr.is-empty {
+  opacity: 0.72;
+}
+
+.panorama-trend-month {
+  font-weight: 700;
+  color: #1f2a44;
+  white-space: nowrap;
+}
+
+.panorama-trend-badge {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #e8f1ff;
+  color: #3b5ccc;
+}
+
+.panorama-trend-up {
+  color: #0d9f6e;
+  font-weight: 700;
+}
+
+.panorama-trend-down {
+  color: #d64545;
+  font-weight: 700;
+}
+
+.panorama-trend-muted {
+  color: #8b97ad;
+}
+
+.panorama-trend-pill {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.panorama-trend-pill--yes {
+  background: #e4f8ef;
+  color: #0d9f6e;
+}
+
+.panorama-trend-pill--no {
+  background: #fdecec;
+  color: #d64545;
+}
+
+.panorama-trend-pill--flat {
+  background: #f0f2f7;
+  color: #5c6b88;
+}
+
+.panorama-trend-list {
+  margin: 0;
+  padding-left: 1rem;
+  line-height: 1.45;
+}
+
+.panorama-trend-list li + li {
+  margin-top: 0.25rem;
+}
+
+.panorama-trend-list--good {
+  color: #1f5c45;
+}
+
+.panorama-trend-list--warn {
+  color: #8a4d12;
+}
+
+@media (max-width: 900px) {
+  .panorama-trend-table {
+    min-width: 760px;
+  }
+}

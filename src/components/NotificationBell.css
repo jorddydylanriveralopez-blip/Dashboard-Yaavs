@@ -1,0 +1,126 @@
+.notification-bell {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.notification-bell-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(0, 85, 255, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--yaavs-ink);
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.notification-bell-btn:hover,
+.notification-bell-btn.is-open {
+  background: #fff;
+  border-color: color-mix(in srgb, var(--yaavs-electric) 35%, transparent);
+  box-shadow: 0 4px 14px rgba(0, 55, 150, 0.1);
+}
+
+.notification-bell-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.625rem;
+  font-weight: 800;
+  line-height: 18px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(220, 38, 38, 0.35);
+}
+
+.notification-bell-panel {
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  border: 1px solid rgba(0, 85, 255, 0.14);
+  background: #fff;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+
+.notification-bell-panel--floating {
+  position: fixed;
+  z-index: 10050;
+  max-height: min(70vh, 480px);
+}
+
+.notification-bell-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid rgba(0, 85, 255, 0.08);
+}
+
+.notification-bell-panel-head strong {
+  display: block;
+  font-size: 0.9375rem;
+  color: var(--yaavs-ink);
+}
+
+.notification-bell-panel-head span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.notification-bell-mark {
+  font-size: 0.72rem;
+  white-space: nowrap;
+  padding: 6px 10px;
+}
+
+.notification-bell-panel-body {
+  overflow: auto;
+  padding: 10px;
+}
+
+.mobile-topbar .notification-bell-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+}
+
+.mobile-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.main-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 767px) {
+  .main-header-actions .notification-bell {
+    display: none;
+  }
+}
+
+@media (min-width: 768px) {
+  .mobile-topbar-actions .notification-bell {
+    display: none;
+  }
+}

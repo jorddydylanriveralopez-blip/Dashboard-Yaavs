@@ -25,3 +25,45 @@
   color: var(--text-secondary);
   font-weight: 600;
 }
+
+.team-hub-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.team-hub-tabs button {
+  flex: 1;
+  min-width: 120px;
+  padding: 10px 14px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.team-hub-tabs button.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(0, 85, 255, 0.25);
+}
+
+.team-hub-tabs button:hover:not(.active) {
+  background: var(--accent-soft);
+  color: var(--yaavs-ink);
+}
+
+.team-hub-panel {
+  min-width: 0;
+}

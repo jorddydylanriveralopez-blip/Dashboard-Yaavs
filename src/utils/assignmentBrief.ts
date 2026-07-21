@@ -1,13 +1,14 @@
 import {
   BUSINESS_UNITS,
-  COLLABORATORS,
-  INTERNAL_AREAS,
   labelFor,
+  labelForInternalArea,
+  labelForRequestedBy,
   PROJECT_PRIORITIES,
   PROJECT_STATUSES,
   PROJECT_TYPES,
   REQUESTING_DEPARTMENTS,
 } from '../data/projectOptions';
+import { labelForProjectCollaborators } from './projectCollaborators';
 import { MARKETING_DEPARTMENT } from '../data/seed';
 import { employeeIdForCollaboratorSlug } from './collaboratorMap';
 import { formatShortDate } from './formatDate';
@@ -57,6 +58,7 @@ export function briefFromProject(project: CreativeProject): AssignmentBrief {
     commitmentDate: project.commitmentDate,
     internalArea: project.internalArea,
     collaborator: project.collaborator,
+    collaborators: project.collaborators,
     projectStatus: project.status,
     projectComments: project.comments,
   };
@@ -69,13 +71,12 @@ export function formatAssignmentBriefText(brief: AssignmentBrief): string {
     `Proyecto: ${name}`,
     `Fecha de solicitud: ${formatShortDate(brief.requestDate)}`,
     `Unidad de negocio: ${labelFor(BUSINESS_UNITS, brief.businessUnit)}`,
-    `Solicitado por: ${brief.requestedBy.trim() || '—'}`,
+    `Solicitado por: ${labelForRequestedBy(brief.requestedBy)}`,
     `Área solicitante: ${labelFor(REQUESTING_DEPARTMENTS, brief.requestingDepartment)}`,
     `Tipo de proyecto: ${labelFor(PROJECT_TYPES, brief.projectType)}`,
     `Prioridad del proyecto: ${labelFor(PROJECT_PRIORITIES, brief.projectPriority)}`,
-    `Fecha de compromiso: ${formatShortDate(brief.commitmentDate)}`,
-    `Área interna: ${labelFor(INTERNAL_AREAS, brief.internalArea)}`,
-    `Colaborador en proyecto: ${labelFor(COLLABORATORS, brief.collaborator)}`,
+    `Área interna: ${labelForInternalArea(brief.internalArea)}`,
+    `Colaborador(es): ${labelForProjectCollaborators(brief)}`,
   ];
   if (brief.projectStatus) {
     lines.push(`Estado del proyecto: ${labelFor(PROJECT_STATUSES, brief.projectStatus)}`);

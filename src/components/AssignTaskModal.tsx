@@ -1,12 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { PRIORITY_LABELS } from '../constants';
 import { FileAttachmentsEditor } from './FileAttachments';
+import { EmployeeMultiSelect } from './EmployeeMultiSelect';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
 import type { AssignmentBrief, EmployeeTask, FileAttachment } from '../types';
 import './AssignTaskModal.css';
 
 export interface AssignFormData {
-  employeeId: string;
+  employeeId?: string;
+  employeeIds?: string[];
   title: string;
   objective: string;
   dueDate: string;
@@ -25,7 +27,7 @@ interface Props {
 }
 
 export function AssignTaskModal({ target, assignable, onClose, onSubmit }: Props) {
-  const [employeeId, setEmployeeId] = useState('');
+  const [employeeIds, setEmployeeIds] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
   const [dueDate, setDueDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -35,16 +37,17 @@ export function AssignTaskModal({ target, assignable, onClose, onSubmit }: Props
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
 
   useEffect(() => {
-    if (target) setEmployeeId(target.employeeId);
+    if (target) setEmployeeIds([target.employeeId]);
   }, [target]);
 
   if (!target && assignable.length === 0) return null;
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (!employeeId || !title.trim()) return;
+    const ids = target ? [target.employeeId] : employeeIds;
+    if (!ids.length || !title.trim()) return;
     onSubmit({
-      employeeId,
+      employeeIds: ids,
       title,
       objective,
       dueDate,
@@ -72,19 +75,12 @@ export function AssignTaskModal({ target, assignable, onClose, onSubmit }: Props
         <form className="assign-modal-form" onSubmit={handleSubmit}>
           {!target && (
             <label>
-              Colaborador
-              <select
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                required
-              >
-                <option value="">Selecciona…</option>
-                {assignable.map((t) => (
-                  <option key={t.employeeId} value={t.employeeId}>
-                    {t.employeeName} — {t.roleTitle}
-                  </option>
-                ))}
-              </select>
+              Colaborador(es)
+              <EmployeeMultiSelect
+                assignable={assignable}
+                values={employeeIds}
+                onChange={setEmployeeIds}
+              />
             </label>
           )}
           {target && (
@@ -135,7 +131,7 @@ export function AssignTaskModal({ target, assignable, onClose, onSubmit }: Props
           </div>
           <label>
             Archivos e imágenes
-            <FileAttachmentsEditor attachments={attachments} onChange={setAttachments} />
+            <FileAttachmentsEditor attachments={attachments} onChange={setAttachments} enableLibrary />
           </label>
           <label>
             Enlace externo (Figma, Drive…)

@@ -252,6 +252,7 @@ async function save(kind: Kind, id: string, attachments: FileAttachment[]): Prom
     memoryCache.set(key, attachments);
     throw new Error(
       `No se pudo guardar en el navegador: ${err instanceof Error ? err.message : 'espacio insuficiente'}. La vista previa sigue en esta sesión.`,
+      { cause: err },
     );
   }
 

@@ -346,6 +346,11 @@
   color: var(--accent);
 }
 
+.project-card-hours {
+  margin-bottom: 10px;
+  padding-top: 4px;
+}
+
 .project-card-files {
   display: inline-block;
   margin: 0 0 8px;

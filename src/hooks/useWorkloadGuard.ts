@@ -10,7 +10,8 @@ import type {
 } from '../types';
 
 export interface AssignmentCreateInput {
-  employeeId: string;
+  employeeId?: string;
+  employeeIds?: string[];
   title: string;
   objective: string;
   dueDate: string;
@@ -57,10 +58,56 @@ export function useWorkloadGuard() {
 
   const submitAssignment = useCallback(
     (input: AssignmentCreateInput, onSuccess: () => void) => {
-      const retry = (password: string) => createAssignment(input, { overridePassword: password });
-      return handleResult(createAssignment(input), retry, onSuccess);
+      const ids =
+        input.employeeIds?.length
+          ? input.employeeIds
+          : input.employeeId
+            ? [input.employeeId]
+            : [];
+      if (!ids.length) return false;
+
+      const sendOne = (employeeId: string, overridePassword?: string) =>
+        createAssignment(
+          {
+            employeeId,
+            title: input.title,
+            objective: input.objective,
+            dueDate: input.dueDate,
+            priority: input.priority,
+            notes: input.notes,
+            attachmentUrl: input.attachmentUrl,
+            attachments: input.attachments,
+            brief: input.brief,
+          },
+          overridePassword ? { overridePassword } : undefined,
+        );
+
+      const sendAll = (overridePassword?: string): WorkloadActionResult => {
+        for (const employeeId of ids) {
+          const result = sendOne(employeeId, overridePassword);
+          if (!result.ok) return result;
+        }
+        return { ok: true };
+      };
+
+      const retry = (password: string) => sendAll(password);
+      return handleResult(sendAll(), retry, onSuccess);
     },
     [createAssignment, handleResult],
+  );
+
+  const assignProjectCollaborators = useCallback(
+    (
+      projectId: string,
+      collaborators: CreativeProject['collaborators'],
+      onSuccess: () => void,
+    ) => {
+      const patch = { collaborators: collaborators ?? [] };
+      const retry = (password: string) =>
+        updateProject(projectId, patch, { overridePassword: password });
+      return handleResult(updateProject(projectId, patch), retry, onSuccess);
+    },
+    [updateProject, handleResult],
   );
 
   const confirmOverride = useCallback(
@@ -80,25 +127,11 @@ export function useWorkloadGuard() {
     [override, toast],
   );
 
-  const assignProjectCollaborator = useCallback(
-    (
-      projectId: string,
-      collaborator: CreativeProject['collaborator'],
-      onSuccess: () => void,
-    ) => {
-      const patch = { collaborator };
-      const retry = (password: string) =>
-        updateProject(projectId, patch, { overridePassword: password });
-      return handleResult(updateProject(projectId, patch), retry, onSuccess);
-    },
-    [updateProject, handleResult],
-  );
-
   return {
     override,
     cancelOverride: () => setOverride(null),
     confirmOverride,
     submitAssignment,
-    assignProjectCollaborator,
+    assignProjectCollaborators,
   };
 }

@@ -50,7 +50,7 @@ export function DailyPulseChart({ employeeName, color, series, compact }: Props)
         role="img"
         aria-label={`Ritmo diario de ${employeeName}`}
       >
-        {display.recent.map((point) => {
+        {display.recent.map((point, i) => {
           const height = Math.max(8, (point.kpiPercent / display.maxKpi) * 100);
           const tone = point.missing
             ? 'missing'
@@ -66,8 +66,12 @@ export function DailyPulseChart({ employeeName, color, series, compact }: Props)
               </span>
               <div className="daily-pulse-bar-wrap">
                 <div
-                  className={`daily-pulse-bar daily-pulse-bar--${tone}`}
-                  style={{ height: `${height}%`, background: tone === 'up' ? color : undefined }}
+                  className={`daily-pulse-bar daily-pulse-bar--${tone} chart-bar-rise`}
+                  style={{
+                    height: `${height}%`,
+                    background: tone === 'up' ? color : undefined,
+                    ['--bar-i' as string]: i,
+                  }}
                 />
               </div>
               <span className="daily-pulse-day">{point.dayLabel.split(' ')[0]}</span>

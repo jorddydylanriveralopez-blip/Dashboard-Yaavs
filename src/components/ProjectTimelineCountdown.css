@@ -1,0 +1,185 @@
+.project-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border));
+  background: linear-gradient(135deg, #eef4ff 0%, #f8fbff 100%);
+}
+
+.project-timeline--empty {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  background: var(--bg-muted);
+}
+
+.project-timeline--overdue {
+  border-color: color-mix(in srgb, #ef4444 35%, var(--border));
+  background: linear-gradient(135deg, #fff1f2 0%, #fff8f8 100%);
+}
+
+.project-timeline--urgent {
+  border-color: color-mix(in srgb, #f59e0b 35%, var(--border));
+  background: linear-gradient(135deg, #fffbeb 0%, #fffdf6 100%);
+}
+
+.project-timeline--soon {
+  border-color: color-mix(in srgb, #3b82f6 30%, var(--border));
+}
+
+.project-timeline--done {
+  border-color: color-mix(in srgb, #22c55e 35%, var(--border));
+  background: linear-gradient(135deg, #ecfdf5 0%, #f6fffb 100%);
+}
+
+.project-timeline-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-timeline-eyebrow {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.project-timeline-label {
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.project-timeline-clock {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: clamp(0.8125rem, 2.5vw, 0.9375rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.18);
+}
+
+.project-timeline--overdue .project-timeline-clock {
+  background: #b91c1c;
+}
+
+.project-timeline--urgent .project-timeline-clock {
+  background: #b45309;
+}
+
+.project-timeline--done .project-timeline-clock {
+  display: none;
+}
+
+.project-timeline-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  overflow: hidden;
+}
+
+.project-timeline-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--yaavs-electric, #00c2ff) 100%);
+  transition: width 0.8s ease;
+}
+
+.project-timeline--overdue .project-timeline-fill {
+  background: linear-gradient(90deg, #ef4444 0%, #f97316 100%);
+}
+
+.project-timeline--done .project-timeline-fill {
+  background: linear-gradient(90deg, #22c55e 0%, #10b981 100%);
+}
+
+.project-timeline-dates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.project-timeline-dates em {
+  font-style: normal;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-right: 4px;
+}
+
+.project-timeline-span {
+  font-weight: 600;
+}
+
+.project-timeline--compact {
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.project-timeline--compact .project-timeline-label {
+  font-size: 0.875rem;
+}
+
+.project-timeline--compact .project-timeline-clock {
+  padding: 6px 10px;
+  font-size: 0.75rem;
+}
+
+.project-timeline--compact .project-timeline-track {
+  height: 6px;
+}
+
+@media (max-width: 640px) {
+  .project-timeline-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-timeline-clock {
+    align-self: flex-start;
+  }
+}
+
+.live-deadline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #fff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+.live-deadline-chip--urgent,
+.live-deadline-chip--overdue {
+  background: #b4234a;
+}
+
+.live-deadline-chip--soon {
+  background: #b45309;
+}
+
+.live-deadline-chip--ok {
+  background: rgba(15, 23, 42, 0.88);
+}
+
+.live-deadline-chip--done {
+  background: #047857;
+}
+

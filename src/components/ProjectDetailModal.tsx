@@ -19,20 +19,41 @@ import {
 } from '../utils/assignmentBrief';
 import {
   BUSINESS_UNITS,
-  COLLABORATORS,
   INTERNAL_AREAS,
   labelFor,
+  labelForInternalArea,
+  normalizeInternalArea,
   PROJECT_PRIORITIES,
   PROJECT_STATUSES,
   PROJECT_STATUS_COLORS,
   PROJECT_TYPES,
+  REQUESTED_BY_OPTIONS,
   REQUESTING_DEPARTMENTS,
+  labelForRequestedBy,
+  normalizeRequestedBy,
 } from '../data/projectOptions';
-import { formatLongDate, formatShortDate } from '../utils/formatDate';
+import { goToCompletedProjects } from '../utils/projectsTab';
+import { formatShortDate } from '../utils/formatDate';
 import { calcProjectDurationDays, formatDuration } from '../utils/projectDuration';
+import { projectDueDate } from '../utils/projectTimeline';
+import {
+  estimatedHoursForProject,
+  formatHoursMinutes,
+  getHoursPaceInfo,
+  hoursPaceBarColor,
+  hoursProgressPercent,
+} from '../utils/projectHours';
+import { CollaboratorMultiSelect } from './CollaboratorMultiSelect';
+import { EmployeeMultiSelect } from './EmployeeMultiSelect';
+import { ProjectTimelineCountdown } from './ProjectTimelineCountdown';
+import {
+  getProjectCollaborators,
+  labelForProjectCollaborators,
+  normalizeProjectCollaborators,
+} from '../utils/projectCollaborators';
 import {
   canEmployeeCompleteProject,
-  canEmployeeSetCommitmentDate,
+  projectNeedsAcceptance,
   projectVisibleToUser,
 } from '../utils/collaboratorMap';
 import { FileAttachmentsEditor, FileAttachmentsList } from './FileAttachments';
@@ -45,9 +66,8 @@ import {
 } from '../utils/attachmentStore';
 import { persistProjectAttachments } from '../utils/persistAttachments';
 import {
+  ATTACHMENT_ACCEPT,
   cloneAttachments,
-  guessMimeType,
-  isImageAttachment,
   readFileAsAttachment,
 } from '../utils/fileAttachments';
 import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
@@ -66,6 +86,17 @@ function ReadOnly({ children }: { children: ReactNode }) {
   return <p className="project-readonly">{children}</p>;
 }
 
+function formatProgressDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('es-MX', {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Props) {
   const {
     user,
@@ -74,12 +105,16 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     updateProject,
     deleteProject,
     activeUsers,
+    acceptProject,
+    declineProject,
+    addProjectProgress,
+    deleteProjectProgress,
   } = useApp();
   const { confirm } = useConfirm();
   const toast = useToast();
-  const { override, cancelOverride, confirmOverride, submitAssignment, assignProjectCollaborator } =
+  const { override, cancelOverride, confirmOverride, submitAssignment, assignProjectCollaborators } =
     useWorkloadGuard();
-  const [assignToId, setAssignToId] = useState('');
+  const [assignToIds, setAssignToIds] = useState<string[]>([]);
   const [projectAttachments, setProjectAttachments] = useState<FileAttachment[]>([]);
   const [completionProof, setCompletionProof] = useState<FileAttachment | null>(null);
   const [proofBusy, setProofBusy] = useState(false);
@@ -87,6 +122,11 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   const attachmentsTouchedRef = useRef(false);
   const proofInputRef = useRef<HTMLInputElement>(null);
   const completionSectionRef = useRef<HTMLElement>(null);
+  const [progressText, setProgressText] = useState('');
+  const [progressFiles, setProgressFiles] = useState<FileAttachment[]>([]);
+  const [progressBusy, setProgressBusy] = useState(false);
+  const progressFileRef = useRef<HTMLInputElement>(null);
+  const [declineBusy, setDeclineBusy] = useState(false);
 
   const p = useMemo(
     () => (board.projects ?? []).find((x) => x.id === projectId),
@@ -99,7 +139,9 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   );
 
   useEffect(() => {
-    if (p && !canView) onClose();
+    if (!p || canView) return;
+    const t = window.setTimeout(() => onClose(), 800);
+    return () => window.clearTimeout(t);
   }, [p, canView, onClose]);
 
   const assignable = useMemo(
@@ -107,17 +149,22 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     [board.tasks, activeUsers],
   );
 
-  useEffect(() => {
-    if (!p) onClose();
-  }, [p, onClose]);
+  // No auto-cerrar si el proyecto "desaparece" un instante por sync.
 
-  const projectCollaborator = p?.collaborator;
+  const projectCollaborators = p ? getProjectCollaborators(p) : [];
 
   useEffect(() => {
-    if (projectCollaborator === undefined) return;
-    const defaultId = employeeIdForCollaborator(projectCollaborator, activeUsers);
-    setAssignToId(defaultId ?? '');
-  }, [projectId, projectCollaborator, activeUsers]);
+    if (!p) return;
+    const collabs = getProjectCollaborators(p);
+    if (collabs.includes('todos')) {
+      setAssignToIds(assignable.map((t) => t.employeeId));
+      return;
+    }
+    const ids = collabs
+      .map((slug) => employeeIdForCollaborator(slug, activeUsers))
+      .filter((id): id is string => Boolean(id));
+    setAssignToIds(ids);
+  }, [projectId, p, assignable, activeUsers]);
 
   useEffect(() => {
     attachmentsTouchedRef.current = false;
@@ -170,10 +217,31 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     return () => window.clearTimeout(t);
   }, [focusCompletion, canCompleteWorkFlag, projectId, p]);
 
-  if (!p) return null;
+  if (!p) {
+    return (
+      <div className="modal-backdrop" onClick={onClose} role="presentation">
+        <div
+          className="modal-panel project-detail-modal"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-modal
+          aria-label="Proyecto"
+        >
+          <header className="modal-header">
+            <h2>Cargando proyecto…</h2>
+            <button type="button" className="btn-icon" onClick={onClose} aria-label="Cerrar">
+              ×
+            </button>
+          </header>
+          <p className="project-readonly" style={{ padding: '16px 24px' }}>
+            Si tarda mucho, cierra y vuelve a abrirlo. Puede ser un desfase de sincronización.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const managerEditable = canEditAll;
-  const canSetCommitment = canEmployeeSetCommitmentDate(p, user, canEditAll, activeUsers);
   const canCompleteWork = canCompleteWorkFlag;
   const isFinished = p.status === 'terminado';
 
@@ -181,20 +249,15 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const mime = guessMimeType(file);
-    if (!isImageAttachment(mime)) {
-      toast.error('La prueba debe ser una imagen (captura o foto del trabajo terminado).');
-      return;
-    }
     setProofBusy(true);
     try {
       const att = await readFileAsAttachment(file);
       await saveProjectCompletionProof(projectId, att);
       setCompletionProof(att);
       updateProject(projectId, { hasCompletionProof: true });
-      toast.success('Prueba de entrega guardada');
+      toast.success('Evidencia de entrega guardada');
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo guardar la imagen');
+      toast.error(err instanceof Error ? err.message : 'No se pudo guardar el archivo');
     } finally {
       setProofBusy(false);
     }
@@ -203,7 +266,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   const handleRemoveProof = async () => {
     const ok = await confirm({
       title: 'Quitar prueba',
-      message: '¿Quitar la foto de entrega? No podrás marcar el trabajo concluido sin ella.',
+      message: '¿Quitar la evidencia de entrega? No podrás marcar el trabajo concluido sin ella.',
       confirmLabel: 'Quitar',
       danger: true,
     });
@@ -216,7 +279,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
 
   const handleCompleteWork = async () => {
     if (!completionProof) {
-      toast.error('Sube primero una imagen del trabajo terminado.');
+      toast.error('Sube primero una evidencia del trabajo terminado.');
       proofInputRef.current?.click();
       return;
     }
@@ -236,18 +299,100 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
         completedAt: new Date().toISOString(),
         completedByName: user?.name ?? user?.username,
       });
-      toast.success('Trabajo marcado como concluido');
+      toast.success('Trabajo marcado como concluido — ya está en Concluidos');
+      goToCompletedProjects();
       onClose();
     } finally {
       setCompleteBusy(false);
     }
   };
+  const handleProgressFiles = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = '';
+    if (!files.length) return;
+    if (progressFiles.length + files.length > 3) {
+      toast.error('Máximo 3 archivos por avance.');
+      return;
+    }
+    setProgressBusy(true);
+    try {
+      for (const file of files) {
+        const attachment = await readFileAsAttachment(file);
+        setProgressFiles((prev) => [...prev, attachment]);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo procesar el archivo');
+    } finally {
+      setProgressBusy(false);
+    }
+  };
+
+  const handleSubmitProgress = () => {
+    if (!progressText.trim() && progressFiles.length === 0) {
+      toast.info('Escribe qué hiciste o sube una evidencia.');
+      return;
+    }
+    const ok = addProjectProgress(projectId, {
+      text: progressText,
+      files: progressFiles.length ? progressFiles : undefined,
+    });
+    if (ok) {
+      setProgressText('');
+      setProgressFiles([]);
+      toast.success('Avance registrado. Orlando podrá verlo.');
+    } else {
+      toast.error('No se pudo registrar el avance.');
+    }
+  };
+
+  const handleDeleteProgress = async (updateId: string) => {
+    const ok = await confirm({
+      title: 'Eliminar avance',
+      message: '¿Eliminar este avance y su evidencia?',
+      confirmLabel: 'Eliminar',
+      danger: true,
+    });
+    if (ok) deleteProjectProgress(projectId, updateId);
+  };
+
+  const handleSendAssignment = () => {
+    if (!p) return;
+    if (assignToIds.length === 0) {
+      toast.info('Elige a quién enviar la indicación.');
+      return;
+    }
+    const recipients = assignable.filter((t) => assignToIds.includes(t.employeeId));
+    submitAssignment(
+      {
+        employeeIds: assignToIds,
+        title: p.projectName.trim() || 'Proyecto creativo',
+        objective: buildObjectiveFromProject(p),
+        dueDate: p.finishedDate || p.requestDate,
+        priority: assignmentPriorityFromProject(p.priority),
+        notes: '',
+        brief: briefFromProject(p),
+        attachments: cloneAttachments(projectAttachments),
+      },
+      () => {
+        const fileCount = projectAttachments.length;
+        const fileNote =
+          fileCount > 0 ? ` con ${fileCount} archivo${fileCount > 1 ? 's' : ''}` : '';
+        const names = recipients.map((r) => r.employeeName).join(', ');
+        toast.success(
+          recipients.length
+            ? `Indicación enviada a ${names}${fileNote}`
+            : `Indicación enviada${fileNote}`,
+        );
+        onClose();
+      },
+    );
+  };
+
   const duration = calcProjectDurationDays(p.requestDate, p.finishedDate, p.status);
-  const durationToCommitment = calcProjectDurationDays(
-    p.requestDate,
-    p.commitmentDate,
-    undefined,
-  );
+  const estHours = estimatedHoursForProject(p);
+  const trackedMin = p.trackedMinutes ?? 0;
+  const hoursPct = hoursProgressPercent(p);
+  const pace = getHoursPaceInfo(p);
 
   const field = (label: string, content: ReactNode, fullWidth = false) => (
     <section className={`project-field${fullWidth ? ' project-field--full' : ''}`}>
@@ -257,45 +402,31 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   );
 
   const displayName = p.projectName.trim() || 'Sin nombre';
+  const needsAcceptance = projectNeedsAcceptance(p, user, canEditAll, activeUsers);
 
-  const handleEmployeeCommitment = (date: string) => {
-    if (!date || p.commitmentDateLocked) return;
-    updateProject(p.id, {
-      commitmentDate: date,
-      commitmentDateLocked: true,
-    });
+  const handleAcceptProject = () => {
+    acceptProject(p.id);
+    toast.success('Proyecto aceptado. El gerente ya fue notificado.');
   };
 
-  const commitmentField = managerEditable ? (
-    <input
-      type="date"
-      value={p.commitmentDate}
-      onChange={(e) => updateProject(p.id, { commitmentDate: e.target.value })}
-    />
-  ) : canSetCommitment ? (
-    <>
-      <input
-        type="date"
-        value={p.commitmentDate}
-        onChange={(e) => handleEmployeeCommitment(e.target.value)}
-      />
-      <p className="field-hint">
-        Define tu fecha de entrega. <strong>Solo puedes guardarla una vez</strong>; después
-        quedará bloqueada.
-      </p>
-    </>
-  ) : (
-    <>
-      <ReadOnly>{formatShortDate(p.commitmentDate)}</ReadOnly>
-      {p.commitmentDateLocked ? (
-        <p className="field-hint">Fecha de compromiso fijada (ya no se puede cambiar).</p>
-      ) : (
-        <p className="field-hint field-hint-warn">
-          Solo el colaborador asignado puede definir la fecha de compromiso.
-        </p>
-      )}
-    </>
-  );
+  const handleDeclineProject = async () => {
+    if (declineBusy) return;
+    const ok = await confirm({
+      title: 'Rechazar proyecto',
+      message: `¿Rechazar «${displayName}»? El gerente será notificado.`,
+      confirmLabel: 'Rechazar',
+      danger: true,
+    });
+    if (!ok) return;
+    setDeclineBusy(true);
+    try {
+      declineProject(p.id);
+      toast.info('Proyecto rechazado. El gerente ya fue notificado.');
+      onClose();
+    } finally {
+      setDeclineBusy(false);
+    }
+  };
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
@@ -321,29 +452,80 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
           </button>
         </header>
 
-        <div className="project-live-summary" aria-live="polite">
+        <div className="project-detail-scroll">
+        <ProjectTimelineCountdown project={p} className="project-detail-timeline" />
+
+        {needsAcceptance && (
+          <section className="project-accept-bar" aria-label="Aceptar proyecto">
+            <h3 className="project-attachments-heading">¿Aceptas este proyecto?</h3>
+            <p className="project-attachments-sub">
+              Revísalo y confirma. Orlando recibirá un aviso en cuanto respondas.
+            </p>
+            <div className="project-accept-actions">
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={declineBusy}
+                onClick={() => void handleDeclineProject()}
+              >
+                Rechazar
+              </button>
+              <button type="button" className="btn-primary" onClick={handleAcceptProject}>
+                ✓ Aceptar proyecto
+              </button>
+            </div>
+          </section>
+        )}
+
+        {managerEditable && p.acceptanceStatus && p.acceptanceStatus !== 'pending' && (
+          <p
+            className={`project-accept-status project-accept-status--${p.acceptanceStatus}`}
+            style={{ padding: '8px 24px', margin: 0 }}
+          >
+            {p.acceptanceStatus === 'accepted'
+              ? `✓ Aceptado por ${p.acceptedByName ?? 'colaborador'}${p.acceptedAt ? ` · ${formatProgressDate(p.acceptedAt)}` : ''}`
+              : `✕ Rechazado por ${p.acceptedByName ?? 'colaborador'}${p.declinedReason ? `: ${p.declinedReason}` : ''}`}
+          </p>
+        )}
+
+        {managerEditable && p.acceptanceStatus === 'pending' && (
+          <p className="project-accept-status project-accept-status--pending" style={{ padding: '8px 24px', margin: 0 }}>
+            ⏳ Esperando que el colaborador acepte este proyecto
+          </p>
+        )}
+
+        {!managerEditable && (
+        <div className="project-live-summary project-live-summary--compact" aria-live="polite">
           <div className="project-live-item">
-            <span className="project-live-label">Fecha de compromiso</span>
-            <strong>{formatLongDate(p.commitmentDate)}</strong>
-            <span className="project-live-sub">
-              {formatShortDate(p.commitmentDate)}
-              {durationToCommitment !== null && (
-                <> · {formatDuration(durationToCommitment)} desde solicitud</>
-              )}
-            </span>
+            <span className="project-live-label">Solicitud</span>
+            <strong>{formatShortDate(p.requestDate)}</strong>
           </div>
           <div className="project-live-item">
-            <span className="project-live-label">Fecha de finalizado</span>
-            <strong>{p.finishedDate ? formatLongDate(p.finishedDate) : 'Sin definir'}</strong>
-            {p.finishedDate && (
-              <span className="project-live-sub">{formatShortDate(p.finishedDate)}</span>
-            )}
+            <span className="project-live-label">Entrega</span>
+            <strong>{projectDueDate(p) ? formatShortDate(projectDueDate(p)!) : 'Pendiente'}</strong>
           </div>
           <div className="project-live-item">
-            <span className="project-live-label">Duración del proyecto</span>
+            <span className="project-live-label">Duración</span>
             <strong className="duration-big">{formatDuration(duration)}</strong>
           </div>
+          <div className={`project-live-item project-live-item--pace project-live-item--${pace.level}`}>
+            <span className="project-live-label">Horas</span>
+            <strong>
+              {formatHoursMinutes(trackedMin)} / {estHours} h
+            </strong>
+            <div className="project-hours-bar">
+              <div
+                className="project-hours-fill"
+                style={{
+                  width: `${Math.min(100, hoursPct)}%`,
+                  background: hoursPaceBarColor(pace.level),
+                }}
+              />
+            </div>
+            <span className={`project-pace-pill project-pace-pill--${pace.level}`}>{pace.label}</span>
+          </div>
         </div>
+        )}
 
         {!managerEditable && (
           <p className="field-hint" style={{ padding: '0 24px 8px', margin: 0 }}>
@@ -385,6 +567,27 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
               ),
             )}
             {field(
+              'Fecha de entrega',
+              managerEditable ? (
+                <input
+                  type="date"
+                  value={p.finishedDate ?? projectDueDate(p) ?? ''}
+                  min={p.requestDate}
+                  onChange={(e) => {
+                    const due = e.target.value || undefined;
+                    updateProject(p.id, {
+                      finishedDate: due,
+                      commitmentDate: due ?? p.commitmentDate,
+                    });
+                  }}
+                />
+              ) : (
+                <ReadOnly>
+                  {projectDueDate(p) ? formatShortDate(projectDueDate(p)!) : '—'}
+                </ReadOnly>
+              ),
+            )}
+            {field(
               'Unidad de negocio',
               managerEditable ? (
                 <select
@@ -408,14 +611,19 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
             {field(
               'Solicitado por',
               managerEditable ? (
-                <SpellCheckInput
-                  value={p.requestedBy}
-                  autoFix={false}
-                  extraWords={[p.projectName, p.requestedBy]}
+                <select
+                  value={normalizeRequestedBy(p.requestedBy)}
                   onChange={(e) => updateProject(p.id, { requestedBy: e.target.value })}
-                />
+                >
+                  <option value="">Seleccionar…</option>
+                  {REQUESTED_BY_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               ) : (
-                <ReadOnly>{p.requestedBy || '—'}</ReadOnly>
+                <ReadOnly>{labelForRequestedBy(p.requestedBy)}</ReadOnly>
               ),
             )}
             {field(
@@ -490,12 +698,11 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 </div>
               ),
             )}
-            {field('Fecha de compromiso', commitmentField)}
             {field(
               'Área interna',
               managerEditable ? (
                 <select
-                  value={p.internalArea}
+                  value={normalizeInternalArea(p.internalArea)}
                   onChange={(e) =>
                     updateProject(p.id, {
                       internalArea: e.target.value as CreativeProject['internalArea'],
@@ -509,30 +716,29 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                   ))}
                 </select>
               ) : (
-                <ReadOnly>{labelFor(INTERNAL_AREAS, p.internalArea)}</ReadOnly>
+                <ReadOnly>{labelForInternalArea(p.internalArea)}</ReadOnly>
               ),
             )}
             {field(
-              'Colaborador',
+              'Colaborador(es)',
               managerEditable ? (
-                <select
-                  value={p.collaborator}
-                  onChange={(e) => {
-                    const next = e.target.value as CreativeProject['collaborator'];
-                    if (next === p.collaborator) return;
-                    assignProjectCollaborator(p.id, next, () => {
-                      toast.success('Colaborador del proyecto actualizado');
+                <CollaboratorMultiSelect
+                  values={projectCollaborators}
+                  onChange={(next) => {
+                    const normalized = normalizeProjectCollaborators(next);
+                    if (
+                      normalized.length === getProjectCollaborators(p).length &&
+                      normalized.every((slug) => getProjectCollaborators(p).includes(slug))
+                    ) {
+                      return;
+                    }
+                    assignProjectCollaborators(p.id, normalized, () => {
+                      toast.success('Colaboradores del proyecto actualizados');
                     });
                   }}
-                >
-                  {COLLABORATORS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
+                />
               ) : (
-                <ReadOnly>{labelFor(COLLABORATORS, p.collaborator)}</ReadOnly>
+                <ReadOnly>{labelForProjectCollaborators(p)}</ReadOnly>
               ),
             )}
             {field(
@@ -547,7 +753,10 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                         status,
                         finishedDate:
                           p.finishedDate ?? new Date().toISOString().slice(0, 10),
+                        completedAt: new Date().toISOString(),
+                        completedByName: user?.name ?? user?.username,
                       });
+                      goToCompletedProjects();
                       onClose();
                       return;
                     }
@@ -564,22 +773,6 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 <ReadOnly>{labelFor(PROJECT_STATUSES, p.status)}</ReadOnly>
               ),
             )}
-            {field(
-              'Fecha de finalizado',
-              managerEditable ? (
-                <input
-                  type="date"
-                  value={p.finishedDate ?? ''}
-                  onChange={(e) =>
-                    updateProject(p.id, {
-                      finishedDate: e.target.value || undefined,
-                    })
-                  }
-                />
-              ) : (
-                <ReadOnly>{p.finishedDate ? formatShortDate(p.finishedDate) : '—'}</ReadOnly>
-              ),
-            )}
             {field('Duración del proyecto', <ReadOnly>{formatDuration(duration)}</ReadOnly>)}
           </div>
 
@@ -587,9 +780,10 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
             'Comentarios',
             managerEditable ? (
               <SpellCheckTextarea
-                rows={5}
+                rows={3}
                 value={p.comments}
                 placeholder="Notas, cambios, bloqueos…"
+                autoFix={false}
                 extraWords={[p.projectName, p.requestedBy]}
                 onChange={(e) => updateProject(p.id, { comments: e.target.value })}
               />
@@ -606,20 +800,120 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
               <span className="project-attachments-badge">{projectAttachments.length}</span>
             )}
           </h3>
-          <p className="project-attachments-sub">
-            El equipo verá estos archivos en el proyecto y al enviar una indicación.
-          </p>
           {managerEditable ? (
-            <FileAttachmentsEditor
-              attachments={projectAttachments}
-              onChange={handleProjectAttachmentsChange}
-              onError={(msg) => toast.error(msg)}
-              onSuccess={(msg) => toast.success(msg)}
-            />
+            <>
+              <FileAttachmentsEditor
+                attachments={projectAttachments}
+                onChange={handleProjectAttachmentsChange}
+                onError={(msg) => toast.error(msg)}
+                onSuccess={(msg) => toast.success(msg)}
+                enableLibrary
+              />
+            </>
           ) : projectAttachments.length > 0 ? (
             <FileAttachmentsList attachments={projectAttachments} />
           ) : (
             <p className="project-readonly">Sin archivos adjuntos</p>
+          )}
+        </section>
+
+        <section className="project-progress-section" aria-label="Avances y evidencia">
+          <h3 className="project-attachments-heading">Avances y evidencia</h3>
+          <p className="project-attachments-sub">
+            {canEditAll
+              ? 'Bitácora del equipo: qué han hecho y sus evidencias.'
+              : 'Cuenta qué hiciste y sube tu evidencia. Orlando lo verá al momento.'}
+          </p>
+
+          {!isFinished && (
+            <div className="project-progress-form">
+              <SpellCheckTextarea
+                value={progressText}
+                onChange={(e) => setProgressText(e.target.value)}
+                placeholder="¿Qué avanzaste hoy? Ej. Terminé la propuesta de diseño y quedó lista para revisión…"
+                rows={3}
+                maxLength={1200}
+              />
+              {progressFiles.length > 0 && (
+                <FileAttachmentsList
+                  attachments={progressFiles}
+                  compact
+                  onRemove={(id) =>
+                    setProgressFiles((prev) => prev.filter((file) => file.id !== id))
+                  }
+                />
+              )}
+              <input
+                ref={progressFileRef}
+                type="file"
+                accept={ATTACHMENT_ACCEPT}
+                multiple
+                className="project-proof-input"
+                onChange={(e) => void handleProgressFiles(e)}
+              />
+              <div className="project-progress-actions">
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  disabled={progressBusy || progressFiles.length >= 3}
+                  onClick={() => progressFileRef.current?.click()}
+                >
+                  {progressBusy ? 'Procesando…' : '📎 Subir evidencia'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={progressBusy}
+                  onClick={handleSubmitProgress}
+                >
+                  Registrar avance
+                </button>
+              </div>
+            </div>
+          )}
+
+          {(p.progressUpdates?.length ?? 0) > 0 ? (
+            <ul className="project-progress-list">
+              {[...(p.progressUpdates ?? [])].reverse().map((up) => (
+                <li key={up.id} className="project-progress-item">
+                  <div className="project-progress-item-head">
+                    <strong>{up.authorName}</strong>
+                    <span>{formatProgressDate(up.createdAt)}</span>
+                    {(canEditAll || up.authorId === user?.id) && (
+                      <button
+                        type="button"
+                        className="project-progress-delete"
+                        aria-label="Eliminar avance"
+                        onClick={() => void handleDeleteProgress(up.id)}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  {up.text && <p className="project-progress-text">{up.text}</p>}
+                  {(up.images?.length ?? 0) > 0 && (
+                    <div className="project-progress-thumbs">
+                      {up.images!.map((img, i) => (
+                        <a
+                          key={`${up.id}-img-${i}`}
+                          href={img.dataUrl}
+                          download={img.name || `evidencia-${i + 1}.jpg`}
+                          className="project-progress-thumb project-progress-thumb--view"
+                          title={`${img.name} · clic para descargar`}
+                        >
+                          <img src={img.dataUrl} alt={img.name} />
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {(up.files?.length ?? 0) > 0 && (
+                    <FileAttachmentsList attachments={up.files!} compact />
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="project-readonly">Aún no hay avances registrados.</p>
           )}
         </section>
 
@@ -631,32 +925,29 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
           >
             <h3 className="project-attachments-heading">Entrega del trabajo</h3>
             <p className="project-attachments-sub">
-              Sube una <strong>imagen del trabajo terminado</strong> (captura o foto). Sin prueba no
-              se puede marcar como concluido.
+              Sube una <strong>evidencia del trabajo terminado</strong>: imagen, video, PDF,
+              documento o cualquier otro archivo. Sin evidencia no se puede marcar como concluido.
             </p>
             <input
               ref={proofInputRef}
               type="file"
-              accept="image/*"
+              accept={ATTACHMENT_ACCEPT}
               className="project-proof-input"
               disabled={proofBusy}
               onChange={handleProofFile}
             />
             {completionProof ? (
-              <figure className="project-proof-preview">
-                <img src={completionProof.dataUrl} alt="Prueba de trabajo terminado" />
-                <figcaption>
-                  <span>{completionProof.name}</span>
-                  <button
-                    type="button"
-                    className="btn-ghost project-proof-remove"
-                    disabled={proofBusy}
-                    onClick={() => void handleRemoveProof()}
-                  >
-                    Cambiar imagen
-                  </button>
-                </figcaption>
-              </figure>
+              <div className="project-proof-preview">
+                <FileAttachmentsList attachments={[completionProof]} compact />
+                <button
+                  type="button"
+                  className="btn-ghost project-proof-remove"
+                  disabled={proofBusy}
+                  onClick={() => void handleRemoveProof()}
+                >
+                  Cambiar evidencia
+                </button>
+              </div>
             ) : (
               <button
                 type="button"
@@ -664,7 +955,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 disabled={proofBusy}
                 onClick={() => proofInputRef.current?.click()}
               >
-                {proofBusy ? 'Guardando imagen…' : '📷 Subir imagen del trabajo terminado'}
+                {proofBusy ? 'Guardando archivo…' : '📎 Subir evidencia del trabajo terminado'}
               </button>
             )}
             <button
@@ -688,96 +979,64 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
               </p>
             )}
             {completionProof ? (
-              <figure className="project-proof-preview">
-                <img src={completionProof.dataUrl} alt="Prueba de entrega" />
-              </figure>
+              <div className="project-proof-preview">
+                <FileAttachmentsList attachments={[completionProof]} compact />
+              </div>
             ) : (
-              <p className="project-readonly">Prueba registrada (recarga si no se ve la imagen)</p>
+              <p className="project-readonly">
+                Evidencia registrada (recarga si no aparece el archivo)
+              </p>
             )}
           </section>
         )}
 
+        {managerEditable && (
+          <section className="project-assign-bar" aria-label="Enviar indicación">
+            <h3 className="project-attachments-heading">Enviar indicación a</h3>
+            <EmployeeMultiSelect
+              assignable={assignable}
+              values={assignToIds}
+              onChange={setAssignToIds}
+            />
+          </section>
+        )}
+        </div>
+
         <footer className="modal-footer project-detail-footer">
-          {managerEditable && (
-            <div className="project-assign-send">
-              <label className="project-assign-label">
-                Enviar indicación a
-                <select
-                  value={assignToId}
-                  onChange={(e) => setAssignToId(e.target.value)}
-                >
-                  <option value="">Selecciona colaborador…</option>
-                  {assignable.map((t) => (
-                    <option key={t.employeeId} value={t.employeeId}>
-                      {t.employeeName}
-                    </option>
-                  ))}
-                </select>
-              </label>
+          {managerEditable ? (
+            <>
               <button
                 type="button"
-                className="btn-ghost"
-                disabled={!assignToId}
-                onClick={() => {
-                  if (!assignToId) {
-                    toast.info('Elige a quién enviar la indicación (Jorddy, Roberto, etc.).');
-                    return;
+                className="btn-danger project-detail-footer-delete"
+                onClick={async () => {
+                  const ok = await confirm({
+                    title: 'Eliminar proyecto',
+                    message: `¿Eliminar «${p.projectName}» por completo?`,
+                    confirmLabel: 'Eliminar',
+                    danger: true,
+                  });
+                  if (ok) {
+                    deleteProject(p.id);
+                    onClose();
                   }
-                  const recipient = assignable.find((t) => t.employeeId === assignToId);
-                  submitAssignment(
-                    {
-                      employeeId: assignToId,
-                      title: p.projectName.trim() || 'Proyecto creativo',
-                      objective: buildObjectiveFromProject(p),
-                      dueDate: p.commitmentDate,
-                      priority: assignmentPriorityFromProject(p.priority),
-                      notes: '',
-                      brief: briefFromProject(p),
-                      attachments: cloneAttachments(projectAttachments),
-                    },
-                    () => {
-                      const fileCount = projectAttachments.length;
-                      const fileNote =
-                        fileCount > 0
-                          ? ` con ${fileCount} archivo${fileCount > 1 ? 's' : ''} adjunto${fileCount > 1 ? 's' : ''}`
-                          : '';
-                      toast.success(
-                        recipient
-                          ? `Indicación enviada a ${recipient.employeeName}${fileNote}`
-                          : `Indicación enviada${fileNote}`,
-                      );
-                      onClose();
-                    },
-                  );
                 }}
+              >
+                Eliminar proyecto
+              </button>
+              <button
+                type="button"
+                className="btn-primary project-detail-footer-send"
+                disabled={assignToIds.length === 0}
+                onClick={handleSendAssignment}
               >
                 Enviar indicación
               </button>
-            </div>
-          )}
-          {managerEditable && (
-            <button
-              type="button"
-              className="btn-danger"
-              onClick={async () => {
-                const ok = await confirm({
-                  title: 'Eliminar proyecto',
-                  message: `¿Eliminar «${p.projectName}» por completo?`,
-                  confirmLabel: 'Eliminar',
-                  danger: true,
-                });
-                if (ok) {
-                  deleteProject(p.id);
-                  onClose();
-                }
-              }}
-            >
-              Eliminar proyecto
+            </>
+          ) : (
+            <button type="button" className="btn-ghost" onClick={onClose}>
+              Cerrar
             </button>
           )}
-          <button type="button" className="btn-primary" onClick={onClose}>
-            Listo
-          </button>
         </footer>
       </div>
       {override && (

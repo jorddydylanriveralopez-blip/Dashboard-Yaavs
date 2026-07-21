@@ -1,14 +1,15 @@
 import { Fragment } from 'react';
 import {
   BUSINESS_UNITS,
-  COLLABORATORS,
-  INTERNAL_AREAS,
   labelFor,
+  labelForInternalArea,
+  labelForRequestedBy,
   PROJECT_PRIORITIES,
   PROJECT_STATUSES,
   PROJECT_TYPES,
   REQUESTING_DEPARTMENTS,
 } from '../data/projectOptions';
+import { labelForProjectCollaborators } from '../utils/projectCollaborators';
 import { formatShortDate } from '../utils/formatDate';
 import type { AssignmentBrief } from '../types';
 import './AssignmentBriefDetails.css';
@@ -23,7 +24,7 @@ export function AssignmentBriefDetails({ brief, compact }: Props) {
     { label: 'Nombre del proyecto', value: brief.projectName.trim() || '—' },
     { label: 'Fecha de solicitud', value: formatShortDate(brief.requestDate) },
     { label: 'Unidad de negocio', value: labelFor(BUSINESS_UNITS, brief.businessUnit) },
-    { label: 'Solicitado por', value: brief.requestedBy.trim() || '—' },
+    { label: 'Solicitado por', value: labelForRequestedBy(brief.requestedBy) },
     {
       label: 'Área solicitante',
       value: labelFor(REQUESTING_DEPARTMENTS, brief.requestingDepartment),
@@ -33,11 +34,10 @@ export function AssignmentBriefDetails({ brief, compact }: Props) {
       label: 'Prioridad del proyecto',
       value: labelFor(PROJECT_PRIORITIES, brief.projectPriority),
     },
-    { label: 'Fecha de compromiso', value: formatShortDate(brief.commitmentDate) },
-    { label: 'Área interna', value: labelFor(INTERNAL_AREAS, brief.internalArea) },
+    { label: 'Área interna', value: labelForInternalArea(brief.internalArea) },
     {
-      label: 'Colaborador en proyecto',
-      value: labelFor(COLLABORATORS, brief.collaborator),
+      label: 'Colaborador(es)',
+      value: labelForProjectCollaborators(brief),
     },
   ];
 

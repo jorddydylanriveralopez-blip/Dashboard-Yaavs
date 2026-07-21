@@ -1,5 +1,8 @@
 import type { BoardState, EmployeeTask } from '../types';
 import { DEFAULT_PROJECTS } from './projectSeed';
+import { TEAM_MEMBER_NAMES } from './teamDisplayNames';
+
+const N = TEAM_MEMBER_NAMES;
 
 export const MARKETING_DEPARTMENT = 'Marketing';
 
@@ -40,21 +43,21 @@ export const EMPTY_BOARD: BoardState = {
   companyName: 'Yaavs',
   projects: [],
   tasks: [
-    emptyTeamTask('t-orlando', 'emp-orlando', 'Orlando', 'Gerente de Marketing', '#5034ff'),
-    emptyTeamTask('t-juancarlos', 'emp-juancarlos', 'Juan Carlos', 'Mercadotecnia', '#fdab3d'),
-    emptyTeamTask('t-ana', 'emp-ana', 'Ana García', 'Contenido digital', '#579bfc'),
-    emptyTeamTask('t-jorddy', 'emp-jorddy', 'Jorddy Dylan', 'Diseñador UX/UI', '#ff158a'),
-    emptyTeamTask('t-jesus', 'emp-jesus', 'Jesus', 'Diseñador Multimedia', '#784bd1'),
-    emptyTeamTask('t-roberto', 'emp-roberto', 'Roberto', 'Diseñador Gráfico', '#0086c0'),
-    emptyTeamTask('t-andrea', 'emp-andrea', 'Andrea', 'Diseñadora Gráfica', '#9cd326'),
-    emptyTeamTask('t-andres', 'emp-andres', 'Andres', 'Diseñador Gráfico', '#cab641'),
+    emptyTeamTask('t-orlando', 'emp-orlando', N['emp-orlando']!, 'Gerente de Marketing', '#5034ff'),
+    emptyTeamTask('t-juancarlos', 'emp-juancarlos', N['emp-juancarlos']!, 'Coordinador de Marketing', '#fdab3d'),
+    emptyTeamTask('t-yared', 'emp-yared', N['emp-yared']!, 'Community Manager', '#14b8a6'),
+    emptyTeamTask('t-jorddy', 'emp-jorddy', N['emp-jorddy']!, 'Diseñador UX/UI', '#ff158a'),
+    emptyTeamTask('t-jesus', 'emp-jesus', N['emp-jesus']!, 'Diseñador Multimedia', '#784bd1'),
+    emptyTeamTask('t-roberto', 'emp-roberto', N['emp-roberto']!, 'Diseñador Gráfico', '#0086c0'),
+    emptyTeamTask('t-andrea', 'emp-andrea', N['emp-andrea']!, 'Diseñador Gráfico', '#9cd326'),
+    emptyTeamTask('t-andres', 'emp-andres', N['emp-andres']!, 'Diseñador Gráfico', '#cab641'),
   ],
 };
 
 export const MARKETING_EMPLOYEE_IDS = [
   'emp-orlando',
   'emp-juancarlos',
-  'emp-ana',
+  'emp-yared',
   'emp-jorddy',
   'emp-jesus',
   'emp-roberto',
@@ -69,7 +72,7 @@ export const DEFAULT_BOARD: BoardState = {
     {
       id: 't-orlando',
       employeeId: 'emp-orlando',
-      employeeName: 'Orlando',
+      employeeName: N['emp-orlando']!,
       department: MARKETING_DEPARTMENT,
       roleTitle: 'Gerente de Marketing',
       avatarColor: '#5034ff',
@@ -85,9 +88,9 @@ export const DEFAULT_BOARD: BoardState = {
     {
       id: 't-juancarlos',
       employeeId: 'emp-juancarlos',
-      employeeName: 'Juan Carlos',
+      employeeName: N['emp-juancarlos']!,
       department: MARKETING_DEPARTMENT,
-      roleTitle: 'Mercadotecnia',
+      roleTitle: 'Coordinador de Marketing',
       avatarColor: '#fdab3d',
       currentWork: 'Plan estratégico Q2 y calendario de campañas',
       status: 'en_progreso',
@@ -99,25 +102,25 @@ export const DEFAULT_BOARD: BoardState = {
       priority: 'alta',
     },
     {
-      id: 't-ana',
-      employeeId: 'emp-ana',
-      employeeName: 'Ana García',
+      id: 't-yared',
+      employeeId: 'emp-yared',
+      employeeName: N['emp-yared']!,
       department: MARKETING_DEPARTMENT,
-      roleTitle: 'Contenido digital',
-      avatarColor: '#579bfc',
-      currentWork: 'Campaña redes sociales — lanzamiento producto',
-      status: 'en_revision',
+      roleTitle: 'Community Manager',
+      avatarColor: '#14b8a6',
+      currentWork: 'Calendario de contenido redes y métricas semanales',
+      status: 'en_progreso',
       kpiTarget: 100,
-      kpiCurrent: 88,
-      objective: 'Publicar 12 piezas y alcanzar 50k impresiones',
-      dueDate: addDays(7),
-      notes: 'Creativos aprobados. Pendiente calendario de stories.',
+      kpiCurrent: 74,
+      objective: 'Publicar 12 piezas y superar 80k impresiones orgánicas',
+      dueDate: addDays(10),
+      notes: 'TikTok con mejor engagement. Meta en revisión.',
       priority: 'media',
     },
     {
       id: 't-jorddy',
       employeeId: 'emp-jorddy',
-      employeeName: 'Jorddy Dylan',
+      employeeName: N['emp-jorddy']!,
       department: MARKETING_DEPARTMENT,
       roleTitle: 'Diseñador UX/UI',
       avatarColor: '#ff158a',
@@ -133,7 +136,7 @@ export const DEFAULT_BOARD: BoardState = {
     {
       id: 't-jesus',
       employeeId: 'emp-jesus',
-      employeeName: 'Jesus',
+      employeeName: N['emp-jesus']!,
       department: MARKETING_DEPARTMENT,
       roleTitle: 'Diseñador Multimedia',
       avatarColor: '#784bd1',
@@ -149,7 +152,7 @@ export const DEFAULT_BOARD: BoardState = {
     {
       id: 't-roberto',
       employeeId: 'emp-roberto',
-      employeeName: 'Roberto',
+      employeeName: N['emp-roberto']!,
       department: MARKETING_DEPARTMENT,
       roleTitle: 'Diseñador Gráfico',
       avatarColor: '#0086c0',
@@ -165,9 +168,9 @@ export const DEFAULT_BOARD: BoardState = {
     {
       id: 't-andrea',
       employeeId: 'emp-andrea',
-      employeeName: 'Andrea',
+      employeeName: N['emp-andrea']!,
       department: MARKETING_DEPARTMENT,
-      roleTitle: 'Diseñadora Gráfica',
+      roleTitle: 'Diseñador Gráfico',
       avatarColor: '#9cd326',
       currentWork: 'Ilustraciones campaña verano — serie 6 piezas',
       status: 'sin_empezar',
@@ -181,7 +184,7 @@ export const DEFAULT_BOARD: BoardState = {
     {
       id: 't-andres',
       employeeId: 'emp-andres',
-      employeeName: 'Andres',
+      employeeName: N['emp-andres']!,
       department: MARKETING_DEPARTMENT,
       roleTitle: 'Diseñador Gráfico',
       avatarColor: '#cab641',

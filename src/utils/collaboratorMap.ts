@@ -1,3 +1,4 @@
+import { getProjectCollaborators, projectIncludesCollaborator } from './projectCollaborators';
 import type { Collaborator, CreativeProject, User } from '../types';
 
 /** Usuario de login → slug de colaborador en proyectos. */
@@ -17,7 +18,7 @@ const NAMED_COLLABORATORS: Collaborator[] = [
   'andres',
   'jesus',
   'carlos',
-  'ana',
+  'yared',
 ];
 
 export function collaboratorForUser(user: User | null): Collaborator | null {
@@ -26,6 +27,20 @@ export function collaboratorForUser(user: User | null): Collaborator | null {
   if (USERNAME_TO_COLLABORATOR[un]) return USERNAME_TO_COLLABORATOR[un];
   if (NAMED_COLLABORATORS.includes(un as Collaborator)) return un as Collaborator;
   return null;
+}
+
+const EMPLOYEE_ID_TO_COLLABORATOR: Record<string, Collaborator> = {
+  'emp-jesus': 'jesus',
+  'emp-jorddy': 'jorddy',
+  'emp-andres': 'andres',
+  'emp-andrea': 'andrea',
+  'emp-juancarlos': 'carlos',
+  'emp-yared': 'yared',
+  'emp-roberto': 'roberto',
+};
+
+export function collaboratorForEmployeeId(employeeId: string): Collaborator | null {
+  return EMPLOYEE_ID_TO_COLLABORATOR[employeeId] ?? null;
 }
 
 export function employeeIdForCollaboratorSlug(
@@ -38,35 +53,73 @@ export function employeeIdForCollaboratorSlug(
 }
 
 export function resolveProjectAssignee(
-  project: Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId'>,
+  project: Pick<CreativeProject, 'collaborator' | 'collaborators' | 'assignedEmployeeId'>,
   activeUsers: User[],
 ): string | undefined {
   if (project.assignedEmployeeId) return project.assignedEmployeeId;
-  return employeeIdForCollaboratorSlug(project.collaborator, activeUsers);
+  const collabs = getProjectCollaborators(project);
+  if (collabs.length === 1 && !collabs.includes('todos')) {
+    return employeeIdForCollaboratorSlug(collabs[0], activeUsers);
+  }
+  if (project.collaborator !== 'todos') {
+    return employeeIdForCollaboratorSlug(project.collaborator, activeUsers);
+  }
+  return undefined;
 }
 
 /** Colaboradores solo ven proyectos asignados a su persona; gerente ve todo. */
 export function projectVisibleToUser(
-  project: Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId'>,
+  project: Pick<
+    CreativeProject,
+    'collaborator' | 'collaborators' | 'assignedEmployeeId' | 'acceptanceStatus'
+  >,
   user: User | null,
   canEditAll: boolean,
   activeUsers: User[],
 ): boolean {
   if (canEditAll) return true;
   if (!user?.employeeId) return false;
+  // Rechazado: solo gerencia lo sigue viendo para reasignar.
+  if (project.acceptanceStatus === 'declined') return false;
+  const mySlug = collaboratorForUser(user) ?? collaboratorForEmployeeId(user.employeeId);
+  if (mySlug && projectIncludesCollaborator(project, mySlug)) return true;
   const assignee = resolveProjectAssignee(project, activeUsers);
-  if (!assignee) return false;
   return assignee === user.employeeId;
 }
 
 export function patchForCollaboratorChange(
   collaborator: Collaborator,
   activeUsers: User[],
-): Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId'> {
+): Pick<CreativeProject, 'collaborator' | 'collaborators' | 'assignedEmployeeId'> {
+  if (collaborator === 'todos') {
+    return { collaborator: 'todos', collaborators: ['todos'], assignedEmployeeId: undefined };
+  }
   return {
     collaborator,
+    collaborators: [collaborator],
     assignedEmployeeId: employeeIdForCollaboratorSlug(collaborator, activeUsers),
   };
+}
+
+/** Colaborador asignado debe aceptar el proyecto (o ya está pendiente). */
+export function projectNeedsAcceptance(
+  project: Pick<
+    CreativeProject,
+    'status' | 'acceptanceStatus' | 'collaborator' | 'collaborators' | 'assignedEmployeeId'
+  >,
+  user: User | null,
+  canEditAll: boolean,
+  activeUsers: User[],
+): boolean {
+  if (canEditAll || !user || project.status === 'terminado') return false;
+  if (project.acceptanceStatus === 'accepted' || project.acceptanceStatus === 'declined') {
+    return false;
+  }
+  if (!projectVisibleToUser(project, user, false, activeUsers)) return false;
+  const collabs = getProjectCollaborators(project);
+  // Solo proyectos con un colaborador concreto (no "todos" ni multi-asignación).
+  if (collabs.length !== 1 || collabs.includes('todos')) return false;
+  return project.acceptanceStatus === 'pending' || project.status === 'nuevo';
 }
 
 /** Puede quitar del listado un proyecto ya marcado como terminado. */
@@ -104,5 +157,17 @@ export function canEmployeeCompleteProject(
 ): boolean {
   if (canEditAll || !user || user.role === 'admin') return false;
   if (project.status === 'terminado') return false;
+  return projectVisibleToUser(project, user, false, activeUsers);
+}
+
+/** Colaborador asignado o gerente pueden registrar horas en proyectos activos. */
+export function canTrackProjectHours(
+  project: Pick<CreativeProject, 'collaborator' | 'assignedEmployeeId' | 'status'>,
+  user: User | null,
+  canEditAll: boolean,
+  activeUsers: User[],
+): boolean {
+  if (canEditAll) return project.status !== 'terminado';
+  if (!user || user.role === 'admin' || project.status === 'terminado') return false;
   return projectVisibleToUser(project, user, false, activeUsers);
 }

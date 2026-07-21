@@ -7,6 +7,7 @@ import {
   clearYaavsStorage,
   resetAppAndReload,
 } from './utils/clearAppData.ts';
+import { applyProductionDemoSeed } from './utils/applyProductionDemo.ts';
 import './index.css';
 
 async function prepareApp(): Promise<void> {
@@ -15,6 +16,10 @@ async function prepareApp(): Promise<void> {
   if (params.get('fix') === '1') {
     await resetAppAndReload();
     return;
+  }
+
+  if (import.meta.env.PROD) {
+    applyProductionDemoSeed();
   }
 
   // En desarrollo: quitar service workers viejos que dejan la pantalla en blanco

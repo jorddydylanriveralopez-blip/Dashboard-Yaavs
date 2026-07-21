@@ -1,105 +1,190 @@
-.mobile-more-backdrop {
+.more-sheet-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
-  background: rgba(15, 23, 42, 0.45);
+  z-index: 200;
+  background: rgba(4, 16, 42, 0.45);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: flex-end;
-  justify-content: center;
-  padding: 0 12px max(12px, env(safe-area-inset-bottom, 0px));
+  animation: more-backdrop-in 0.2s ease both;
 }
 
-.mobile-more-panel {
+.more-sheet-backdrop.is-closing {
+  animation: more-backdrop-out 0.22s ease both;
+}
+
+.more-sheet {
   width: 100%;
-  max-width: 420px;
-  background: var(--bg-surface);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-lg);
-  animation: mobile-more-slide 0.22s ease;
+  background: linear-gradient(180deg, #ffffff 0%, #f4f7ff 100%);
+  border-radius: 26px 26px 0 0;
+  padding: 10px 18px calc(22px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -18px 60px rgba(0, 35, 100, 0.28);
+  animation: more-sheet-in 0.28s cubic-bezier(0.32, 0.72, 0.28, 1) both;
 }
 
-@keyframes mobile-more-slide {
+.more-sheet.is-closing {
+  animation: more-sheet-out 0.22s ease both;
+}
+
+.more-sheet-handle {
+  display: block;
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(0, 60, 160, 0.18);
+  margin: 4px auto 10px;
+}
+
+.more-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.more-sheet-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--yaavs-blue-dark, #041d54);
+  letter-spacing: -0.01em;
+}
+
+.more-sheet-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 85, 255, 0.08);
+  color: var(--text-secondary, #5a6b8c);
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+
+.more-sheet-close:active {
+  transform: scale(0.92);
+}
+
+.more-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.more-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 6px 12px;
+  border: 1px solid rgba(0, 85, 255, 0.08);
+  border-radius: 18px;
+  background: #fff;
+  color: var(--text-primary, #12203f);
+  font-size: 0.72rem;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0, 40, 110, 0.06);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  animation: more-tile-in 0.3s cubic-bezier(0.3, 0.7, 0.3, 1) both;
+  animation-delay: var(--tile-delay, 0ms);
+}
+
+.more-tile:active {
+  transform: scale(0.95);
+}
+
+.more-tile.active {
+  border-color: color-mix(in srgb, var(--tile-accent) 55%, transparent);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--tile-accent) 25%, transparent);
+}
+
+.more-tile-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    var(--tile-accent),
+    color-mix(in srgb, var(--tile-accent) 55%, #062a7a)
+  );
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--tile-accent) 40%, transparent);
+}
+
+.more-tile-badge {
+  position: absolute;
+  top: -5px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ff3b5c;
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  border: 2px solid #fff;
+}
+
+.more-tile-label {
+  line-height: 1.15;
+  text-align: center;
+}
+
+@keyframes more-backdrop-in {
   from {
-    transform: translateY(100%);
-    opacity: 0.6;
+    opacity: 0;
   }
   to {
-    transform: translateY(0);
     opacity: 1;
   }
 }
 
-.mobile-more-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 18px 8px;
-  border-bottom: 1px solid var(--border);
+@keyframes more-backdrop-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
 
-.mobile-more-head h2 {
-  margin: 0;
-  font-size: 1rem;
+/* Sin transform en el keyframe final: un transform retenido crearía un
+   containing block que atraparía elementos position:fixed descendientes. */
+@keyframes more-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-.mobile-more-list {
-  list-style: none;
-  margin: 0;
-  padding: 8px 10px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+@keyframes more-sheet-out {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(100%);
+  }
 }
 
-.mobile-more-item {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 12px;
-  border: none;
-  border-radius: var(--radius);
-  background: transparent;
-  font-size: 0.9375rem;
-  font-weight: 500;
-  color: var(--yaavs-ink);
-  text-align: left;
-  cursor: pointer;
-}
-
-.mobile-more-item:hover {
-  background: var(--bg-muted);
-}
-
-.mobile-more-item.active {
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-surface));
-  color: var(--accent);
-  font-weight: 600;
-}
-
-.mobile-more-icon {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: var(--bg-muted);
-  font-size: 1rem;
-}
-
-.mobile-more-badge {
-  margin-left: auto;
-  min-width: 20px;
-  height: 20px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: white;
-  font-size: 0.6875rem;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+@keyframes more-tile-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }

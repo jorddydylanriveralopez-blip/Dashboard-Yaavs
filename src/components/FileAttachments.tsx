@@ -21,6 +21,7 @@ import {
 } from '../utils/fileAttachments';
 import type { FileAttachment } from '../types';
 import { deleteAttachmentBlobs } from '../utils/attachmentStore';
+import { LibraryPickerModal } from './LibraryPickerModal';
 import './FileAttachments.css';
 
 interface EditorProps {
@@ -29,6 +30,8 @@ interface EditorProps {
   disabled?: boolean;
   onError?: (message: string) => void;
   onSuccess?: (message: string) => void;
+  /** Muestra botón para elegir imágenes de la biblioteca compartida. */
+  enableLibrary?: boolean;
 }
 
 type UploadState = {
@@ -44,6 +47,7 @@ export function FileAttachmentsEditor({
   disabled,
   onError,
   onSuccess,
+  enableLibrary = false,
 }: EditorProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef(attachments);
@@ -52,6 +56,7 @@ export function FileAttachmentsEditor({
   const [busy, setBusy] = useState(false);
   const [uploadState, setUploadState] = useState<UploadState | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const processFiles = useCallback(
     async (fileList: FileList | File[]) => {
@@ -61,7 +66,9 @@ export function FileAttachmentsEditor({
       const allowed = files.filter(isAllowedFile);
       const rejected = files.length - allowed.length;
       if (rejected > 0) {
-        onError?.('Solo se permiten imágenes, PDF y videos.');
+        onError?.(
+          `Uno o más archivos superan el máximo de ${formatAttachmentSize(MAX_ATTACHMENT_BYTES)}.`,
+        );
       }
       if (!allowed.length) return;
 
@@ -175,6 +182,27 @@ export function FileAttachmentsEditor({
 
   const count = attachments.length;
   const totalSize = totalAttachmentsBytes(attachments);
+  const libraryAssetIds = attachments
+    .map((a) => a.libraryAssetId)
+    .filter((id): id is string => Boolean(id));
+
+  const addFromLibrary = (picked: FileAttachment[]) => {
+    const fresh = picked.filter(
+      (att) => !att.libraryAssetId || !libraryAssetIds.includes(att.libraryAssetId),
+    );
+    if (!fresh.length) {
+      onError?.('Esas imágenes ya están adjuntas');
+      return;
+    }
+    const next = [...listRef.current, ...fresh];
+    listRef.current = next;
+    onChange(next);
+    onSuccess?.(
+      fresh.length === 1
+        ? 'Imagen agregada desde la biblioteca'
+        : `${fresh.length} imágenes agregadas desde la biblioteca`,
+    );
+  };
 
   return (
     <div
@@ -211,7 +239,7 @@ export function FileAttachmentsEditor({
       <p className="file-drop-hint">
         {dragOver
           ? 'Suelta los archivos aquí'
-          : 'Arrastra imágenes, PDF o videos aquí, o usa el botón'}
+          : 'Arrastra aquí imágenes, videos, PDF, documentos o cualquier otro archivo'}
       </p>
 
       {count > 0 && (
@@ -269,9 +297,31 @@ export function FileAttachmentsEditor({
           </span>
         </span>
       </label>
+
+      {enableLibrary && !disabled && (
+        <button
+          type="button"
+          className="file-library-btn"
+          disabled={busy}
+          onClick={(e) => {
+            e.stopPropagation();
+            setLibraryOpen(true);
+          }}
+        >
+          Desde biblioteca
+        </button>
+      )}
+
+      <LibraryPickerModal
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        onSelect={addFromLibrary}
+        existingAttachmentIds={libraryAssetIds}
+      />
+
       <p className="file-attachments-hint">
-        Imágenes, PDF y videos · hasta {formatAttachmentSize(MAX_ATTACHMENT_BYTES)} por archivo ·
-        videos grandes (más de {formatAttachmentSize(INLINE_ATTACHMENT_MAX_BYTES)}) se guardan en el
+        Cualquier formato · hasta {formatAttachmentSize(MAX_ATTACHMENT_BYTES)} por archivo · archivos
+        grandes (más de {formatAttachmentSize(INLINE_ATTACHMENT_MAX_BYTES)}) se guardan en el
         navegador · lista con 6+ archivos
       </p>
     </div>

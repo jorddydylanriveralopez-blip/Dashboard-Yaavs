@@ -25,6 +25,7 @@ import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
 import { workloadLabel } from '../utils/workloadLimits';
 import { WorkloadLimitsPanel } from './WorkloadLimitsPanel';
 import { WorkloadOverrideModal } from './WorkloadOverrideModal';
+import { EmployeeMultiSelect } from './EmployeeMultiSelect';
 import type { FileAttachment, TaskAssignment } from '../types';
 import './AssignmentsView.css';
 
@@ -47,7 +48,7 @@ export function AssignmentsView() {
   const toast = useToast();
   const { override, cancelOverride, confirmOverride, submitAssignment } = useWorkloadGuard();
 
-  const [employeeId, setEmployeeId] = useState('');
+  const [employeeIds, setEmployeeIds] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [objective, setObjective] = useState('');
   const [dueDate, setDueDate] = useState(
@@ -64,6 +65,20 @@ export function AssignmentsView() {
     () => assignableMarketingTasks(board.tasks, activeUsers),
     [board.tasks, activeUsers],
   );
+
+  /**
+   * Evita mostrar dos veces la misma indicación para el mismo colaborador
+   * (por ejemplo, si un envío se duplicó durante la sincronización).
+   */
+  const dedupeByRecipient = (list: TaskAssignment[]) => {
+    const seen = new Set<string>();
+    return list.filter((a) => {
+      const key = `${a.employeeId}|${a.title.trim().toLowerCase()}|${a.dueDate}|${a.status}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
 
   const filterList = (list: TaskAssignment[]) => {
     const q = assignmentSearch.trim();
@@ -90,9 +105,11 @@ export function AssignmentsView() {
 
   const managerList = useMemo(() => {
     if (!canEditAll) return [];
-    return filterList(
-      filterPendingAssignments(assignments).sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    return dedupeByRecipient(
+      filterList(
+        filterPendingAssignments(assignments).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+        ),
       ),
     );
   }, [assignments, canEditAll, assignmentSearch]);
@@ -100,24 +117,41 @@ export function AssignmentsView() {
   const myHistory = useMemo(() => {
     if (!user?.employeeId) return [];
     return filterList(
-      filterPendingAssignments(
-        assignments.filter((a) => a.employeeId === user.employeeId),
-      ).sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      ),
+      assignments
+        .filter((a) => a.employeeId === user.employeeId && a.status !== 'pending')
+        .sort(
+          (a, b) =>
+            new Date(b.respondedAt || b.createdAt).getTime() -
+            new Date(a.respondedAt || a.createdAt).getTime(),
+        )
+        .slice(0, 20),
     );
   }, [assignments, user?.employeeId, assignmentSearch]);
 
+  const managerResponses = useMemo(() => {
+    if (!canEditAll) return [];
+    return filterList(
+      assignments
+        .filter((a) => a.status === 'accepted' || a.status === 'rejected')
+        .sort(
+          (a, b) =>
+            new Date(b.respondedAt || b.createdAt).getTime() -
+            new Date(a.respondedAt || a.createdAt).getTime(),
+        )
+        .slice(0, 15),
+    );
+  }, [assignments, canEditAll, assignmentSearch]);
+
   const selectedWorkload = useMemo(() => {
-    if (!employeeId) return null;
-    return getWorkloadCheck(employeeId, { addSlots: 1 });
-  }, [employeeId, getWorkloadCheck, assignments]);
+    if (employeeIds.length !== 1) return null;
+    return getWorkloadCheck(employeeIds[0], { addSlots: 1 });
+  }, [employeeIds, getWorkloadCheck, assignments]);
 
   const handleSend = (e: FormEvent) => {
     e.preventDefault();
-    if (!employeeId || !title.trim()) return;
+    if (!employeeIds.length || !title.trim()) return;
     const payload = {
-      employeeId,
+      employeeIds,
       title,
       objective,
       dueDate,
@@ -133,10 +167,12 @@ export function AssignmentsView() {
       setNotes('');
       setAttachmentUrl('');
       setAttachments([]);
+      setEmployeeIds([]);
+      const count = employeeIds.length;
       toast.success(
         fileCount > 0
-          ? `Indicación enviada con ${fileCount} archivo${fileCount > 1 ? 's' : ''} adjunto${fileCount > 1 ? 's' : ''}`
-          : 'Indicación enviada al colaborador (sin archivos adjuntos)',
+          ? `Indicación enviada a ${count} colaborador${count > 1 ? 'es' : ''} con ${fileCount} archivo${fileCount > 1 ? 's' : ''}`
+          : `Indicación enviada a ${count} colaborador${count > 1 ? 'es' : ''}`,
       );
     });
   };
@@ -177,7 +213,7 @@ export function AssignmentsView() {
             aparezca en tu tablero.
           </p>
           <ul className="assign-list">
-            {myPendingAssignments.map((a) => (
+            {dedupeByRecipient(myPendingAssignments).map((a) => (
               <AssignmentCard
                 key={a.id}
                 assignment={a}
@@ -198,29 +234,20 @@ export function AssignmentsView() {
           </p>
           <form className="assign-form" onSubmit={handleSend}>
             <label>
-              Colaborador
-              <select
-                value={employeeId}
-                onChange={(e) => setEmployeeId(e.target.value)}
-                required
-              >
-                <option value="">Selecciona…</option>
-                {assignable.map((t) => {
-                  const check = getWorkloadCheck(t.employeeId);
-                  return (
-                    <option key={t.employeeId} value={t.employeeId}>
-                      {t.employeeName} — {check.current.total}/{check.max} trabajos
-                    </option>
-                  );
-                })}
-              </select>
+              Colaborador(es)
+              <EmployeeMultiSelect
+                assignable={assignable}
+                values={employeeIds}
+                onChange={setEmployeeIds}
+              />
               {selectedWorkload && (
                 <span
                   className={`assign-workload-hint${selectedWorkload.allowed ? '' : ' assign-workload-hint--full'}`}
                 >
-                  {workloadLabel(selectedWorkload)} tras enviar ·{' '}
-                  {selectedWorkload.current.projects} proy. +{' '}
-                  {selectedWorkload.current.pendingAssignments} indic. pendientes
+                  Carga actual: {workloadLabel(selectedWorkload)} ·{' '}
+                  {selectedWorkload.current.projects} proyecto
+                  {selectedWorkload.current.projects === 1 ? '' : 's'} activo
+                  {selectedWorkload.current.projects === 1 ? '' : 's'}
                   {!selectedWorkload.allowed && ' — límite alcanzado (pedirá contraseña)'}
                 </span>
               )}
@@ -235,6 +262,7 @@ export function AssignmentsView() {
                 onChange={setAttachments}
                 onError={(msg) => toast.info(msg)}
                 onSuccess={(msg) => toast.success(msg)}
+                enableLibrary
               />
             </div>
             <label>
@@ -322,16 +350,22 @@ export function AssignmentsView() {
 
       {!canEditAll && myHistory.length > 0 && (
         <section className="assign-section">
-          <h2>Pendientes anteriores</h2>
+          <h2>Respondidas</h2>
           <ul className="assign-list">
             {myHistory.map((a) => (
-              <AssignmentCard
-                key={a.id}
-                assignment={a}
-                showActions
-                onAccept={() => handleAccept(a.id)}
-                onReject={() => setRejectingId(a.id)}
-              />
+              <AssignmentCard key={a.id} assignment={a} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {canEditAll && managerResponses.length > 0 && (
+        <section className="assign-section">
+          <h2>Respuestas del equipo</h2>
+          <p className="assign-hint">Indicaciones que el equipo ya aceptó o rechazó.</p>
+          <ul className="assign-list">
+            {managerResponses.map((a) => (
+              <AssignmentCard key={a.id} assignment={a} />
             ))}
           </ul>
         </section>
@@ -378,6 +412,7 @@ function AssignmentCard({
   assignment,
   showActions,
   canCancel,
+  defaultExpanded = false,
   onAccept,
   onReject,
   onCancel,
@@ -385,25 +420,28 @@ function AssignmentCard({
   assignment: TaskAssignment;
   showActions?: boolean;
   canCancel?: boolean;
+  defaultExpanded?: boolean;
   onAccept?: () => void;
   onReject?: () => void;
   onCancel?: () => void;
 }) {
-  const [files, setFiles] = useState<FileAttachment[]>(assignment.attachments ?? []);
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [loadedFiles, setLoadedFiles] = useState<FileAttachment[]>([]);
 
   useEffect(() => {
-    if (assignment.attachments?.length) {
-      setFiles(assignment.attachments);
-      return;
-    }
+    if (assignment.attachments?.length) return;
     let cancelled = false;
     void loadAssignmentAttachments(assignment.id).then((list) => {
-      if (!cancelled) setFiles(list);
+      if (!cancelled) setLoadedFiles(list);
     });
     return () => {
       cancelled = true;
     };
   }, [assignment.id, assignment.attachments]);
+
+  const files = assignment.attachments?.length
+    ? assignment.attachments
+    : loadedFiles;
 
   const date = new Date(assignment.createdAt).toLocaleDateString('es-MX', {
     day: 'numeric',
@@ -413,64 +451,97 @@ function AssignmentCard({
   });
 
   return (
-    <li className={`assign-card status-${assignment.status}`}>
-      <div className="assign-card-top">
-        <span className={`assign-status assign-status-${assignment.status}`}>
-          {ASSIGNMENT_STATUS_LABELS[assignment.status]}
+    <li
+      className={`assign-card status-${assignment.status}${expanded ? ' assign-card--open' : ''}`}
+    >
+      <button
+        type="button"
+        className="assign-card-header"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <div className="assign-card-header-main">
+          <div className="assign-card-top">
+            <span className={`assign-status assign-status-${assignment.status}`}>
+              {ASSIGNMENT_STATUS_LABELS[assignment.status]}
+            </span>
+            <span className="assign-priority">
+              {PRIORITY_LABELS[assignment.priority]}
+            </span>
+          </div>
+          <h3>{assignment.title}</h3>
+          <p className="assign-card-subtitle">
+            Para <strong>{assignment.employeeName}</strong> · Entrega{' '}
+            {assignment.dueDate}
+          </p>
+        </div>
+        <span className="assign-card-chevron" aria-hidden="true">
+          ▾
         </span>
-        <span className="assign-priority">{PRIORITY_LABELS[assignment.priority]}</span>
-      </div>
-      <h3>{assignment.title}</h3>
-      {assignment.brief ? (
-        <AssignmentBriefDetails brief={assignment.brief} />
-      ) : null}
-      {files.length > 0 && (
-        <div className="assign-attachments-block">
-          <p className="assign-attachments-label">Archivos adjuntos</p>
-          <FileAttachmentsList attachments={files} />
+      </button>
+      {expanded && (
+        <div className="assign-card-body">
+          {assignment.brief ? (
+            <AssignmentBriefDetails brief={assignment.brief} />
+          ) : null}
+          {files.length > 0 && (
+            <div className="assign-attachments-block">
+              <p className="assign-attachments-label">Archivos adjuntos</p>
+              <FileAttachmentsList attachments={files} />
+            </div>
+          )}
+          {(() => {
+            const taskLine = assignmentTaskLine(assignment.objective);
+            return taskLine ? (
+              <p className="assign-task-line">
+                <span className="assign-task-label">Qué debes hacer</span>
+                {taskLine}
+              </p>
+            ) : null;
+          })()}
+          {!assignment.brief && assignment.objective && (
+            <p className="assign-objective">{assignment.objective}</p>
+          )}
+          {assignment.attachmentUrl && (
+            <a
+              href={assignment.attachmentUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="assign-link"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Ver material de referencia →
+            </a>
+          )}
+          <div className="assign-meta">
+            <span>
+              Para: <strong>{assignment.employeeName}</strong>
+            </span>
+            <span>
+              De: <strong>{assignment.assignedByName}</strong>
+            </span>
+            <span>Entrega: {assignment.dueDate}</span>
+            <span>Enviada: {date}</span>
+          </div>
+          {assignment.rejectReason && (
+            <p className="assign-reject-reason">
+              Motivo de rechazo: {assignment.rejectReason}
+            </p>
+          )}
+          {assignment.notes && <p className="assign-notes">{assignment.notes}</p>}
         </div>
       )}
-      {(() => {
-        const taskLine = assignmentTaskLine(assignment.objective);
-        return taskLine ? (
-          <p className="assign-task-line">
-            <span className="assign-task-label">Qué debes hacer</span>
-            {taskLine}
-          </p>
-        ) : null;
-      })()}
-      {!assignment.brief && assignment.objective && (
-        <p className="assign-objective">{assignment.objective}</p>
-      )}
-      {assignment.attachmentUrl && (
-        <a
-          href={assignment.attachmentUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="assign-link"
-          onClick={(e) => e.stopPropagation()}
-        >
-          Ver material de referencia →
-        </a>
-      )}
-      <div className="assign-meta">
-        <span>
-          Para: <strong>{assignment.employeeName}</strong>
-        </span>
-        <span>
-          De: <strong>{assignment.assignedByName}</strong>
-        </span>
-        <span>Entrega: {assignment.dueDate}</span>
-        <span>Enviada: {date}</span>
-      </div>
-      {assignment.rejectReason && (
-        <p className="assign-reject-reason">
-          Motivo de rechazo: {assignment.rejectReason}
-        </p>
-      )}
-      {assignment.notes && <p className="assign-notes">{assignment.notes}</p>}
       {showActions && (
         <div className="assign-actions">
+          {!expanded && (
+            <button
+              type="button"
+              className="btn-ghost assign-view-details"
+              onClick={() => setExpanded(true)}
+            >
+              Ver detalles
+            </button>
+          )}
           <button type="button" className="btn-primary" onClick={onAccept}>
             Aceptar
           </button>
@@ -479,7 +550,7 @@ function AssignmentCard({
           </button>
         </div>
       )}
-      {canCancel && (
+      {canCancel && expanded && (
         <button type="button" className="btn-ghost assign-cancel" onClick={onCancel}>
           Cancelar indicación
         </button>

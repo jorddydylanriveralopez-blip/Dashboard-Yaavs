@@ -1,22 +1,22 @@
 import { useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
-import { collaboratorForUser } from '../utils/collaboratorMap';
-import { groupProjectsForBoard } from '../utils/projectGroups';
 import {
   BUSINESS_UNITS,
   COLLABORATORS,
-  INTERNAL_AREAS,
   labelFor,
   PROJECT_STATUSES,
   PROJECT_STATUS_COLORS,
-  PROJECT_TYPES,
-  REQUESTING_DEPARTMENTS,
 } from '../data/projectOptions';
-import { formatShortDate } from '../utils/formatDate';
 import { fuzzyIncludes } from '../utils/fuzzyMatch';
 import { isActiveProject } from '../utils/activeItems';
-import { calcProjectDurationDays, formatDuration } from '../utils/projectDuration';
+import {
+  countByDeadlineFilter,
+  DEADLINE_FILTERS,
+  projectMatchesDeadlineFilter,
+  type ProjectDeadlineFilter,
+} from '../utils/projectDeadlineFilters';
 import { ProjectsKanban } from './ProjectsKanban';
+import { ProjectsStatusView } from './ProjectsStatusView';
 import type { CreativeProject, ProjectStatus } from '../types';
 import './ProjectsBoard.css';
 
@@ -32,11 +32,10 @@ interface Props {
 }
 
 export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Props) {
-  const { user, canEditAll, addProject } = useApp();
+  const { canEditAll, addProject, visibleCompletedProjects } = useApp();
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
-  const [layoutMode, setLayoutMode] = useState<'cards' | 'kanban'>('cards');
-  const myCollaborator = collaboratorForUser(user);
-
+  const [deadlineFilter, setDeadlineFilter] = useState<ProjectDeadlineFilter>('all');
+  const [layoutMode, setLayoutMode] = useState<'projects' | 'status'>('projects');
   const activeProjects = useMemo(
     () => projects.filter(isActiveProject),
     [projects],
@@ -48,6 +47,9 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
     if (statusFilter !== 'all') {
       list = list.filter((p) => p.status === statusFilter);
     }
+    if (deadlineFilter !== 'all') {
+      list = list.filter((p) => projectMatchesDeadlineFilter(p, deadlineFilter));
+    }
     if (!q) return list;
     return list.filter(
       (p) =>
@@ -56,23 +58,11 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
         fuzzyIncludes(labelFor(COLLABORATORS, p.collaborator), q) ||
         fuzzyIncludes(labelFor(BUSINESS_UNITS, p.businessUnit), q),
     );
-  }, [activeProjects, filter, statusFilter]);
+  }, [activeProjects, filter, statusFilter, deadlineFilter]);
 
-  const kanbanList = useMemo(() => {
-    const q = filter.trim();
-    if (!q) return activeProjects;
-    return activeProjects.filter(
-      (p) =>
-        fuzzyIncludes(p.projectName, q) ||
-        fuzzyIncludes(p.requestedBy, q) ||
-        fuzzyIncludes(labelFor(COLLABORATORS, p.collaborator), q) ||
-        fuzzyIncludes(labelFor(BUSINESS_UNITS, p.businessUnit), q),
-    );
-  }, [activeProjects, filter]);
-
-  const projectGroups = useMemo(
-    () => groupProjectsForBoard(filtered, canEditAll, myCollaborator),
-    [filtered, canEditAll, myCollaborator],
+  const deadlineCounts = useMemo(
+    () => countByDeadlineFilter(activeProjects),
+    [activeProjects],
   );
 
   const counts = useMemo(() => {
@@ -117,28 +107,63 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
         )}
       </p>
 
-      <div className="projects-layout-toggle">
+      <div className="projects-layout-toggle" role="tablist" aria-label="Vista de proyectos">
         <button
           type="button"
-          className={`projects-layout-btn ${layoutMode === 'cards' ? 'active' : ''}`}
-          onClick={() => setLayoutMode('cards')}
+          role="tab"
+          aria-selected={layoutMode === 'projects'}
+          className={`projects-layout-btn ${layoutMode === 'projects' ? 'active' : ''}`}
+          onClick={() => setLayoutMode('projects')}
         >
-          Tarjetas
+          Proyectos
         </button>
         <button
           type="button"
-          className={`projects-layout-btn ${layoutMode === 'kanban' ? 'active' : ''}`}
-          onClick={() => setLayoutMode('kanban')}
+          role="tab"
+          aria-selected={layoutMode === 'status'}
+          className={`projects-layout-btn ${layoutMode === 'status' ? 'active' : ''}`}
+          onClick={() => setLayoutMode('status')}
         >
-          Kanban
+          Estatus
         </button>
       </div>
 
-      {layoutMode === 'kanban' ? (
-        <ProjectsKanban projects={kanbanList} onSelect={onSelect} />
+      {layoutMode === 'status' ? (
+        <ProjectsStatusView
+          projects={projects}
+          completedProjects={visibleCompletedProjects}
+          filter={filter}
+          onSelect={onSelect}
+        />
       ) : (
         <>
+      <div className="projects-filters projects-filters--deadline">
+        <span className="projects-filters-label">Plazo</span>
+        <button
+          type="button"
+          className={`filter-chip project-filter-chip project-deadline-chip ${deadlineFilter === 'all' ? 'active' : ''}`}
+          onClick={() => setDeadlineFilter('all')}
+        >
+          Todos <span>{deadlineCounts.all}</span>
+        </button>
+        {DEADLINE_FILTERS.map(({ id, label, tone }) => {
+          const count = deadlineCounts[id];
+          if (count === 0) return null;
+          return (
+            <button
+              key={id}
+              type="button"
+              className={`filter-chip project-filter-chip project-deadline-chip project-deadline-chip--${tone} ${deadlineFilter === id ? 'active' : ''}`}
+              onClick={() => setDeadlineFilter(id)}
+            >
+              {label} <span>{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <div className="projects-filters">
+        <span className="projects-filters-label">Estatus</span>
         {visibleFilters.map(({ id, count }) => (
           <button
             key={id}
@@ -193,121 +218,14 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
           <p className="projects-empty">No hay proyectos activos con ese filtro.</p>
         )
       ) : (
-        <div className="projects-sections">
-          {projectGroups.map((group) => {
-            let cardIndex = 0;
-            return (
-              <section key={group.id} className="projects-section">
-                <h3 className="projects-subheading">
-                  {group.title}
-                  <span className="projects-subheading-count">{group.projects.length}</span>
-                </h3>
-                {group.note && <p className="projects-section-note">{group.note}</p>}
-                <div className="projects-grid">
-                  {group.projects.map((p) => {
-                    const index = cardIndex++;
-                    return (
-                      <ProjectCard
-                        key={p.id}
-                        project={p}
-                        index={index}
-                        onOpen={() => onSelect(p)}
-                      />
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })}
-        </div>
+        <ProjectsKanban
+          projects={filtered}
+          onSelect={onSelect}
+          statusFilter={statusFilter}
+        />
       )}
         </>
       )}
     </div>
-  );
-}
-
-function ProjectCard({
-  project: p,
-  index,
-  onOpen,
-}: {
-  project: CreativeProject;
-  index: number;
-  onOpen: () => void;
-}) {
-  const duration = calcProjectDurationDays(p.requestDate, p.commitmentDate, p.status);
-  const accent = PROJECT_STATUS_COLORS[p.status];
-  const collabLabel = labelFor(COLLABORATORS, p.collaborator);
-
-  return (
-    <article
-      className="project-card"
-      style={
-        {
-          '--card-accent': accent,
-          '--stagger': `${Math.min(index, 12) * 40}ms`,
-        } as React.CSSProperties
-      }
-      onClick={onOpen}
-    >
-      <div className="project-card-glow" aria-hidden />
-      <header className="project-card-head">
-        <div className="project-card-title-wrap">
-          <h3>{p.projectName.trim() || 'Sin nombre'}</h3>
-          <div className="project-card-badges">
-            <span className="status-pill" style={{ background: accent }}>
-              {labelFor(PROJECT_STATUSES, p.status)}
-            </span>
-            <span className={`priority-badge priority-badge--compact priority-badge--${p.priority}`}>
-              {p.priority === 'alta_urgente' ? 'Urgente' : p.priority === 'media' ? 'Media' : 'Baja'}
-            </span>
-          </div>
-        </div>
-      </header>
-
-      <p className="project-card-sub">
-        {labelFor(BUSINESS_UNITS, p.businessUnit)} · {labelFor(PROJECT_TYPES, p.projectType)}
-      </p>
-
-      <div className="project-card-meta">
-        <div className="meta-block">
-          <span className="meta-label">Colaborador</span>
-          <strong>{collabLabel}</strong>
-        </div>
-        <div className="meta-block">
-          <span className="meta-label">Área interna</span>
-          <strong>{labelFor(INTERNAL_AREAS, p.internalArea)}</strong>
-        </div>
-      </div>
-
-      <div className="project-card-request">
-        <span>Solicita: {p.requestedBy || '—'}</span>
-        <span>{labelFor(REQUESTING_DEPARTMENTS, p.requestingDepartment)}</span>
-      </div>
-
-      <div className="project-card-dates">
-        <span>
-          <em>Solicitud</em> {formatShortDate(p.requestDate)}
-        </span>
-        <span>
-          <em>Compromiso</em> {formatShortDate(p.commitmentDate)}
-        </span>
-        {duration !== null && (
-          <span className="duration-tag">{formatDuration(duration)}</span>
-        )}
-      </div>
-
-      {p.comments && <p className="project-card-comment">{p.comments}</p>}
-
-      {(p.attachmentCount ?? p.attachments?.length ?? 0) > 0 && (
-        <span className="project-card-files">
-          📎 {p.attachmentCount ?? p.attachments!.length} archivo
-          {(p.attachmentCount ?? p.attachments!.length) > 1 ? 's' : ''}
-        </span>
-      )}
-
-      <span className="project-card-cta">Ver detalles →</span>
-    </article>
   );
 }

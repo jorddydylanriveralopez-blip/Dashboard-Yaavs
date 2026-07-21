@@ -1,47 +1,57 @@
+import { setTeamTab } from './teamTab';
+
 export type DashboardView =
   | 'home'
   | 'team'
+  | 'chat'
   | 'board'
   | 'completed'
   | 'assignments'
-  | 'kpis'
   | 'history'
   | 'calendar'
-  | 'reports'
   | 'pulse'
-  | 'community';
+  | 'community'
+  | 'attendance'
+  | 'library';
 
 const PATH_TO_VIEW: Record<string, DashboardView> = {
   '/': 'home',
   '/inicio': 'home',
   '/equipo': 'team',
+  '/chat': 'chat',
   '/proyectos': 'board',
   '/concluidos': 'completed',
   '/indicaciones': 'assignments',
-  '/kpis': 'kpis',
   '/historial': 'history',
   '/agenda': 'calendar',
-  '/reportes': 'reports',
+  '/reportes': 'pulse',
   '/panorama': 'pulse',
   '/redes': 'community',
+  '/asistencia': 'attendance',
+  '/biblioteca': 'library',
 };
 
 const VIEW_TO_PATH: Record<DashboardView, string> = {
   home: '/inicio',
   team: '/equipo',
+  chat: '/chat',
   board: '/proyectos',
   completed: '/concluidos',
   assignments: '/indicaciones',
-  kpis: '/kpis',
   history: '/historial',
   calendar: '/agenda',
-  reports: '/reportes',
   pulse: '/panorama',
   community: '/redes',
+  attendance: '/asistencia',
+  library: '/biblioteca',
 };
 
 export function viewFromPath(pathname: string): DashboardView {
   const clean = pathname.replace(/\/$/, '') || '/';
+  if (clean === '/kpis') {
+    setTeamTab('kpis');
+    return 'team';
+  }
   return PATH_TO_VIEW[clean] ?? 'home';
 }
 

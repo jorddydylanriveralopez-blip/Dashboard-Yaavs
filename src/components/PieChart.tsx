@@ -9,7 +9,7 @@ interface Props {
   centerValue?: string | number;
   centerSuffix?: string;
   centerLabel?: string;
-  legendMode?: 'kpi' | 'share';
+  legendMode?: 'kpi' | 'share' | 'attendance';
 }
 
 export function PieChart({
@@ -48,14 +48,14 @@ export function PieChart({
     centerSuffix ?? (centerValue === undefined && typeof holeValue === 'number' ? '%' : '');
 
   return (
-    <div className="pie-chart">
+    <div className="pie-chart pie-chart--animate">
       <div
-        className="pie-chart-ring"
+        className="pie-chart-ring pie-chart-ring--animate"
         style={{ width: size, height: size, background: gradient }}
         role="img"
         aria-label={title}
       >
-        <div className="pie-chart-hole">
+        <div className="pie-chart-hole pie-chart-hole--animate">
           <strong>
             {holeValue}
             {suffix}
@@ -64,15 +64,17 @@ export function PieChart({
         </div>
       </div>
       <ul className="pie-chart-legend">
-        {slices.map((sl) => (
-          <li key={sl.id}>
+        {slices.map((sl, i) => (
+          <li key={sl.id} style={{ ['--legend-i' as string]: i }}>
             <span className="pie-chart-dot" style={{ background: sl.color }} />
             <div className="pie-chart-legend-text">
               <strong>{sl.label}</strong>
               <span>
                 {legendMode === 'share'
                   ? `${sl.sharePercent}% · ${sl.value} ${sl.value === 1 ? 'pieza' : 'piezas'}`
-                  : `KPI ${sl.kpiPercent}% · ${sl.sharePercent}% del pastel`}
+                  : legendMode === 'attendance'
+                    ? `${sl.sharePercent}% · ${sl.value} ${sl.value === 1 ? 'día' : 'días'}`
+                    : `Avance actual: ${sl.kpiPercent} de 100`}
               </span>
             </div>
           </li>

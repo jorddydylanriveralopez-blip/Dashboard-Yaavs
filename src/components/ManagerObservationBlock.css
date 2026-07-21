@@ -1,0 +1,108 @@
+.manager-observation {
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  background: #f3f6ff;
+  border: 1px solid #d8e2ff;
+}
+
+.manager-observation--personal {
+  background: #f8f5ff;
+  border-color: #e3d9ff;
+}
+
+.manager-observation--compact {
+  padding: 0.7rem 0.85rem;
+}
+
+.manager-observation h4 {
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #4a5d8a;
+}
+
+.manager-observation-form textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  border: 1px solid #c9d4ef;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  line-height: 1.45;
+  background: #fff;
+}
+
+.manager-observation-form textarea:focus {
+  outline: 2px solid #6b8cff;
+  outline-offset: 1px;
+  border-color: #6b8cff;
+}
+
+.manager-observation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.manager-observation-meta {
+  font-size: 0.72rem;
+  color: #6b7a99;
+}
+
+.manager-observation-read p {
+  margin: 0;
+  line-height: 1.5;
+  color: #1f2a44;
+  white-space: pre-wrap;
+}
+
+.manager-observation-read .manager-observation-meta {
+  display: block;
+  margin-top: 0.45rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.82rem;
+}
+
+.panorama-member-block--manager-note {
+  margin-top: 0.75rem;
+}
+
+.panorama-member-block--manager-note .manager-observation {
+  margin-top: 0;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.panorama-member-block--manager-note .manager-observation h4 {
+  margin-bottom: 0.45rem;
+}
+
+.home-observations-block--manager {
+  margin-top: 0.85rem;
+  padding: 0.9rem 1rem;
+  border-radius: 10px;
+  background: #f3f6ff;
+  border: 1px solid #d8e2ff;
+}
+
+.home-observations-block--manager .manager-observation {
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.home-observations-team-card .manager-observation {
+  margin-top: 0.65rem;
+}

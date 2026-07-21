@@ -127,7 +127,7 @@ export function KpiObjectiveInbox({ compact, onGoKpis }: Props) {
 
       {onGoKpis && (
         <button type="button" className="btn-ghost kpi-inbox-link" onClick={onGoKpis}>
-          Ver mis KPIs →
+          Ver en Equipo → KPIs
         </button>
       )}
     </section>

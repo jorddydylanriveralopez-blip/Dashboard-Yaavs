@@ -1,0 +1,199 @@
+/* ── Yaavs motion system ── */
+
+/* El keyframe final no define transform: así el valor retenido por
+   fill-mode "both" es "none" y el contenedor no rompe position: fixed
+   de los modales que viven dentro (crearía un containing block). */
+@keyframes yaavs-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes yaavs-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes yaavs-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes yaavs-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes yaavs-pie-enter {
+  from {
+    opacity: 0;
+    transform: rotate(-120deg) scale(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+  }
+}
+
+@keyframes yaavs-pie-hole {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes yaavs-bar-rise {
+  from {
+    opacity: 0;
+    transform: scaleY(0);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes yaavs-bar-fill-x {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes yaavs-number-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.9);
+  }
+  70% {
+    transform: translateY(-2px) scale(1.03);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes yaavs-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Page enter (dashboard view switch) */
+.dashboard-page {
+  animation: yaavs-fade-in-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.dashboard-page-header {
+  animation: yaavs-fade-in-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Stagger children */
+.yaavs-stagger > * {
+  animation: yaavs-fade-in-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.yaavs-stagger > *:nth-child(1) {
+  animation-delay: 0ms;
+}
+.yaavs-stagger > *:nth-child(2) {
+  animation-delay: 50ms;
+}
+.yaavs-stagger > *:nth-child(3) {
+  animation-delay: 100ms;
+}
+.yaavs-stagger > *:nth-child(4) {
+  animation-delay: 150ms;
+}
+.yaavs-stagger > *:nth-child(5) {
+  animation-delay: 200ms;
+}
+.yaavs-stagger > *:nth-child(6) {
+  animation-delay: 250ms;
+}
+.yaavs-stagger > *:nth-child(7) {
+  animation-delay: 300ms;
+}
+.yaavs-stagger > *:nth-child(8) {
+  animation-delay: 350ms;
+}
+.yaavs-stagger > *:nth-child(9) {
+  animation-delay: 400ms;
+}
+.yaavs-stagger > *:nth-child(10) {
+  animation-delay: 450ms;
+}
+.yaavs-stagger > *:nth-child(11) {
+  animation-delay: 500ms;
+}
+.yaavs-stagger > *:nth-child(12) {
+  animation-delay: 550ms;
+}
+
+/* Chart bars — use --bar-i for delay (ms) */
+.chart-bar-rise {
+  transform-origin: bottom center;
+  animation: yaavs-bar-rise 0.65s cubic-bezier(0.34, 1.25, 0.64, 1) both;
+  animation-delay: calc(var(--bar-i, 0) * 45ms);
+}
+
+.chart-bar-fill-x {
+  transform-origin: left center;
+  animation: yaavs-bar-fill-x 0.75s cubic-bezier(0.34, 1.2, 0.64, 1) both;
+  animation-delay: calc(var(--bar-i, 0) * 55ms);
+}
+
+.chart-stat-pop strong {
+  display: inline-block;
+  animation: yaavs-number-pop 0.55s cubic-bezier(0.34, 1.3, 0.64, 1) both;
+  animation-delay: calc(var(--bar-i, 0) * 40ms + 120ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-page,
+  .dashboard-page-header,
+  .yaavs-stagger > *,
+  .chart-bar-rise,
+  .chart-bar-fill-x,
+  .chart-stat-pop strong,
+  .pie-chart-ring--animate,
+  .pie-chart-hole--animate,
+  .pie-chart-legend li,
+  .daily-pulse--animate,
+  .pulse-section--animate,
+  .pulse-stat--animate,
+  .report-stat--animate,
+  .attendance-stat--animate {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -10,7 +10,8 @@ export const INLINE_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
 /** Sin tope fijo de cantidad; a partir de 6 se muestra vista en lista. */
 export const LIST_LAYOUT_MIN_COUNT = 6;
 
-export const ATTACHMENT_ACCEPT = 'image/*,application/pdf,video/*';
+/** Se permite seleccionar cualquier tipo de archivo como evidencia. */
+export const ATTACHMENT_ACCEPT = '*/*';
 
 export function formatAttachmentSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -32,11 +33,7 @@ export function guessMimeType(file: File): string {
 }
 
 export function isAllowedFile(file: File): boolean {
-  const t = guessMimeType(file);
-  if (t.startsWith('image/')) return true;
-  if (t.startsWith('video/')) return true;
-  if (t === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) return true;
-  return false;
+  return file.size <= MAX_ATTACHMENT_BYTES;
 }
 
 export function isImageAttachment(mimeType: string): boolean {

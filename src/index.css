@@ -1,4 +1,5 @@
 @import './styles/tech-ambience.css';
+@import './styles/animations.css';
 
 :root {
   --accent: #0055ff;

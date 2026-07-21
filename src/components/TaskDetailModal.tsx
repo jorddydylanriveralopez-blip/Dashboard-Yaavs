@@ -1,13 +1,17 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { STATUS_COLORS, STATUS_LABELS } from '../constants';
 import { getDeadlineInfo } from '../utils/deadline';
 import { hasActiveKpiObjective } from '../utils/kpiObjectives';
 import { getMonthKey } from '../utils/performanceHistory';
+import { collaboratorForEmployeeId } from '../utils/collaboratorMap';
+import { projectIncludesCollaborator } from '../utils/projectCollaborators';
+import { formatShortDate } from '../utils/formatDate';
+import { labelFor, PROJECT_STATUSES, PROJECT_STATUS_COLORS } from '../data/projectOptions';
 import { FileAttachmentsEditor, FileAttachmentsList } from './FileAttachments';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
-import type { EmployeeTask, TaskStatus } from '../types';
+import type { CreativeProject, EmployeeTask, TaskStatus } from '../types';
 import './TaskDetailModal.css';
 
 interface Props {
@@ -16,7 +20,8 @@ interface Props {
 }
 
 export function TaskDetailModal({ taskId, onClose }: Props) {
-  const { board, canEditTask, updateTask, deleteTask, canEditAll, user } = useApp();
+  const { board, allProjects, canEditTask, updateTask, deleteTask, canEditAll, user } =
+    useApp();
   const { confirm } = useConfirm();
 
   const task = useMemo(
@@ -37,6 +42,8 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
   const canEditObjectiveFields = editable && !lockedKpiFields;
   const canEditProgressFields = editable;
   const deadline = getDeadlineInfo(task.dueDate, task.status);
+  // Proyectos del colaborador: el gerente ve los de todos; cada quien ve los suyos.
+  const canSeeProjects = canEditAll || isOwnTask;
 
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
@@ -199,6 +206,10 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
             )}
           </section>
 
+          {canSeeProjects && (
+            <MemberProjectsSection employeeId={task.employeeId} projects={allProjects} />
+          )}
+
           <section>
             <label>Notas</label>
             {editable ? (
@@ -283,5 +294,132 @@ export function TaskDetailModal({ taskId, onClose }: Props) {
         </footer>
       </div>
     </div>
+  );
+}
+
+type ProjectGroupKey = 'overdue' | 'active' | 'done';
+
+interface ProjectGroup {
+  key: ProjectGroupKey;
+  label: string;
+  projects: CreativeProject[];
+}
+
+function MemberProjectsSection({
+  employeeId,
+  projects,
+}: {
+  employeeId: string;
+  projects: CreativeProject[];
+}) {
+  const [openGroup, setOpenGroup] = useState<ProjectGroupKey | null>(null);
+
+  const groups = useMemo<ProjectGroup[]>(() => {
+    const slug = collaboratorForEmployeeId(employeeId);
+    const mine = projects.filter((p) => {
+      if (p.assignedEmployeeId === employeeId) return true;
+      return slug ? projectIncludesCollaborator(p, slug) : false;
+    });
+
+    const overdue: CreativeProject[] = [];
+    const active: CreativeProject[] = [];
+    const done: CreativeProject[] = [];
+    for (const p of mine) {
+      if (p.status === 'terminado') {
+        done.push(p);
+      } else if (getDeadlineInfo(p.commitmentDate, p.status).tone === 'overdue') {
+        overdue.push(p);
+      } else {
+        active.push(p);
+      }
+    }
+    overdue.sort((a, b) => a.commitmentDate.localeCompare(b.commitmentDate));
+    active.sort((a, b) => a.commitmentDate.localeCompare(b.commitmentDate));
+    done.sort((a, b) =>
+      (b.finishedDate ?? b.updatedAt).localeCompare(a.finishedDate ?? a.updatedAt),
+    );
+
+    return [
+      { key: 'overdue' as const, label: 'Atrasados', projects: overdue },
+      { key: 'active' as const, label: 'Activos', projects: active },
+      { key: 'done' as const, label: 'Concluidos', projects: done },
+    ];
+  }, [employeeId, projects]);
+
+  const total = groups.reduce((sum, g) => sum + g.projects.length, 0);
+  const overdueCount = groups[0].projects.length;
+
+  useEffect(() => {
+    setOpenGroup(overdueCount > 0 ? 'overdue' : total > 0 ? 'active' : null);
+    // Solo al abrir el modal de otra persona.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId]);
+
+  return (
+    <section className="member-projects">
+      <label>Proyectos ({total})</label>
+      {total === 0 ? (
+        <p className="member-projects-empty">Sin proyectos asignados por ahora.</p>
+      ) : (
+        <div className="member-projects-groups">
+          {groups.map((group) => {
+            const isOpen = openGroup === group.key;
+            return (
+              <div key={group.key} className={`project-group project-group--${group.key}`}>
+                <button
+                  type="button"
+                  className="project-group-toggle"
+                  aria-expanded={isOpen}
+                  disabled={group.projects.length === 0}
+                  onClick={() => setOpenGroup(isOpen ? null : group.key)}
+                >
+                  <span className="project-group-dot" aria-hidden />
+                  <span className="project-group-name">{group.label}</span>
+                  <span className="project-group-count">{group.projects.length}</span>
+                  <span className={`project-group-chevron ${isOpen ? 'open' : ''}`} aria-hidden>
+                    ▾
+                  </span>
+                </button>
+                {isOpen && group.projects.length > 0 && (
+                  <ul className="project-group-list">
+                    {group.projects.map((p) => {
+                      const info = getDeadlineInfo(p.commitmentDate, p.status);
+                      return (
+                        <li key={p.id} className="project-group-item">
+                          <div className="project-item-main">
+                            <strong>{p.projectName.trim() || 'Sin nombre'}</strong>
+                            <span
+                              className="project-item-status"
+                              style={{ background: PROJECT_STATUS_COLORS[p.status] }}
+                            >
+                              {labelFor(PROJECT_STATUSES, p.status)}
+                            </span>
+                          </div>
+                          <div className="project-item-meta">
+                            {group.key === 'done' ? (
+                              <span>
+                                Entregado{' '}
+                                {p.finishedDate ? formatShortDate(p.finishedDate) : '—'}
+                              </span>
+                            ) : (
+                              <>
+                                <span>Compromiso {formatShortDate(p.commitmentDate)}</span>
+                                <span className={`project-item-deadline tone-${info.tone}`}>
+                                  {info.label}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }

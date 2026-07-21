@@ -24,3 +24,12 @@ Archivo.zip
 *.njsproj
 *.sln
 *.sw?
+.vercel
+.env*
+
+# Local Netlify folder
+.netlify
+
+# Local server state (Neon is the source of truth in production)
+server/data/
+

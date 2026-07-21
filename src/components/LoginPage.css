@@ -163,6 +163,68 @@
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.login-user-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  animation: login-in 0.35s ease;
+}
+
+.login-user-preview-name {
+  margin: 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.login-user-preview-avatar.user-avatar--photo {
+  border: 3px solid rgba(0, 85, 255, 0.2);
+  box-shadow: 0 8px 24px rgba(0, 40, 100, 0.18);
+}
+
+.login-password-wrap {
+  position: relative;
+  display: block;
+}
+
+.login-password-wrap input {
+  width: 100%;
+  padding-right: 48px;
+}
+
+.login-password-visibility {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+
+.login-password-visibility:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.login-password-visibility:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .login-error {
   margin: -4px 0 0;
   color: #e2445c;

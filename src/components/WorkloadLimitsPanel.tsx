@@ -45,8 +45,9 @@ export function WorkloadLimitsPanel() {
         <div>
           <h2>Límites de trabajos</h2>
           <p>
-            Evita saturar al equipo. Cuenta proyectos activos + indicaciones pendientes por persona.
-            Orlando puede pedir contraseña para enviar uno extra.
+            Máximo {workloadLimits.defaultMax} proyectos activos por persona. Los terminados y
+            las indicaciones pendientes no cuentan. Si alguien está al límite, pedirá tu
+            contraseña para asignar uno extra.
           </p>
         </div>
         <label className="workload-limits-default">
@@ -114,7 +115,8 @@ function WorkloadLimitRow({
       <td>
         <span className="workload-limits-count">{workloadLabel(check)}</span>
         <span className="workload-limits-detail">
-          {check.current.projects} proy. · {check.current.pendingAssignments} indic.
+          {check.current.projects} proyecto{check.current.projects === 1 ? '' : 's'} activo
+          {check.current.projects === 1 ? '' : 's'}
         </span>
       </td>
       <td>

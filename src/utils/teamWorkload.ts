@@ -1,7 +1,7 @@
 import { COLLABORATORS, labelFor } from '../data/projectOptions';
 import { isActiveProject } from './activeItems';
 import { getDeadlineInfo } from './deadline';
-import { resolveProjectAssignee } from './collaboratorMap';
+import { projectIncludesCollaborator } from './projectCollaborators';
 import {
   countEmployeeWorkload,
   getWorkloadMax,
@@ -54,15 +54,20 @@ export function buildTeamWorkload(
   }
 
   for (const p of active) {
-    if (p.collaborator === 'todos') continue;
-    const assignee = resolveProjectAssignee(p, activeUsers);
-    if (!assignee) continue;
-    const row = rows.get(assignee);
-    if (!row) continue;
-    row.activeCount += 1;
-    const tone = getDeadlineInfo(p.commitmentDate, 'en_progreso').tone;
-    if (tone === 'overdue') row.overdueCount += 1;
-    else if (tone === 'urgent' || tone === 'soon') row.dueSoonCount += 1;
+    for (const c of COLLABORATORS) {
+      if (c.value === 'todos') continue;
+      if (!projectIncludesCollaborator(p, c.value)) continue;
+      const employeeId = activeUsers.find(
+        (u) => u.username.toLowerCase() === (c.value === 'carlos' ? 'juancarlos' : c.value),
+      )?.employeeId;
+      if (!employeeId) continue;
+      const row = rows.get(employeeId);
+      if (!row) continue;
+      row.activeCount += 1;
+      const tone = getDeadlineInfo(p.commitmentDate, 'en_progreso').tone;
+      if (tone === 'overdue') row.overdueCount += 1;
+      else if (tone === 'urgent' || tone === 'soon') row.dueSoonCount += 1;
+    }
   }
 
   return Array.from(rows.values())
@@ -93,8 +98,7 @@ export function buildTeamCapacity(
     let dueSoonCount = 0;
 
     for (const p of active) {
-      if (p.collaborator === 'todos') continue;
-      if (resolveProjectAssignee(p, activeUsers) !== employeeId) continue;
+      if (!projectIncludesCollaborator(p, c.value)) continue;
       const tone = getDeadlineInfo(p.commitmentDate, 'en_progreso').tone;
       if (tone === 'overdue') overdueCount += 1;
       else if (tone === 'urgent' || tone === 'soon') dueSoonCount += 1;

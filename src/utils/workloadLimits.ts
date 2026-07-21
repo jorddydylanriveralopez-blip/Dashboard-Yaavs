@@ -1,6 +1,7 @@
 import { DEFAULT_WORKLOAD_MAX } from '../constants';
-import { isActiveProject, isPendingAssignment } from './activeItems';
-import { resolveProjectAssignee } from './collaboratorMap';
+import { countsTowardWorkload } from './activeItems';
+import { collaboratorForEmployeeId, resolveProjectAssignee } from './collaboratorMap';
+import { projectIncludesCollaborator } from './projectCollaborators';
 import type {
   CreativeProject,
   TaskAssignment,
@@ -10,22 +11,31 @@ import type {
   WorkloadLimitsStore,
 } from '../types';
 
+const LEGACY_DEFAULT_WORKLOAD_MAX = 10;
+
 export const EMPTY_WORKLOAD_LIMITS: WorkloadLimitsStore = {
   defaultMax: DEFAULT_WORKLOAD_MAX,
   byEmployee: {},
 };
 
+function migrateLegacyMax(max: number): number {
+  return max === LEGACY_DEFAULT_WORKLOAD_MAX ? DEFAULT_WORKLOAD_MAX : max;
+}
+
 export function normalizeWorkloadLimits(raw: unknown): WorkloadLimitsStore {
   if (!raw || typeof raw !== 'object') return { ...EMPTY_WORKLOAD_LIMITS };
   const o = raw as Partial<WorkloadLimitsStore>;
-  const defaultMax =
+  const defaultMax = migrateLegacyMax(
     typeof o.defaultMax === 'number' && o.defaultMax >= 1
       ? Math.round(o.defaultMax)
-      : DEFAULT_WORKLOAD_MAX;
+      : DEFAULT_WORKLOAD_MAX,
+  );
   const byEmployee: Record<string, number> = {};
   if (o.byEmployee && typeof o.byEmployee === 'object') {
     for (const [id, max] of Object.entries(o.byEmployee)) {
-      if (typeof max === 'number' && max >= 1) byEmployee[id] = Math.round(max);
+      if (typeof max === 'number' && max >= 1) {
+        byEmployee[id] = migrateLegacyMax(Math.round(max));
+      }
     }
   }
   return { defaultMax, byEmployee };
@@ -41,25 +51,23 @@ export function getWorkloadMax(
 export function countEmployeeWorkload(
   employeeId: string,
   projects: CreativeProject[],
-  assignments: TaskAssignment[],
+  _assignments: TaskAssignment[],
   activeUsers: User[],
   options?: { excludeProjectId?: string },
 ): WorkloadBreakdown {
   const projectsCount = projects.filter((p) => {
-    if (!isActiveProject(p)) return false;
+    if (!countsTowardWorkload(p)) return false;
     if (p.id === options?.excludeProjectId) return false;
-    if (p.collaborator === 'todos') return false;
+    const slug = collaboratorForEmployeeId(employeeId);
+    if (slug && projectIncludesCollaborator(p, slug)) return true;
     return resolveProjectAssignee(p, activeUsers) === employeeId;
   }).length;
 
-  const pendingAssignments = assignments.filter(
-    (a) => a.employeeId === employeeId && isPendingAssignment(a),
-  ).length;
-
   return {
     projects: projectsCount,
-    pendingAssignments,
-    total: projectsCount + pendingAssignments,
+    // Las indicaciones pendientes aún no son trabajo activo.
+    pendingAssignments: 0,
+    total: projectsCount,
   };
 }
 

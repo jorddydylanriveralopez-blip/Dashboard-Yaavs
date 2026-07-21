@@ -3,6 +3,11 @@
   border-radius: var(--radius-lg);
   background: var(--bg-surface);
   border: 1px solid var(--border);
+  animation: yaavs-fade-in-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.daily-pulse-head {
+  animation: yaavs-fade-in 0.4s ease 0.1s both;
 }
 
 .daily-pulse--compact {
@@ -118,7 +123,6 @@
   max-width: 20px;
   border-radius: 4px 4px 2px 2px;
   min-height: 4px;
-  transition: height 0.3s ease;
 }
 
 .daily-pulse-bar--up {

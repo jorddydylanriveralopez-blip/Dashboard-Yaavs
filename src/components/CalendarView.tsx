@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { useApp } from '../context/AppContext';
 import { REMINDER_OPTIONS } from '../constants';
+import { reminderEmailForUser } from '../api/calendar';
 import { useEventReminders } from '../hooks/useEventReminders';
 import {
   elapsedMinutesSince,
@@ -10,6 +11,7 @@ import {
   toDateKey,
 } from '../utils/calendarDates';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
+import { useSharedNow } from '../hooks/useSharedNow';
 import type { CalendarEvent } from '../types';
 import './CalendarView.css';
 
@@ -26,12 +28,15 @@ export function CalendarView() {
     startTimer,
     stopTimer,
     markEventReminded,
+    markEventEmailReminded,
   } = useApp();
 
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
-  const [selectedDate, setSelectedDate] = useState(toDateKey(now));
+  const reminderEmail = user ? reminderEmailForUser(user.id, user.email) : null;
+
+  const initialNow = new Date();
+  const [year, setYear] = useState(initialNow.getFullYear());
+  const [month, setMonth] = useState(initialNow.getMonth());
+  const [selectedDate, setSelectedDate] = useState(toDateKey(initialNow));
 
   const [title, setTitle] = useState('');
   const [time, setTime] = useState('09:00');
@@ -39,14 +44,10 @@ export function CalendarView() {
   const [estimatedMinutes, setEstimatedMinutes] = useState(60);
   const [notes, setNotes] = useState('');
 
-  useEventReminders(calendar.events, markEventReminded);
+  useEventReminders(calendar.events, user, markEventReminded, markEventEmailReminded);
 
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (!calendar.activeTimer) return;
-    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
-    return () => window.clearInterval(id);
-  }, [calendar.activeTimer]);
+  const tickNow = useSharedNow(Boolean(calendar.activeTimer));
+  void tickNow;
 
   const matrix = useMemo(() => getMonthMatrix(year, month), [year, month]);
 
@@ -181,6 +182,12 @@ export function CalendarView() {
             <p className="calendar-user">Agenda de {user?.name}</p>
             <p className="calendar-hint">
               Al marcar un pendiente como hecho, desaparece de la agenda.
+              {reminderEmail && (
+                <>
+                  {' '}
+                  Los recordatorios también llegan a <strong>{reminderEmail}</strong>.
+                </>
+              )}
             </p>
           </header>
 
@@ -331,7 +338,11 @@ function EventCard({
       <p className="event-time-meta">
         {formatDuration(tracked)} / {formatDuration(event.estimatedMinutes)} estimado
         {event.reminderMinutes > 0 && (
-          <span className="event-reminder"> · Recordatorio activo</span>
+          <span className="event-reminder">
+            {' '}
+            · Recordatorio activo
+            {event.emailRemindedAt ? ' · Correo enviado' : ''}
+          </span>
         )}
       </p>
 

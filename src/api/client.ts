@@ -1,8 +1,16 @@
 import type { AppSyncState } from '../types';
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-
 const FETCH_TIMEOUT_MS = 8000;
+
+function apiBase(): string {
+  const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  // En producción las funciones /api/* viven en el mismo dominio (Vercel).
+  if (import.meta.env.PROD && typeof window !== 'undefined') return window.location.origin;
+  return '';
+}
+
+const API_URL = apiBase();
 
 function isLocalhostApi(url: string): boolean {
   try {
@@ -47,17 +55,25 @@ export async function fetchSyncState(): Promise<AppSyncState | null> {
   }
 }
 
-export async function pushSyncState(state: AppSyncState): Promise<boolean> {
-  if (!isApiEnabled()) return false;
+export async function pushSyncState(
+  state: AppSyncState,
+): Promise<{ ok: boolean; updatedAt?: string }> {
+  if (!isApiEnabled()) return { ok: false };
   try {
     const res = await fetchWithTimeout(`${API_URL}/api/state`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...state, updatedAt: new Date().toISOString() }),
     });
-    return res.ok;
+    if (!res.ok) return { ok: false };
+    try {
+      const body = (await res.json()) as { updatedAt?: string };
+      return { ok: true, updatedAt: body.updatedAt ?? state.updatedAt };
+    } catch {
+      return { ok: true, updatedAt: state.updatedAt };
+    }
   } catch {
-    return false;
+    return { ok: false };
   }
 }
 

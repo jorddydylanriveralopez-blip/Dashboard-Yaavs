@@ -5,6 +5,7 @@ import {
   getStreakAlertMessage,
   shouldAlertNegativeStreak,
 } from '../utils/performanceHistory';
+import { showLocalNotification } from '../api/pushClient';
 import type { PerformanceHistoryStore } from '../types';
 
 export function usePerformanceStreakAlert(
@@ -23,12 +24,10 @@ export function usePerformanceStreakAlert(
 
     const body = getStreakAlertMessage();
 
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-      new Notification(`${COMPANY_NAME} — Apoyo del equipo`, {
-        body,
-        tag: `yaavs-streak-${employeeId}`,
-      });
-    }
+    void showLocalNotification(`${COMPANY_NAME} — Apoyo del equipo`, {
+      body,
+      tag: `yaavs-streak-${employeeId}`,
+    });
 
     localStorage.setItem(alertKey, new Date().toISOString());
     alerted.current = true;

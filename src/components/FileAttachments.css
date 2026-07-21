@@ -105,6 +105,24 @@
   opacity: 0.9;
 }
 
+.file-library-btn {
+  align-self: center;
+  min-height: 36px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+  color: var(--accent);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.file-library-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .file-upload-btn {
   position: relative;
   display: flex;

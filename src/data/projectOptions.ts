@@ -7,12 +7,18 @@ import type {
   ProjectType,
   RequestingDepartment,
 } from '../types';
+import { COLLABORATOR_DISPLAY_NAMES } from './teamDisplayNames';
 
 export const BUSINESS_UNITS: { value: BusinessUnit; label: string }[] = [
+  { value: 'yaavs_general', label: 'Yaavs general' },
   { value: 'prepago', label: 'Prepago' },
+  { value: 'prepago_centro', label: 'Prepago centro' },
+  { value: 'prepago_foraneo', label: 'Prepago foráneo' },
   { value: 'pospago', label: 'Pospago' },
   { value: 'silemi', label: 'Silemi' },
   { value: 'yaavs_shop', label: 'Yaavs Shop' },
+  { value: 'arregla_mx', label: 'Arregla MX' },
+  { value: 'academia_yaavs', label: 'Academia Yaavs' },
 ];
 
 export const REQUESTING_DEPARTMENTS: { value: RequestingDepartment; label: string }[] = [
@@ -24,6 +30,8 @@ export const REQUESTING_DEPARTMENTS: { value: RequestingDepartment; label: strin
   { value: 'almacen', label: 'Almacén' },
   { value: 'capacitacion', label: 'Capacitación' },
   { value: 'ti', label: 'TI' },
+  { value: 'marketing', label: 'Marketing' },
+  { value: 'ventas', label: 'Ventas' },
 ];
 
 export const PROJECT_TYPES: { value: ProjectType; label: string }[] = [
@@ -45,25 +53,71 @@ export const PROJECT_PRIORITIES: { value: ProjectPriority; label: string }[] = [
 ];
 
 export const INTERNAL_AREAS: { value: InternalArea; label: string }[] = [
-  { value: 'diseno_web', label: 'Diseño web' },
-  { value: 'diseno_corporativo', label: 'Diseño corporativo' },
-  { value: 'diseno_editorial', label: 'Diseño editorial' },
-  { value: 'diseno_audiovisual', label: 'Diseño audiovisual' },
-  { value: 'community_manager', label: 'Community manager' },
-  { value: 'produccion', label: 'Producción' },
-  { value: 'mercadotecnia', label: 'Mercadotecnia' },
   { value: 'diseno_grafico', label: 'Diseño gráfico' },
+  { value: 'diseno_web', label: 'Diseño web' },
+  { value: 'diseno_audiovisual', label: 'Diseño audiovisual' },
+  { value: 'redes_sociales', label: 'Redes sociales' },
 ];
 
+const LEGACY_INTERNAL_AREA_MAP: Record<string, InternalArea> = {
+  diseno_corporativo: 'diseno_grafico',
+  diseno_editorial: 'diseno_grafico',
+  community_manager: 'redes_sociales',
+  produccion: 'diseno_audiovisual',
+  mercadotecnia: 'redes_sociales',
+};
+
+export function normalizeInternalArea(value: string): InternalArea {
+  if (INTERNAL_AREAS.some((a) => a.value === value)) return value as InternalArea;
+  return LEGACY_INTERNAL_AREA_MAP[value] ?? 'diseno_grafico';
+}
+
+export function labelForInternalArea(value: string): string {
+  const normalized = normalizeInternalArea(value);
+  return labelFor(INTERNAL_AREAS, normalized);
+}
+
+export const REQUESTED_BY_OPTIONS = [
+  { value: 'Carlos', label: 'Carlos Trejo' },
+  { value: 'Orlando', label: 'Orlando Villagómez' },
+  { value: 'Ambos', label: 'Ambos' },
+] as const;
+
+export type RequestedByOption = (typeof REQUESTED_BY_OPTIONS)[number]['value'];
+
+export function normalizeRequestedBy(value: string): RequestedByOption | '' {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === 'ambos' ||
+    (lower.includes('orlando') && lower.includes('carlos'))
+  ) {
+    return 'Ambos';
+  }
+  if (lower === 'orlando' || lower.startsWith('orlando')) return 'Orlando';
+  if (lower === 'carlos' || lower.includes('carlos')) return 'Carlos';
+  return '';
+}
+
+export function labelForRequestedBy(value: string): string {
+  const normalized = normalizeRequestedBy(value);
+  if (normalized) {
+    const match = REQUESTED_BY_OPTIONS.find((o) => o.value === normalized);
+    if (match) return match.label;
+  }
+  return value.trim() || '—';
+}
+
 export const COLLABORATORS: { value: Collaborator; label: string }[] = [
-  { value: 'andrea', label: 'Andrea' },
-  { value: 'roberto', label: 'Roberto' },
-  { value: 'jorddy', label: 'Jorddy' },
-  { value: 'andres', label: 'Andres' },
-  { value: 'jesus', label: 'Jesus' },
-  { value: 'ana', label: 'Ana García' },
-  { value: 'carlos', label: 'Juan Carlos' },
-  { value: 'todos', label: 'TODOS' },
+  { value: 'andrea', label: COLLABORATOR_DISPLAY_NAMES.andrea },
+  { value: 'roberto', label: COLLABORATOR_DISPLAY_NAMES.roberto },
+  { value: 'jorddy', label: COLLABORATOR_DISPLAY_NAMES.jorddy },
+  { value: 'andres', label: COLLABORATOR_DISPLAY_NAMES.andres },
+  { value: 'jesus', label: COLLABORATOR_DISPLAY_NAMES.jesus },
+  { value: 'carlos', label: COLLABORATOR_DISPLAY_NAMES.carlos },
+  { value: 'yared', label: COLLABORATOR_DISPLAY_NAMES.yared },
+  { value: 'todos', label: COLLABORATOR_DISPLAY_NAMES.todos },
 ];
 
 export const PROJECT_STATUSES: { value: ProjectStatus; label: string }[] = [
@@ -96,7 +150,8 @@ export const PRIORITY_COLORS: Record<ProjectPriority, string> = {
 
 export function labelFor<T extends string>(
   list: { value: T; label: string }[],
-  value: T,
+  value: T | null | undefined,
 ): string {
-  return list.find((x) => x.value === value)?.label ?? value;
+  if (value == null || value === '') return '—';
+  return list.find((x) => x.value === value)?.label ?? String(value);
 }

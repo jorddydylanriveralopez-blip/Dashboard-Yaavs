@@ -12,11 +12,25 @@ function isIos(): boolean {
   );
 }
 
+function isAndroid(): boolean {
+  return /Android/i.test(navigator.userAgent);
+}
+
 function isStandalone(): boolean {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
     (navigator as Navigator & { standalone?: boolean }).standalone === true
   );
+}
+
+export function getPwaInstallHint(): string {
+  if (isIos()) {
+    return 'Safari → Compartir → Añadir a pantalla de inicio';
+  }
+  if (isAndroid()) {
+    return 'Chrome → menú ⋮ → Instalar aplicación o Añadir a inicio';
+  }
+  return 'Chrome o Edge → icono ⊕ en la barra de direcciones, o menú → Instalar Yaavs';
 }
 
 export function usePwaInstall() {
@@ -61,9 +75,9 @@ export function usePwaInstall() {
     localStorage.setItem('yaavs-pwa-dismiss', '1');
   }, []);
 
-  const showIosHint = isIos() && !installed && !dismissed;
-  const showInstallBanner =
-    !installed && !dismissed && (deferred !== null || showIosHint);
+  const showIosHint = isIos() && !installed;
+  const showInstallBanner = !installed && !dismissed;
+  const installHint = getPwaInstallHint();
 
   return {
     canInstall: deferred !== null,
@@ -72,5 +86,8 @@ export function usePwaInstall() {
     installed,
     install,
     dismiss,
+    installHint,
+    isIos: isIos(),
+    isAndroid: isAndroid(),
   };
 }

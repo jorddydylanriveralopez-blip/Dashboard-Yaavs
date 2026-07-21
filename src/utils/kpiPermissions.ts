@@ -13,3 +13,8 @@ export function canSendKpiObjectives(user: User | null | undefined): boolean {
 export function canManageWorkloadLimits(user: User | null | undefined): boolean {
   return canSendKpiObjectives(user);
 }
+
+/** Puede escribir observaciones personalizadas por colaborador. */
+export function canWriteManagerObservations(user: User | null | undefined): boolean {
+  return canSendKpiObjectives(user);
+}

@@ -209,6 +209,18 @@
   padding-top: 4px;
 }
 
+.profile-push-status {
+  font-size: 0.82rem;
+  color: var(--text-secondary, #5a6b8c);
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
+.profile-push-status--on {
+  color: #059669;
+  font-weight: 600;
+}
+
 .profile-recovery {
   margin: 0;
   font-size: 0.75rem;

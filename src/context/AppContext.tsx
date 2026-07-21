@@ -13,6 +13,7 @@ import {
   MARKETING_DEPARTMENT,
 } from '../data/seed';
 import { USERS } from '../data/users';
+import { displayNameForEmployee } from '../data/teamDisplayNames';
 import {
   canRemoveTeamMember,
   defaultTeamRoster,
@@ -34,13 +35,19 @@ import {
   pushSyncState,
 } from '../api/client';
 import { saveAssignmentAttachments } from '../utils/attachmentStore';
+import { syncCalendarForReminders } from '../api/calendar';
+import { notifyPush, subscribeToPush } from '../api/pushClient';
 import {
   ASSIGNMENTS_STORAGE_KEY,
   BOARD_SCHEMA_VERSION,
   CALENDAR_STORAGE_KEY,
+  CALENDAR_EMAIL_BY_USER,
+  DELETED_PROJECTS_KEY,
   EMPLOYEE_PHONES_KEY,
   PASSWORD_OVERRIDES_KEY,
   SOCIAL_METRICS_KEY,
+  SOCIAL_ACCOUNTS_KEY,
+  EXTRA_PROJECTS_KEY,
   USER_PROFILES_KEY,
   WORKLOAD_LIMITS_KEY,
   DAILY_KPI_SNAPSHOTS_KEY,
@@ -48,6 +55,8 @@ import {
   MONTHLY_ARCHIVES_KEY,
   normalizeCompanyName,
   PERFORMANCE_HISTORY_KEY,
+  MANAGER_OBSERVATIONS_KEY,
+  TEAM_CHAT_STORAGE_KEY,
   SESSION_EXPIRY_KEY,
   SESSION_HOURS,
   SESSION_KEY,
@@ -90,13 +99,34 @@ import {
   EMPTY_WORKLOAD_LIMITS,
 } from '../utils/workloadLimits';
 import {
+  collaboratorForEmployeeId,
   employeeIdForCollaboratorSlug,
   projectVisibleToUser,
-  resolveProjectAssignee,
 } from '../utils/collaboratorMap';
+import {
+  getProjectCollaborators,
+  normalizeProjectCollaborators,
+  patchForCollaboratorsChange,
+  sanitizeProjectCollaborators,
+} from '../utils/projectCollaborators';
+import {
+  loadAttendanceStore,
+  saveAttendanceStore,
+  upsertAttendance,
+} from '../utils/attendance';
+import {
+  loadManagerObservations,
+  upsertManagerObservation,
+} from '../utils/managerObservations';
+import {
+  estimatedHoursForProject,
+  isEarlyDelivery,
+  isHoursExceeded,
+} from '../utils/projectHours';
 import type {
   ActivityEvent,
   AppSyncState,
+  AttendanceStore,
   BoardState,
   CalendarEvent,
   CalendarStore,
@@ -105,20 +135,27 @@ import type {
   MonthlyPerformanceRecord,
   MonthlyArchiveStore,
   PerformanceHistoryStore,
+  ProjectProgressUpdate,
   AssignmentBrief,
+  Collaborator,
   FileAttachment,
   DailyKpiStore,
   ContentSentiment,
   SocialPlatform,
   SocialMetricsStore,
+  SocialAccountsStore,
+  ExtraProjectEntry,
   KpiObjectiveAssignment,
   TaskAssignment,
+  TeamChatMessage,
   User,
   UserCalendarState,
   WorkloadActionResult,
   WorkloadCheckResult,
   WorkloadLimitsStore,
   UserProfilesStore,
+  ManagerObservationsStore,
+  ManagerEmployeeObservation,
 } from '../types';
 
 interface AppContextValue {
@@ -127,6 +164,10 @@ interface AppContextValue {
   calendar: UserCalendarState;
   login: (username: string, password: string) => boolean;
   logout: () => void;
+  spyMode: boolean;
+  enterSpyMode: () => boolean;
+  exitSpyMode: () => void;
+  enablePushNotifications: () => Promise<{ ok: boolean; reason?: string }>;
   canEditAll: boolean;
   canSendKpiObjectives: boolean;
   canManageWorkloadLimits: boolean;
@@ -157,6 +198,7 @@ interface AppContextValue {
   startTimer: (eventId: string) => void;
   stopTimer: () => void;
   markEventReminded: (id: string) => void;
+  markEventEmailReminded: (id: string) => void;
   assignments: TaskAssignment[];
   myPendingAssignments: TaskAssignment[];
   pendingAssignmentsCount: number;
@@ -203,6 +245,8 @@ interface AppContextValue {
     options?: { overridePassword?: string },
   ) => WorkloadActionResult;
   deleteProject: (id: string) => void;
+  acceptProject: (id: string) => void;
+  declineProject: (id: string, reason?: string) => void;
   employeePhones: Record<string, string>;
   setEmployeePhone: (employeeId: string, phone: string) => void;
   activityFeed: ActivityEvent[];
@@ -233,6 +277,67 @@ interface AppContextValue {
     notes: string;
   }) => void;
   deleteSocialEntry: (id: string) => void;
+  socialAccounts: SocialAccountsStore;
+  setSocialAccount: (
+    platform: SocialPlatform,
+    link: { handle: string; url: string } | null,
+  ) => void;
+  extraProjects: ExtraProjectEntry[];
+  visibleExtraProjects: ExtraProjectEntry[];
+  addExtraProject: (input: {
+    projectName: string;
+    employeeIds: string[];
+    minutes?: number;
+    doneDate: string;
+    notes?: string;
+  }) => ExtraProjectEntry | null;
+  updateExtraProject: (
+    id: string,
+    patch: Partial<
+      Pick<
+        ExtraProjectEntry,
+        'projectName' | 'employeeIds' | 'minutes' | 'doneDate' | 'notes'
+      >
+    >,
+  ) => boolean;
+  deleteExtraProject: (id: string) => boolean;
+  setAttendanceStatus: (input: {
+    employeeId: string;
+    employeeName: string;
+    dateKey: string;
+    monthKey: string;
+    status: import('../types').AttendanceStatus;
+    notes?: string;
+  }) => void;
+  trackProjectMinutes: (
+    projectId: string,
+    minutes: number,
+    options?: { source?: 'timer' | 'manual'; note?: string },
+  ) => void;
+  addProjectProgress: (
+    projectId: string,
+    input: {
+      text: string;
+      images?: { name: string; dataUrl: string }[];
+      files?: FileAttachment[];
+    },
+  ) => boolean;
+  deleteProjectProgress: (projectId: string, updateId: string) => void;
+  attendanceStore: AttendanceStore;
+  managerObservations: ManagerObservationsStore;
+  getManagerObservation: (
+    employeeId: string,
+    monthKey: string,
+  ) => ManagerEmployeeObservation | undefined;
+  setManagerObservation: (input: {
+    employeeId: string;
+    monthKey: string;
+    text: string;
+  }) => void;
+  chatMessages: TeamChatMessage[];
+  sendChatMessage: (text: string) => void;
+  deleteChatMessage: (id: string) => void;
+  allProjects: CreativeProject[];
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -263,11 +368,18 @@ function migrateMarketingBoard(
         id: def.id,
         department: MARKETING_DEPARTMENT,
         roleTitle: def.roleTitle ?? existing.roleTitle,
+        employeeName:
+          displayNameForEmployee(def.employeeId) ?? existing.employeeName ?? def.employeeName,
       };
     });
 
   const defaultEmpIds = new Set(defaultMerged.map((t) => t.employeeId));
-  const customTasks = savedMarketing.filter((t) => !defaultEmpIds.has(t.employeeId));
+  const customTasks = savedMarketing
+    .filter((t) => !defaultEmpIds.has(t.employeeId))
+    .map((t) => {
+      const name = displayNameForEmployee(t.employeeId);
+      return name ? { ...t, employeeName: name } : t;
+    });
   const tasks = [...defaultMerged, ...customTasks];
 
   const companyName = normalizeCompanyName(saved.companyName);
@@ -315,6 +427,47 @@ function loadBoard(roster: TeamRosterState): BoardState {
   return migrateMarketingBoard(EMPTY_BOARD, removedEmpIds);
 }
 
+const DELETED_PROJECT_TTL_MS = 1000 * 60 * 60 * 24 * 120; // 120 días
+
+function pruneDeletedProjectIds(
+  map: Record<string, string>,
+  now = Date.now(),
+): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [id, at] of Object.entries(map)) {
+    const ts = Date.parse(at);
+    if (!Number.isFinite(ts) || now - ts < DELETED_PROJECT_TTL_MS) {
+      next[id] = at;
+    }
+  }
+  return next;
+}
+
+function mergeDeletedProjectIds(
+  ...maps: Array<Record<string, string> | undefined>
+): Record<string, string> {
+  const merged: Record<string, string> = {};
+  for (const map of maps) {
+    if (!map) continue;
+    for (const [id, at] of Object.entries(map)) {
+      if (!merged[id] || at > merged[id]) merged[id] = at;
+    }
+  }
+  return pruneDeletedProjectIds(merged);
+}
+
+function loadDeletedProjectIds(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(DELETED_PROJECTS_KEY);
+    if (raw) {
+      return pruneDeletedProjectIds(JSON.parse(raw) as Record<string, string>);
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
 function loadCalendarStore(): CalendarStore {
   try {
     const raw = localStorage.getItem(CALENDAR_STORAGE_KEY);
@@ -328,7 +481,13 @@ function loadCalendarStore(): CalendarStore {
 function loadAssignments(): TaskAssignment[] {
   try {
     const raw = localStorage.getItem(ASSIGNMENTS_STORAGE_KEY);
-    if (raw) return JSON.parse(raw) as TaskAssignment[];
+    if (raw) {
+      const list = JSON.parse(raw) as TaskAssignment[];
+      return list.map((a) => {
+        const name = displayNameForEmployee(a.employeeId);
+        return name ? { ...a, employeeName: name } : a;
+      });
+    }
   } catch {
     /* ignore */
   }
@@ -368,6 +527,33 @@ function loadSocialMetrics(): SocialMetricsStore {
   return { entries: [] };
 }
 
+function loadSocialAccounts(): SocialAccountsStore {
+  try {
+    const raw = localStorage.getItem(SOCIAL_ACCOUNTS_KEY);
+    if (raw) return JSON.parse(raw) as SocialAccountsStore;
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+function loadExtraProjects(): ExtraProjectEntry[] {
+  try {
+    const raw = localStorage.getItem(EXTRA_PROJECTS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as ExtraProjectEntry[];
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((e) => e && typeof e.id === 'string' && typeof e.employeeId === 'string')
+          .sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
 function loadDailyKpiStore(): DailyKpiStore {
   try {
     const raw = localStorage.getItem(DAILY_KPI_SNAPSHOTS_KEY);
@@ -396,7 +582,9 @@ function loadKpiObjectives(): KpiObjectiveAssignment[] {
 
 function loadWorkloadLimits(): WorkloadLimitsStore {
   try {
-    const raw = localStorage.getItem(WORKLOAD_LIMITS_KEY);
+    const raw =
+      localStorage.getItem(WORKLOAD_LIMITS_KEY) ??
+      localStorage.getItem('empresa-board-workload-limits-v1');
     if (raw) return normalizeWorkloadLimits(JSON.parse(raw));
   } catch {
     /* ignore */
@@ -428,6 +616,19 @@ function loadMonthlyArchives(): MonthlyArchiveStore {
     /* ignore */
   }
   return { snapshots: [] };
+}
+
+function loadChatMessages(): TeamChatMessage[] {
+  try {
+    const raw = localStorage.getItem(TEAM_CHAT_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as TeamChatMessage[];
+      if (Array.isArray(parsed)) return parsed.slice(-200);
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
 }
 
 function filterMarketingTasks(tasks: EmployeeTask[]): EmployeeTask[] {
@@ -467,7 +668,17 @@ function loadSession(roster: TeamRosterState): User | null {
 export function AppProvider({ children }: { children: ReactNode }) {
   const [teamRoster, setTeamRoster] = useState<TeamRosterState>(loadTeamRoster);
   const [user, setUser] = useState<User | null>(() => loadSession(loadTeamRoster()));
-  const [board, setBoard] = useState<BoardState>(() => loadBoard(loadTeamRoster()));
+  const [board, setBoard] = useState<BoardState>(() => {
+    const loaded = loadBoard(loadTeamRoster());
+    const deleted = loadDeletedProjectIds();
+    if (!Object.keys(deleted).length) return loaded;
+    return {
+      ...loaded,
+      projects: (loaded.projects ?? []).filter((p) => !deleted[p.id]),
+    };
+  });
+  const [deletedProjectIds, setDeletedProjectIds] =
+    useState<Record<string, string>>(loadDeletedProjectIds);
   const [calendarStore, setCalendarStore] = useState<CalendarStore>(loadCalendarStore);
   const [assignments, setAssignments] = useState<TaskAssignment[]>(loadAssignments);
   const [passwordOverrides, setPasswordOverrides] = useState(loadPasswordOverrides);
@@ -481,6 +692,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     useState<KpiObjectiveAssignment[]>(loadKpiObjectives);
   const [dailyKpiStore, setDailyKpiStore] = useState<DailyKpiStore>(loadDailyKpiStore);
   const [socialMetrics, setSocialMetrics] = useState<SocialMetricsStore>(loadSocialMetrics);
+  const [socialAccounts, setSocialAccounts] = useState<SocialAccountsStore>(loadSocialAccounts);
+  const [extraProjects, setExtraProjects] = useState<ExtraProjectEntry[]>(loadExtraProjects);
   const [workloadLimits, setWorkloadLimits] = useState<WorkloadLimitsStore>(loadWorkloadLimits);
   const [userProfiles, setUserProfiles] = useState<UserProfilesStore>(() =>
     loadUserProfiles(localStorage.getItem(USER_PROFILES_KEY)),
@@ -488,9 +701,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [employeePhones, setEmployeePhones] =
     useState<Record<string, string>>(loadEmployeePhones);
   const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>(loadActivityFeed);
+  const [attendanceStore, setAttendanceStore] = useState<AttendanceStore>(loadAttendanceStore);
+  const [managerObservations, setManagerObservations] =
+    useState<ManagerObservationsStore>(loadManagerObservations);
+  const [chatMessages, setChatMessages] = useState<TeamChatMessage[]>(loadChatMessages);
   const [syncOnline, setSyncOnline] = useState(false);
   const lastRemoteAt = useRef('');
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Edición local en curso: no dejar que un pull viejo borre lo que se está escribiendo. */
+  const localEditAt = useRef('');
+  const pushInFlight = useRef(false);
+  /** true mientras se aplica estado remoto — no marcar como edición local. */
+  const applyingRemote = useRef(false);
+  /** Hubo merge local que debe re-empujarse al servidor. */
+  const needsRepushAfterRemote = useRef(false);
+  /** Pull remoto pendiente mientras hay un push en vuelo. */
+  const pendingRemote = useRef<AppSyncState | null>(null);
+  /** Pedir otro push cuando termine el que está en vuelo. */
+  const pushQueued = useRef(false);
+  // Modo espejo oculto: solo la cuenta de Dylan puede observar la vista de Orlando.
+  const [spyMode, setSpyMode] = useState(false);
+  const realSessionUserId = useRef<string | null>(
+    (() => {
+      try {
+        const raw = sessionStorage.getItem(SESSION_KEY);
+        return raw ? (JSON.parse(raw) as string) : null;
+      } catch {
+        return null;
+      }
+    })(),
+  );
 
   const userKey = user?.id ?? '';
 
@@ -539,6 +779,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [board]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(DELETED_PROJECTS_KEY, JSON.stringify(deletedProjectIds));
+    } catch {
+      /* ignore */
+    }
+  }, [deletedProjectIds]);
+
   const activeUsers = useMemo(
     () => getActiveUsers(teamRoster).map((u) => withUserProfile(u, userProfiles)),
     [teamRoster, userProfiles],
@@ -573,6 +821,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [socialMetrics]);
 
   useEffect(() => {
+    saveAttendanceStore(attendanceStore);
+  }, [attendanceStore]);
+
+  useEffect(() => {
+    localStorage.setItem(MANAGER_OBSERVATIONS_KEY, JSON.stringify(managerObservations));
+  }, [managerObservations]);
+
+  useEffect(() => {
+    localStorage.setItem(TEAM_CHAT_STORAGE_KEY, JSON.stringify(chatMessages.slice(-200)));
+  }, [chatMessages]);
+
+  useEffect(() => {
     localStorage.setItem(WORKLOAD_LIMITS_KEY, JSON.stringify(workloadLimits));
   }, [workloadLimits]);
 
@@ -585,15 +845,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [employeePhones]);
 
   useEffect(() => {
+    localStorage.setItem(SOCIAL_ACCOUNTS_KEY, JSON.stringify(socialAccounts));
+  }, [socialAccounts]);
+
+  useEffect(() => {
+    localStorage.setItem(EXTRA_PROJECTS_KEY, JSON.stringify(extraProjects));
+  }, [extraProjects]);
+
+  useEffect(() => {
     if (!activeUsers.length) return;
     setBoard((prev) => {
       let changed = false;
       const nextProjects = (prev.projects ?? []).map((p) => {
-        if (p.assignedEmployeeId || p.collaborator === 'todos') return p;
-        const assignee = employeeIdForCollaboratorSlug(p.collaborator, activeUsers);
-        if (!assignee) return p;
+        let next = p;
+        if (!p.collaborators?.length) {
+          next = {
+            ...p,
+            collaborators: p.collaborator === 'todos' ? ['todos'] : [p.collaborator],
+          };
+          changed = true;
+        }
+        if (next.assignedEmployeeId || next.collaborator === 'todos' || (next.collaborators?.length ?? 0) > 1) {
+          return next;
+        }
+        const assignee = employeeIdForCollaboratorSlug(next.collaborator, activeUsers);
+        if (!assignee) return next;
         changed = true;
-        return { ...p, assignedEmployeeId: assignee };
+        return { ...next, assignedEmployeeId: assignee };
       });
       return changed ? { ...prev, projects: nextProjects } : prev;
     });
@@ -610,6 +888,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { ...prev, [employeeId]: trimmed };
     });
   }, []);
+
+  // Vincula/actualiza/borra una cuenta de red social del equipo (solo gerencia).
+  const setSocialAccount = useCallback(
+    (platform: SocialPlatform, link: { handle: string; url: string } | null) => {
+      if (!user || (user.role !== 'admin' && user.role !== 'lider')) return;
+      setSocialAccounts((prev) => {
+        if (!link) {
+          const next = { ...prev };
+          delete next[platform];
+          return next;
+        }
+        return {
+          ...prev,
+          [platform]: {
+            handle: link.handle,
+            url: link.url,
+            updatedByName: user.name,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+      });
+    },
+    [user],
+  );
+
+  const getManagerObservationFor = useCallback(
+    (employeeId: string, monthKey: string) =>
+      managerObservations.items.find(
+        (item) => item.employeeId === employeeId && item.monthKey === monthKey,
+      ),
+    [managerObservations.items],
+  );
+
+  const setManagerObservation = useCallback(
+    (input: { employeeId: string; monthKey: string; text: string }) => {
+      if (!user || !canSendKpiObjectives(user)) return;
+      setManagerObservations((prev) =>
+        upsertManagerObservation(prev, {
+          ...input,
+          authorId: user.id,
+          authorName: user.name,
+        }),
+      );
+    },
+    [user],
+  );
 
   const marketingTasks = useMemo(() => {
     const removed = getRemovedEmployeeIds(teamRoster);
@@ -698,9 +1022,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const leanBoard: BoardState = {
       ...board,
       projects: (board.projects ?? []).map((p) => {
-        if (!p.attachments?.length) return p;
-        const { attachments: _a, ...rest } = p;
-        return { ...rest, attachmentCount: p.attachments.length };
+        const { attachments, ...base } = { ...p, ...sanitizeProjectCollaborators(p) };
+        if (!attachments?.length) return base;
+        return { ...base, attachmentCount: attachments.length };
       }),
     };
     const leanAssignments = assignments.map((a) => {
@@ -711,78 +1035,289 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return {
       board: leanBoard,
       assignments: leanAssignments,
+      chatMessages: chatMessages.slice(-200),
       calendars: calendarStore,
       passwordOverrides,
       performanceHistory,
       teamRoster,
+      socialAccounts,
+      deletedProjectIds,
+      extraProjects,
       updatedAt: new Date().toISOString(),
     };
-  }, [board, assignments, calendarStore, passwordOverrides, performanceHistory, teamRoster]);
+  }, [
+    board,
+    assignments,
+    chatMessages,
+    calendarStore,
+    passwordOverrides,
+    performanceHistory,
+    teamRoster,
+    socialAccounts,
+    deletedProjectIds,
+    extraProjects,
+  ]);
 
   const schedulePush = useCallback(() => {
     if (!isApiEnabled()) return;
+    if (applyingRemote.current) {
+      // Tras un merge que conservó datos locales, empujar cuando termine applyRemote.
+      needsRepushAfterRemote.current = true;
+      return;
+    }
+    localEditAt.current = new Date().toISOString();
     if (pushTimer.current) clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(() => {
-      void pushSyncState(buildSyncState());
-    }, 400);
+      void (async () => {
+        if (pushInFlight.current) {
+          pushQueued.current = true;
+          return;
+        }
+        pushInFlight.current = true;
+        try {
+          const state = buildSyncState();
+          const result = await pushSyncState(state);
+          if (result.ok && result.updatedAt) {
+            lastRemoteAt.current = result.updatedAt;
+            if (localEditAt.current <= state.updatedAt) {
+              localEditAt.current = result.updatedAt;
+            }
+          } else if (!result.ok) {
+            window.setTimeout(() => schedulePush(), 4000);
+          }
+        } finally {
+          pushInFlight.current = false;
+          const queued = pendingRemote.current;
+          pendingRemote.current = null;
+          if (queued) applyRemoteRef.current?.(queued);
+          if (pushQueued.current) {
+            pushQueued.current = false;
+            schedulePush();
+          }
+        }
+      })();
+    }, 700);
   }, [buildSyncState]);
 
+  // Referencia estable para llamar applyRemote desde schedulePush sin ciclos.
+  const applyRemoteRef = useRef<((remote: AppSyncState) => void) | null>(null);
+
   const applyRemote = useCallback((remote: AppSyncState) => {
+    // No pisar ediciones locales en vuelo (escritura o push pendiente).
+    if (pushInFlight.current) {
+      pendingRemote.current = remote;
+      return;
+    }
+    if (localEditAt.current && remote.updatedAt < localEditAt.current) return;
     if (remote.updatedAt <= lastRemoteAt.current) return;
     lastRemoteAt.current = remote.updatedAt;
+    applyingRemote.current = true;
+    let preservedLocal = false;
 
     const remoteRoster = remote.teamRoster ?? defaultTeamRoster();
     const removedEmpIds = getRemovedEmployeeIds(remoteRoster);
     setTeamRoster(remoteRoster);
 
+    const deleted = mergeDeletedProjectIds(
+      deletedProjectIds,
+      remote.deletedProjectIds,
+    );
+    setDeletedProjectIds(deleted);
+
     setBoard((prev) => {
-      const remoteProjects = remote.board.projects ?? [];
-      const localById = new Map((prev.projects ?? []).map((p) => [p.id, p]));
-      const projects = remoteProjects.map((rp) => {
-        const local = localById.get(rp.id);
-        if (local?.attachments?.length) {
-          return { ...rp, attachments: local.attachments, attachmentCount: local.attachments.length };
+      const remoteProjects = (remote.board.projects ?? []).filter((p) => !deleted[p.id]);
+      const localProjects = (prev.projects ?? []).filter((p) => !deleted[p.id]);
+      const byId = new Map<string, (typeof remoteProjects)[number]>();
+
+      for (const rp of remoteProjects) {
+        byId.set(rp.id, rp);
+      }
+      for (const lp of localProjects) {
+        const rp = byId.get(lp.id);
+        if (!rp) {
+          // Proyecto solo local: conservar solo si no está marcado como borrado.
+          byId.set(lp.id, lp);
+          preservedLocal = true;
+          continue;
         }
-        return rp;
-      });
-      for (const lp of prev.projects ?? []) {
-        if (!projects.some((p) => p.id === lp.id) && lp.attachments?.length) {
-          projects.push(lp);
+        const localNewer = (lp.updatedAt || '') > (rp.updatedAt || '');
+        const localAccepted =
+          lp.acceptanceStatus === 'accepted' || lp.acceptanceStatus === 'declined';
+        const remoteStillPending =
+          !rp.acceptanceStatus || rp.acceptanceStatus === 'pending';
+        if (localNewer || (localAccepted && remoteStillPending)) {
+          preservedLocal = true;
+          byId.set(lp.id, {
+            ...rp,
+            ...lp,
+            attachments: lp.attachments?.length ? lp.attachments : rp.attachments,
+            attachmentCount: lp.attachments?.length
+              ? lp.attachments.length
+              : (rp.attachmentCount ?? rp.attachments?.length),
+          });
+        } else if (lp.attachments?.length) {
+          byId.set(lp.id, {
+            ...rp,
+            attachments: lp.attachments,
+            attachmentCount: lp.attachments.length,
+          });
         }
       }
-      const tasks = (remote.board.tasks ?? []).filter(
+
+      const projects = [...byId.values()]
+        .filter((p) => !deleted[p.id])
+        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+
+      // Mezclar tareas: no borrar trabajo recién aceptado por un pull viejo.
+      const remoteTasks = (remote.board.tasks ?? []).filter(
         (t) => !removedEmpIds.has(t.employeeId),
       );
-      return { ...remote.board, tasks, projects };
+      const localTasks = prev.tasks ?? [];
+      const taskById = new Map(remoteTasks.map((t) => [t.id, t]));
+      for (const lt of localTasks) {
+        if (removedEmpIds.has(lt.employeeId)) continue;
+        const rt = taskById.get(lt.id);
+        if (!rt) {
+          taskById.set(lt.id, lt);
+          preservedLocal = true;
+          continue;
+        }
+        const localAssignedNewer =
+          Boolean(lt.assignedAt) && (lt.assignedAt || '') > (rt.assignedAt || '');
+        if (localAssignedNewer) {
+          preservedLocal = true;
+          taskById.set(lt.id, { ...rt, ...lt });
+        }
+      }
+
+      return { ...remote.board, tasks: [...taskById.values()], projects };
     });
+    // Si el remoto aún trae un proyecto que ya borramos, hay que re-empujar tombstones.
+    if (
+      Object.keys(deleted).some(
+        (id) =>
+          (remote.board.projects ?? []).some((p) => p.id === id) &&
+          !remote.deletedProjectIds?.[id],
+      )
+    ) {
+      preservedLocal = true;
+    }
     setAssignments((prev) => {
       const remoteList = remote.assignments ?? [];
-      const filtered = remoteList.filter((a) => !removedEmpIds.has(a.employeeId));
-      return filtered.map((ra) => {
-        const local = prev.find((a) => a.id === ra.id);
-        if (local?.attachments?.length && !ra.attachments?.length) {
-          return { ...ra, attachments: local.attachments };
+      const byId = new Map(remoteList.map((a) => [a.id, a]));
+      for (const local of prev) {
+        const remoteAsg = byId.get(local.id);
+        if (!remoteAsg) {
+          if (!removedEmpIds.has(local.employeeId)) {
+            byId.set(local.id, local);
+            preservedLocal = true;
+          }
+          continue;
         }
-        return ra;
-      });
+        const localResolved = local.status !== 'pending';
+        const remotePending = remoteAsg.status === 'pending';
+        if (localResolved && remotePending) {
+          byId.set(local.id, local);
+          preservedLocal = true;
+          continue;
+        }
+        if (
+          localResolved &&
+          remoteAsg.status !== 'pending' &&
+          (local.respondedAt || '') > (remoteAsg.respondedAt || '')
+        ) {
+          byId.set(local.id, local);
+          preservedLocal = true;
+          continue;
+        }
+        if (local.attachments?.length && !remoteAsg.attachments?.length) {
+          byId.set(local.id, { ...remoteAsg, attachments: local.attachments });
+        }
+      }
+      return [...byId.values()].filter((a) => !removedEmpIds.has(a.employeeId));
     });
     setCalendarStore(remote.calendars);
-    setPasswordOverrides(remote.passwordOverrides ?? {});
+    // No borrar contraseñas locales si el remoto viene vacío (fallo de sync previo).
+    setPasswordOverrides((prev) => {
+      const remotePo = remote.passwordOverrides ?? {};
+      if (Object.keys(remotePo).length === 0) {
+        if (Object.keys(prev).length > 0) preservedLocal = true;
+        return prev;
+      }
+      return { ...prev, ...remotePo };
+    });
+    if (Array.isArray(remote.chatMessages)) {
+      setChatMessages((prev) => {
+        const byId = new Map<string, TeamChatMessage>();
+        for (const message of [...prev, ...remote.chatMessages!]) {
+          byId.set(message.id, message);
+        }
+        return [...byId.values()]
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+          .slice(-200);
+      });
+    }
     if (remote.performanceHistory?.records) {
       setPerformanceHistory(remote.performanceHistory);
     }
-  }, []);
+    if (remote.socialAccounts) {
+      setSocialAccounts(remote.socialAccounts);
+    }
+    if (Array.isArray(remote.extraProjects)) {
+      setExtraProjects((prev) => {
+        const byId = new Map(remote.extraProjects!.map((e) => [e.id, e]));
+        const remoteAt = remote.updatedAt || '';
+        for (const local of prev) {
+          const remoteEntry = byId.get(local.id);
+          if (!remoteEntry) {
+            // Solo conservar extras locales recién creados (aún no en servidor).
+            if ((local.createdAt || local.updatedAt || '') > remoteAt) {
+              byId.set(local.id, local);
+              preservedLocal = true;
+            }
+            continue;
+          }
+          if ((local.updatedAt || '') > (remoteEntry.updatedAt || '')) {
+            byId.set(local.id, local);
+            preservedLocal = true;
+          }
+        }
+        return [...byId.values()].sort((a, b) =>
+          (b.doneDate || '').localeCompare(a.doneDate || ''),
+        );
+      });
+    }
+
+    if (preservedLocal) needsRepushAfterRemote.current = true;
+
+    window.setTimeout(() => {
+      applyingRemote.current = false;
+      if (needsRepushAfterRemote.current) {
+        needsRepushAfterRemote.current = false;
+        schedulePush();
+      }
+    }, 80);
+  }, [schedulePush, deletedProjectIds]);
+
+  useEffect(() => {
+    applyRemoteRef.current = applyRemote;
+  }, [applyRemote]);
 
   useEffect(() => {
     if (!isApiEnabled()) return;
     void (async () => {
       const online = await checkApiHealth();
-      setSyncOnline(online);
+      setSyncOnline((prev) => (prev === online ? prev : online));
       if (!online) return;
       const remote = await fetchSyncState();
-      if (remote?.board?.tasks?.length) {
-        applyRemote(remote);
-      } else if (board.tasks.length > 0) {
+      const remoteHasBoard =
+        (remote?.board?.tasks?.length ?? 0) > 0 ||
+        (remote?.board?.projects?.length ?? 0) > 0;
+      const localHasBoard =
+        board.tasks.length > 0 || (board.projects?.length ?? 0) > 0;
+      if (remoteHasBoard) {
+        applyRemote(remote!);
+      } else if (localHasBoard) {
         await pushSyncState(buildSyncState());
       }
     })();
@@ -790,21 +1325,72 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isApiEnabled() || !user) return;
+
+    let cancelled = false;
+    let intervalId: number | null = null;
+
     const pull = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       const online = await checkApiHealth();
-      setSyncOnline(online);
+      if (cancelled) return;
+      setSyncOnline((prev) => (prev === online ? prev : online));
       if (!online) return;
       const remote = await fetchSyncState();
-      if (remote) applyRemote(remote);
+      if (cancelled) return;
+      // Un servidor sin datos no debe pisar el estado local.
+      const remoteHasBoard =
+        (remote?.board?.tasks?.length ?? 0) > 0 ||
+        (remote?.board?.projects?.length ?? 0) > 0;
+      if (remoteHasBoard) applyRemoteRef.current?.(remote!);
     };
-    pull();
-    const id = window.setInterval(pull, 4000);
-    return () => window.clearInterval(id);
-  }, [user, applyRemote]);
+
+    const start = () => {
+      if (intervalId != null) return;
+      intervalId = window.setInterval(() => {
+        void pull();
+      }, 10_000);
+    };
+
+    const stop = () => {
+      if (intervalId == null) return;
+      window.clearInterval(intervalId);
+      intervalId = null;
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        stop();
+        return;
+      }
+      void pull();
+      start();
+    };
+
+    void pull();
+    if (document.visibilityState !== 'hidden') start();
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [user]);
 
   useEffect(() => {
     schedulePush();
-  }, [board, assignments, calendarStore, passwordOverrides, teamRoster, schedulePush]);
+  }, [
+    board,
+    assignments,
+    chatMessages,
+    calendarStore,
+    passwordOverrides,
+    teamRoster,
+    socialAccounts,
+    deletedProjectIds,
+    extraProjects,
+    schedulePush,
+  ]);
 
   const canEditAll = user?.role === 'admin' || user?.role === 'lider';
   const userCanSendKpiObjectives = canSendKpiObjectives(user);
@@ -855,7 +1441,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return kpiObjectives.filter(
       (k) => k.employeeId === user.employeeId && k.status === 'pending',
     );
-  }, [kpiObjectives, user?.employeeId]);
+  }, [kpiObjectives, user]);
 
   const pendingKpiObjectivesCount = useMemo(() => {
     if (userCanSendKpiObjectives) {
@@ -869,7 +1455,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return assignments.filter(
       (a) => a.employeeId === user.employeeId && a.status === 'pending',
     );
-  }, [assignments, user?.employeeId]);
+  }, [assignments, user]);
 
   const pendingAssignmentsCount = useMemo(() => {
     if (canEditAll) {
@@ -889,13 +1475,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     (username: string, password: string) => {
+      const loginName = username.trim();
+      const loginPassword = password.trim();
       const rosterUsers = getActiveUsers(teamRoster);
-      const found = findUserByLoginName(username, rosterUsers, userProfiles);
+      const found = findUserByLoginName(loginName, rosterUsers, userProfiles);
       if (!found) return false;
       const resolved = withUserProfile(found, userProfiles);
       const expected = getPasswordForUser(found.id, passwordOverrides, teamRoster);
-      if (password !== expected) return false;
+      if (loginPassword !== expected) return false;
       setUser(resolved);
+      realSessionUserId.current = found.id;
+      setSpyMode(false);
+      void subscribeToPush(resolved);
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(found.id));
       sessionStorage.setItem(
         SESSION_EXPIRY_KEY,
@@ -908,9 +1499,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setUser(null);
+    realSessionUserId.current = null;
+    setSpyMode(false);
     sessionStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SESSION_EXPIRY_KEY);
   }, []);
+
+  // Pide permiso y activa las notificaciones push en este dispositivo.
+  const enablePushNotifications = useCallback(async () => {
+    if (!user) return { ok: false, reason: 'no-user' as const };
+    return subscribeToPush(user, { requestPermission: true });
+  }, [user]);
+
+  // Activa la vista de Orlando sin cerrar la sesión real de Dylan.
+  const enterSpyMode = useCallback(() => {
+    if (realSessionUserId.current !== 'u-jorddy') return false;
+    const base = findUserById('u-orlando', teamRoster);
+    if (!base) return false;
+    setUser(withUserProfile(base, userProfiles));
+    setSpyMode(true);
+    return true;
+  }, [teamRoster, userProfiles]);
+
+  // Regresa a la interfaz real de Dylan.
+  const exitSpyMode = useCallback(() => {
+    if (realSessionUserId.current !== 'u-jorddy') return;
+    const base = findUserById('u-jorddy', teamRoster);
+    if (base) setUser(withUserProfile(base, userProfiles));
+    setSpyMode(false);
+  }, [teamRoster, userProfiles]);
+
+  // Secuencia secreta de teclado: solo funciona en la cuenta de Dylan.
+  // Escribir "jorddy" abre la vista de Orlando; escribir "dylan" la cierra.
+  useEffect(() => {
+    let buffer = '';
+    const onKey = (e: KeyboardEvent) => {
+      if (realSessionUserId.current !== 'u-jorddy') return;
+      if (e.key.length !== 1 || !/[a-záéíóúñ]/i.test(e.key)) return;
+      buffer = (buffer + e.key.toLowerCase()).slice(-16);
+      if (buffer.endsWith('jorddy')) {
+        enterSpyMode();
+        buffer = '';
+      } else if (buffer.endsWith('dylan')) {
+        exitSpyMode();
+        buffer = '';
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [enterSpyMode, exitSpyMode]);
+
+  // Re-suscribe al push en sesiones ya iniciadas (si el permiso ya se concedió).
+  useEffect(() => {
+    if (user && realSessionUserId.current === user.id) {
+      void subscribeToPush(user);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const changePassword = useCallback(
     (current: string, next: string) => {
@@ -962,9 +1607,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (input.avatarUrl !== undefined) {
         if (input.avatarUrl === null || input.avatarUrl === '') {
           const prev = nextProfiles[user.id] ?? {};
-          const { avatarUrl: _removed, ...rest } = prev;
+          const rest = { ...prev };
+          delete rest.avatarUrl;
           if (Object.keys(rest).length === 0) {
-            const { [user.id]: _drop, ...others } = nextProfiles;
+            const others = { ...nextProfiles };
+            delete others[user.id];
             nextProfiles = others;
           } else {
             nextProfiles = { ...nextProfiles, [user.id]: rest };
@@ -1261,6 +1908,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [board.projects],
   );
 
+  const allProjects = useMemo(() => board.projects ?? [], [board.projects]);
+
   const completedProjects = useMemo(
     () => filterCompletedProjects(board.projects ?? []),
     [board.projects],
@@ -1283,18 +1932,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addProject = useCallback((): CreativeProject => {
     const now = new Date().toISOString();
     const today = now.slice(0, 10);
+    const dueDefault = (() => {
+      const d = new Date(`${today}T12:00:00`);
+      d.setDate(d.getDate() + 2);
+      return d.toISOString().slice(0, 10);
+    })();
     const newProject: CreativeProject = {
       id: `proj-${Date.now()}`,
       requestDate: today,
       projectName: '',
       businessUnit: 'prepago',
-      requestedBy: '',
+      requestedBy: 'Orlando',
       requestingDepartment: 'direccion_comercial',
       projectType: 'campana_creativa',
       priority: 'media',
-      commitmentDate: today,
+      commitmentDate: dueDefault,
+      finishedDate: dueDefault,
       internalArea: 'diseno_grafico',
       collaborator: 'todos',
+      collaborators: ['todos'],
       status: 'nuevo',
       comments: '',
       createdAt: now,
@@ -1317,19 +1973,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!current) return { ok: false, reason: 'forbidden' };
 
       let nextPatch = patch;
-      if (patch.collaborator !== undefined) {
+      if (patch.collaborators !== undefined) {
         nextPatch = {
           ...patch,
+          ...patchForCollaboratorsChange(patch.collaborators),
+        };
+      } else if (patch.collaborator !== undefined) {
+        nextPatch = {
+          ...patch,
+          collaborators:
+            patch.collaborator === 'todos' ? ['todos'] : [patch.collaborator],
           assignedEmployeeId: employeeIdForCollaboratorSlug(
             patch.collaborator,
             activeUsers,
           ),
         };
+      }
 
-        if (patch.collaborator !== 'todos' && canEditAll) {
-          const prevAssignee = resolveProjectAssignee(current, activeUsers);
-          const nextAssignee = nextPatch.assignedEmployeeId;
-          if (nextAssignee && nextAssignee !== prevAssignee) {
+      const collaboratorChanged =
+        patch.collaborators !== undefined || patch.collaborator !== undefined;
+      if (collaboratorChanged && canEditAll) {
+        const prevCollabs = getProjectCollaborators(current);
+        const nextCollabs: Collaborator[] =
+          nextPatch.collaborators !== undefined
+            ? normalizeProjectCollaborators(nextPatch.collaborators)
+            : nextPatch.collaborator === 'todos'
+              ? ['todos']
+              : nextPatch.collaborator
+                ? [nextPatch.collaborator]
+                : prevCollabs;
+
+        if (!nextCollabs.includes('todos')) {
+          for (const slug of nextCollabs) {
+            if (prevCollabs.includes(slug) || prevCollabs.includes('todos')) continue;
+            const nextAssignee = employeeIdForCollaboratorSlug(slug, activeUsers);
+            if (!nextAssignee) continue;
             const check = getWorkloadCheck(nextAssignee, {
               excludeProjectId: id,
               addSlots: 1,
@@ -1373,6 +2051,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ),
         }));
         logActivity('project_completed', `${who} entregó «${name}»`, who);
+        const merged = { ...current, ...nextPatch, status: 'terminado' as const };
+        if (isHoursExceeded(merged)) {
+          logActivity(
+            'project_hours_exceeded',
+            `⚠ «${name}» se entregó superando las horas presupuestadas (${Math.round((merged.trackedMinutes ?? 0) / 60)}h / ${estimatedHoursForProject(merged)}h)`,
+            who,
+          );
+        } else if (isEarlyDelivery(merged)) {
+          logActivity(
+            'project_early_delivery',
+            `🎉 ¡Excelente! ${who} entregó «${name}» antes del plazo y dentro del presupuesto de horas`,
+            who,
+          );
+        }
         return { ok: true };
       }
 
@@ -1388,7 +2080,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ) {
             return p;
           }
-          return { ...p, ...nextPatch, updatedAt: new Date().toISOString() };
+          const merged = { ...p, ...nextPatch, updatedAt: new Date().toISOString() };
+          if (
+            nextPatch.finishedDate !== undefined &&
+            nextPatch.finishedDate &&
+            nextPatch.commitmentDate === undefined
+          ) {
+            merged.commitmentDate = nextPatch.finishedDate;
+          }
+          // Si cambió el colaborador, pedir aceptación de nuevo.
+          if (collaboratorChanged) {
+            const nextCollabs = getProjectCollaborators(merged);
+            if (nextCollabs.includes('todos') || nextCollabs.length !== 1) {
+              merged.acceptanceStatus = undefined;
+              merged.acceptedAt = undefined;
+              merged.acceptedByName = undefined;
+              merged.declinedReason = undefined;
+            } else {
+              merged.acceptanceStatus = 'pending';
+              merged.acceptedAt = undefined;
+              merged.acceptedByName = undefined;
+              merged.declinedReason = undefined;
+            }
+          }
+          return merged;
         }),
       }));
       return { ok: true };
@@ -1406,11 +2121,318 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const deleteProject = useCallback((id: string) => {
+    const now = new Date().toISOString();
+    setDeletedProjectIds((prev) => mergeDeletedProjectIds(prev, { [id]: now }));
     setBoard((prev) => ({
       ...prev,
       projects: (prev.projects ?? []).filter((p) => p.id !== id),
     }));
+    // Cancelar indicaciones vinculadas al proyecto para que no queden en Equipo.
+    setAssignments((prev) =>
+      prev.map((a) =>
+        a.brief?.projectId === id && a.status === 'pending'
+          ? { ...a, status: 'cancelled' as const, respondedAt: now }
+          : a,
+      ),
+    );
   }, []);
+
+  const visibleExtraProjects = useMemo(() => {
+    if (canEditAll) return extraProjects;
+    if (!user) return [];
+    const myId = user.employeeId || user.id;
+    return extraProjects.filter(
+      (e) => e.employeeId === myId || e.employeeIds?.includes(myId),
+    );
+  }, [canEditAll, extraProjects, user]);
+
+  const addExtraProject = useCallback(
+    (input: {
+      projectName: string;
+      employeeIds: string[];
+      minutes?: number;
+      doneDate: string;
+      notes?: string;
+    }): ExtraProjectEntry | null => {
+      if (!user) return null;
+      const fallbackId = user.employeeId || user.id;
+      const employeeIds = [...new Set(input.employeeIds.filter(Boolean))];
+      if (!employeeIds.length) employeeIds.push(fallbackId);
+      const employeeNames = employeeIds.map(
+        (id) =>
+          board.tasks.find((task) => task.employeeId === id)?.employeeName ??
+          activeUsers.find((activeUser) => activeUser.employeeId === id)?.name ??
+          id,
+      );
+      const collaborators = employeeIds
+        .map(collaboratorForEmployeeId)
+        .filter((value): value is Collaborator => Boolean(value));
+      if (!collaborators.length) return null;
+
+      const minutes =
+        input.minutes !== undefined
+          ? Math.max(1, Math.round(input.minutes))
+          : undefined;
+      const now = new Date().toISOString();
+      const projectId = `extra-project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const entry: ExtraProjectEntry = {
+        id: `extra-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        employeeId: employeeIds[0],
+        employeeName: employeeNames[0],
+        employeeIds,
+        employeeNames,
+        projectName: input.projectName.trim(),
+        minutes,
+        doneDate: input.doneDate || now.slice(0, 10),
+        notes: input.notes?.trim() || undefined,
+        linkedProjectId: projectId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      if (!entry.projectName) return null;
+
+      const activeProject: CreativeProject = {
+        id: projectId,
+        requestDate: now.slice(0, 10),
+        projectName: entry.projectName,
+        businessUnit: 'yaavs_general',
+        requestedBy: user.name,
+        requestingDepartment: 'marketing',
+        projectType: 'diseno_grafico',
+        priority: 'media',
+        commitmentDate: entry.doneDate,
+        internalArea: 'diseno_grafico',
+        collaborator: collaborators[0],
+        collaborators,
+        assignedEmployeeId:
+          employeeIds.length === 1 ? employeeIds[0] : undefined,
+        acceptanceStatus: 'accepted',
+        acceptedAt: now,
+        acceptedByName: employeeNames.join(', '),
+        status: 'en_proceso',
+        comments: entry.notes ?? 'Proyecto extra',
+        estimatedHours: minutes ? minutes / 60 : undefined,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      setExtraProjects((prev) => [entry, ...prev]);
+      setBoard((prev) => ({
+        ...prev,
+        projects: [activeProject, ...(prev.projects ?? [])],
+      }));
+      logActivity(
+        'project_progress',
+        `${user.name} registró proyecto extra «${entry.projectName}» para ${employeeNames.join(', ')}${
+          minutes ? ` (${Math.round((minutes / 60) * 10) / 10} h)` : ''
+        }`,
+        user.name,
+      );
+      return entry;
+    },
+    [user, board.tasks, activeUsers, logActivity],
+  );
+
+  const updateExtraProject = useCallback(
+    (
+      id: string,
+      patch: Partial<
+        Pick<
+          ExtraProjectEntry,
+          'projectName' | 'employeeIds' | 'minutes' | 'doneDate' | 'notes'
+        >
+      >,
+    ): boolean => {
+      if (!user) return false;
+      const myId = user.employeeId || user.id;
+      const current = extraProjects.find((entry) => entry.id === id);
+      if (!current) return false;
+      if (
+        !canEditAll &&
+        current.employeeId !== myId &&
+        !current.employeeIds?.includes(myId)
+      ) {
+        return false;
+      }
+
+      const employeeIds = patch.employeeIds?.length
+        ? [...new Set(patch.employeeIds)]
+        : (current.employeeIds ?? [current.employeeId]);
+      const employeeNames = employeeIds.map(
+        (employeeId) =>
+          board.tasks.find((task) => task.employeeId === employeeId)
+            ?.employeeName ??
+          activeUsers.find((activeUser) => activeUser.employeeId === employeeId)
+            ?.name ??
+          employeeId,
+      );
+      const collaborators = employeeIds
+        .map(collaboratorForEmployeeId)
+        .filter((value): value is Collaborator => Boolean(value));
+      if (!collaborators.length) return false;
+
+      const next: ExtraProjectEntry = {
+        ...current,
+        employeeId: employeeIds[0],
+        employeeName: employeeNames[0],
+        employeeIds,
+        employeeNames,
+        projectName: patch.projectName?.trim() || current.projectName,
+        minutes:
+          patch.minutes === undefined
+            ? undefined
+            : Math.max(1, Math.round(patch.minutes)),
+        doneDate: patch.doneDate || current.doneDate,
+        notes:
+          patch.notes !== undefined
+            ? patch.notes.trim() || undefined
+            : current.notes,
+        updatedAt: new Date().toISOString(),
+      };
+
+      setExtraProjects((prev) =>
+        prev.map((entry) => (entry.id === id ? next : entry)),
+      );
+      if (next.linkedProjectId) {
+        setBoard((prev) => ({
+          ...prev,
+          projects: (prev.projects ?? []).map((project) =>
+            project.id === next.linkedProjectId
+              ? {
+                  ...project,
+                  projectName: next.projectName,
+                  commitmentDate: next.doneDate,
+                  comments: next.notes ?? 'Proyecto extra',
+                  estimatedHours: next.minutes
+                    ? next.minutes / 60
+                    : undefined,
+                  collaborators,
+                  collaborator: collaborators[0],
+                  assignedEmployeeId:
+                    employeeIds.length === 1 ? employeeIds[0] : undefined,
+                  updatedAt: new Date().toISOString(),
+                }
+              : project,
+          ),
+        }));
+      }
+      return true;
+    },
+    [user, canEditAll, board.tasks, activeUsers, extraProjects],
+  );
+
+  const deleteExtraProject = useCallback(
+    (id: string): boolean => {
+      if (!user) return false;
+      const myId = user.employeeId || user.id;
+      const target = extraProjects.find((e) => e.id === id);
+      if (!target) return false;
+      if (
+        !canEditAll &&
+        target.employeeId !== myId &&
+        !target.employeeIds?.includes(myId)
+      ) {
+        return false;
+      }
+      setExtraProjects((prev) => prev.filter((e) => e.id !== id));
+      return true;
+    },
+    [user, canEditAll, extraProjects],
+  );
+
+  const acceptProject = useCallback(
+    (id: string) => {
+      if (!user) return;
+      const current = board.projects?.find((p) => p.id === id);
+      if (!current || current.status === 'terminado') return;
+      if (!projectVisibleToUser(current, user, false, activeUsers)) return;
+      if (
+        current.acceptanceStatus === 'accepted' ||
+        current.acceptanceStatus === 'declined'
+      ) {
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const name = current.projectName?.trim() || 'Proyecto';
+      setBoard((prev) => ({
+        ...prev,
+        projects: (prev.projects ?? []).map((p) =>
+          p.id !== id
+            ? p
+            : {
+                ...p,
+                acceptanceStatus: 'accepted',
+                acceptedAt: now,
+                acceptedByName: user.name,
+                declinedReason: undefined,
+                status: p.status === 'nuevo' ? 'en_proceso' : p.status,
+                updatedAt: now,
+              },
+        ),
+      }));
+      logActivity('project_accepted', `${user.name} aceptó el proyecto «${name}»`, user.name);
+      notifyPush({
+        audience: 'employees',
+        employeeIds: ['emp-orlando', 'emp-juancarlos'],
+        excludeUserId: user.id,
+        title: `${user.name} aceptó el proyecto`,
+        body: name,
+        url: '/proyectos',
+        tag: `proj-ok-${id}`,
+      });
+    },
+    [user, board.projects, activeUsers, logActivity],
+  );
+
+  const declineProject = useCallback(
+    (id: string, reason?: string) => {
+      if (!user) return;
+      const current = board.projects?.find((p) => p.id === id);
+      if (!current || current.status === 'terminado') return;
+      if (!projectVisibleToUser(current, user, false, activeUsers)) return;
+      if (
+        current.acceptanceStatus === 'accepted' ||
+        current.acceptanceStatus === 'declined'
+      ) {
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const name = current.projectName?.trim() || 'Proyecto';
+      const cleanReason = reason?.trim();
+      setBoard((prev) => ({
+        ...prev,
+        projects: (prev.projects ?? []).map((p) =>
+          p.id !== id
+            ? p
+            : {
+                ...p,
+                acceptanceStatus: 'declined',
+                acceptedAt: now,
+                acceptedByName: user.name,
+                declinedReason: cleanReason || undefined,
+                updatedAt: now,
+              },
+        ),
+      }));
+      logActivity(
+        'project_declined',
+        `${user.name} rechazó «${name}»${cleanReason ? `: ${cleanReason}` : ''}`,
+        user.name,
+      );
+      notifyPush({
+        audience: 'employees',
+        employeeIds: ['emp-orlando', 'emp-juancarlos'],
+        excludeUserId: user.id,
+        title: `${user.name} rechazó el proyecto`,
+        body: cleanReason ? `${name} — ${cleanReason}` : name,
+        url: '/proyectos',
+        tag: `proj-no-${id}`,
+      });
+    },
+    [user, board.projects, activeUsers, logActivity],
+  );
 
   const setCompanyName = useCallback((name: string) => {
     setBoard((prev) => ({ ...prev, companyName: name }));
@@ -1513,6 +2535,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [updateCalendarEvent],
   );
 
+  const markEventEmailReminded = useCallback(
+    (id: string) => {
+      updateCalendarEvent(id, { emailRemindedAt: new Date().toISOString() });
+    },
+    [updateCalendarEvent],
+  );
+
+  const calendarSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!user?.id || !CALENDAR_EMAIL_BY_USER[user.id]) return;
+    const state = calendarStore[user.id];
+    if (!state) return;
+
+    if (calendarSyncTimer.current) clearTimeout(calendarSyncTimer.current);
+    calendarSyncTimer.current = setTimeout(() => {
+      void syncCalendarForReminders({
+        userId: user.id,
+        userName: user.name,
+        email: user.email,
+        events: state.events,
+      });
+    }, 600);
+
+    return () => {
+      if (calendarSyncTimer.current) clearTimeout(calendarSyncTimer.current);
+    };
+  }, [calendarStore, user?.id, user?.name, user?.email]);
+
   const createAssignment = useCallback(
     (
       input: {
@@ -1532,6 +2582,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const employee = board.tasks.find((t) => t.employeeId === input.employeeId);
       if (!employee) return { ok: false, reason: 'forbidden' };
 
+      // No duplicar: si ya existe la misma indicación pendiente para este
+      // colaborador, no se crea otra (evita dobles envíos o dobles clics).
+      const cleanTitle = input.title.trim().toLowerCase();
+      const alreadyPending = assignments.some(
+        (a) =>
+          a.status === 'pending' &&
+          a.employeeId === input.employeeId &&
+          a.title.trim().toLowerCase() === cleanTitle &&
+          a.dueDate === input.dueDate,
+      );
+      if (alreadyPending) return { ok: true };
+
       const check = getWorkloadCheck(input.employeeId, { addSlots: 1 });
       if (!check.allowed) {
         if (!options?.overridePassword || !verifyManagerPassword(options.overridePassword)) {
@@ -1547,7 +2609,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       const assignment: TaskAssignment = {
-        id: `asg-${Date.now()}`,
+        id: `asg-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         employeeId: input.employeeId,
         employeeName: employee.employeeName,
         assignedById: user.id,
@@ -1573,9 +2635,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         `Indicación «${assignment.title}» enviada a ${employee.employeeName}`,
         user.name,
       );
+      notifyPush({
+        audience: 'employees',
+        employeeIds: [assignment.employeeId],
+        title: 'Nueva indicación',
+        body: `${assignment.assignedByName}: ${assignment.title}`,
+        url: '/indicaciones',
+        tag: `asg-${assignment.id}`,
+      });
       return { ok: true };
     },
-    [user, canEditAll, board.tasks, logActivity, getWorkloadCheck, verifyManagerPassword],
+    [user, canEditAll, board.tasks, assignments, logActivity, getWorkloadCheck, verifyManagerPassword],
   );
 
   const acceptAssignment = useCallback(
@@ -1584,12 +2654,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!assignment || assignment.status !== 'pending') return;
       if (user?.employeeId !== assignment.employeeId && !canEditAll) return;
 
+      const now = new Date().toISOString();
       const task = board.tasks.find((t) => t.employeeId === assignment.employeeId);
       if (task) {
         const noteLine = assignment.notes
           ? `${assignment.notes} (Indicación de ${assignment.assignedByName})`
           : `Indicación aceptada — ${assignment.assignedByName}`;
-        const now = new Date().toISOString();
         setBoard((prev) => ({
           ...prev,
           tasks: prev.tasks.map((t) =>
@@ -1617,14 +2687,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }));
       }
 
-      setAssignments((prev) => prev.filter((a) => a.id !== id));
-      logActivity(
-        'assignment_accepted',
-        `${user?.name ?? assignment.employeeName} aceptó «${assignment.title}»`,
-        user?.name ?? assignment.employeeName,
+      // Marcar como aceptada (no borrar): si se borra, el sync la revive desde el servidor.
+      // También se resuelven duplicados exactos pendientes para que la misma
+      // indicación no vuelva a aparecer en la bandeja del colaborador.
+      const dupKey = `${assignment.employeeId}|${assignment.title.trim().toLowerCase()}|${assignment.dueDate}`;
+      setAssignments((prev) =>
+        prev.map((a) => {
+          const isDuplicate =
+            a.status === 'pending' &&
+            `${a.employeeId}|${a.title.trim().toLowerCase()}|${a.dueDate}` === dupKey;
+          return a.id === id || isDuplicate
+            ? { ...a, status: 'accepted' as const, respondedAt: now }
+            : a;
+        }),
       );
+      const who = user?.name ?? assignment.employeeName;
+      logActivity('assignment_accepted', `${who} aceptó «${assignment.title}»`, who);
+      notifyPush({
+        audience: 'employees',
+        employeeIds: ['emp-orlando', 'emp-juancarlos'],
+        excludeUserId: user?.id,
+        title: `${who} aceptó la indicación`,
+        body: assignment.title,
+        url: '/indicaciones',
+        tag: `asg-ok-${assignment.id}`,
+      });
     },
-    [assignments, board.tasks, user?.employeeId, user?.name, canEditAll, logActivity],
+    [assignments, board.tasks, user?.employeeId, user?.name, user?.id, canEditAll, logActivity],
   );
 
   const rejectAssignment = useCallback(
@@ -1632,16 +2721,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const assignment = assignments.find((a) => a.id === id);
       if (!assignment || assignment.status !== 'pending') return;
       if (user?.employeeId !== assignment.employeeId && !canEditAll) return;
-      void reason;
-      setAssignments((prev) => prev.filter((a) => a.id !== id));
+      const now = new Date().toISOString();
+      const who = user?.name ?? assignment.employeeName;
+      const cleanReason = reason?.trim();
+      const dupKey = `${assignment.employeeId}|${assignment.title.trim().toLowerCase()}|${assignment.dueDate}`;
+      setAssignments((prev) =>
+        prev.map((a) => {
+          const isDuplicate =
+            a.status === 'pending' &&
+            `${a.employeeId}|${a.title.trim().toLowerCase()}|${a.dueDate}` === dupKey;
+          return a.id === id || isDuplicate
+            ? {
+                ...a,
+                status: 'rejected' as const,
+                respondedAt: now,
+                rejectReason: cleanReason || undefined,
+              }
+            : a;
+        }),
+      );
+      logActivity(
+        'assignment_rejected',
+        `${who} rechazó «${assignment.title}»${cleanReason ? `: ${cleanReason}` : ''}`,
+        who,
+      );
+      notifyPush({
+        audience: 'employees',
+        employeeIds: ['emp-orlando', 'emp-juancarlos'],
+        excludeUserId: user?.id,
+        title: `${who} rechazó la indicación`,
+        body: cleanReason
+          ? `${assignment.title} — ${cleanReason}`
+          : assignment.title,
+        url: '/indicaciones',
+        tag: `asg-no-${assignment.id}`,
+      });
     },
-    [assignments, user?.employeeId, canEditAll],
+    [assignments, user?.employeeId, user?.name, user?.id, canEditAll, logActivity],
   );
 
   const cancelAssignment = useCallback(
     (id: string) => {
       if (!canEditAll) return;
-      setAssignments((prev) => prev.filter((a) => a.id !== id));
+      setAssignments((prev) =>
+        prev.map((a) =>
+          a.id === id
+            ? { ...a, status: 'cancelled' as const, respondedAt: new Date().toISOString() }
+            : a,
+        ),
+      );
     },
     [canEditAll],
   );
@@ -1835,6 +2963,187 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const setAttendanceStatus = useCallback(
+    (input: {
+      employeeId: string;
+      employeeName: string;
+      dateKey: string;
+      monthKey: string;
+      status: import('../types').AttendanceStatus;
+      notes?: string;
+    }) => {
+      if (!user) return;
+      setAttendanceStore((prev) =>
+        upsertAttendance(prev, {
+          employeeId: input.employeeId,
+          employeeName: input.employeeName,
+          dateKey: input.dateKey,
+          monthKey: input.monthKey,
+          status: input.status,
+          notes: input.notes ?? '',
+          recordedById: user.id,
+          recordedByName: user.name,
+        }),
+      );
+    },
+    [user],
+  );
+
+  const trackProjectMinutes = useCallback(
+    (
+      projectId: string,
+      minutes: number,
+      options?: { source?: 'timer' | 'manual'; note?: string },
+    ) => {
+      if (minutes <= 0) return;
+      const current = board.projects?.find((p) => p.id === projectId);
+      if (!current) return;
+      const nextMinutes = (current.trackedMinutes ?? 0) + minutes;
+      const estMin = estimatedHoursForProject(current) * 60;
+      const logEntry = {
+        id: `plog-${Date.now()}`,
+        minutes,
+        loggedAt: new Date().toISOString(),
+        loggedByName: user?.name ?? user?.username ?? 'Usuario',
+        source: options?.source ?? ('manual' as const),
+        note: options?.note,
+      };
+      const timeLogs = [...(current.timeLogs ?? []), logEntry].slice(-40);
+      setBoard((prev) => ({
+        ...prev,
+        projects: (prev.projects ?? []).map((p) =>
+          p.id === projectId
+            ? { ...p, trackedMinutes: nextMinutes, timeLogs, updatedAt: new Date().toISOString() }
+            : p,
+        ),
+      }));
+      if (nextMinutes > estMin && (current.trackedMinutes ?? 0) <= estMin) {
+        logActivity(
+          'project_hours_exceeded',
+          `⚠ Horas excedidas en «${current.projectName}» — ${Math.round(nextMinutes / 60)}h de ${estimatedHoursForProject(current)}h presupuestadas`,
+          current.collaborator,
+        );
+      }
+    },
+    [board.projects, logActivity, user],
+  );
+
+  const addProjectProgress = useCallback(
+    (
+      projectId: string,
+      input: {
+        text: string;
+        images?: { name: string; dataUrl: string }[];
+        files?: FileAttachment[];
+      },
+    ): boolean => {
+      if (!user) return false;
+      const current = board.projects?.find((p) => p.id === projectId);
+      if (!current) return false;
+      const clean = input.text.trim();
+      if (!clean && !input.images?.length && !input.files?.length) return false;
+
+      const update: ProjectProgressUpdate = {
+        id: `pup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        authorId: user.id,
+        authorName: user.name,
+        text: clean.slice(0, 1200),
+        images: input.images?.length ? input.images.slice(0, 3) : undefined,
+        files: input.files?.length ? input.files.slice(0, 3) : undefined,
+        createdAt: new Date().toISOString(),
+      };
+      const progressUpdates = [...(current.progressUpdates ?? []), update].slice(-30);
+
+      setBoard((prev) => ({
+        ...prev,
+        projects: (prev.projects ?? []).map((p) =>
+          p.id === projectId
+            ? { ...p, progressUpdates, updatedAt: new Date().toISOString() }
+            : p,
+        ),
+      }));
+      logActivity(
+        'project_progress',
+        `Avance en «${current.projectName || 'proyecto'}»: ${clean.slice(0, 80) || 'evidencia subida'}`,
+        user.name,
+      );
+      // Avisa a los gerentes (Orlando y Carlos) del avance registrado.
+      notifyPush({
+        audience: 'employees',
+        employeeIds: ['emp-orlando', 'emp-juancarlos'],
+        excludeUserId: user.id,
+        title: `Avance de ${user.name}`,
+        body: `${current.projectName || 'Proyecto'}: ${clean.slice(0, 120) || 'subió evidencia'}`,
+        url: '/proyectos',
+        tag: `progress-${projectId}`,
+      });
+      return true;
+    },
+    [board.projects, user, logActivity],
+  );
+
+  const deleteProjectProgress = useCallback(
+    (projectId: string, updateId: string) => {
+      if (!user) return;
+      setBoard((prev) => ({
+        ...prev,
+        projects: (prev.projects ?? []).map((p) => {
+          if (p.id !== projectId) return p;
+          const target = p.progressUpdates?.find((u) => u.id === updateId);
+          if (!target) return p;
+          const canDelete = canEditAll || target.authorId === user.id;
+          if (!canDelete) return p;
+          return {
+            ...p,
+            progressUpdates: (p.progressUpdates ?? []).filter((u) => u.id !== updateId),
+            updatedAt: new Date().toISOString(),
+          };
+        }),
+      }));
+    },
+    [user, canEditAll],
+  );
+
+  const sendChatMessage = useCallback(
+    (text: string) => {
+      const clean = text.trim();
+      if (!clean || !user) return;
+      const message: TeamChatMessage = {
+        id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        authorId: user.id,
+        authorName: user.name,
+        authorRole: user.role,
+        authorAvatarColor: user.avatarColor,
+        authorAvatarUrl: user.avatarUrl,
+        text: clean.slice(0, 1000),
+        createdAt: new Date().toISOString(),
+      };
+      setChatMessages((prev) => [...prev, message].slice(-200));
+      notifyPush({
+        audience: 'all',
+        excludeUserId: user.id,
+        title: `Mensaje de ${user.name}`,
+        body: message.text,
+        url: '/chat',
+        tag: 'chat',
+      });
+    },
+    [user],
+  );
+
+  const deleteChatMessage = useCallback(
+    (id: string) => {
+      if (!user) return;
+      setChatMessages((prev) =>
+        prev.filter((message) => {
+          const canDelete = user.role === 'admin' || message.authorId === user.id;
+          return message.id !== id || !canDelete;
+        }),
+      );
+    },
+    [user],
+  );
+
   const value = useMemo(
     () => ({
       user,
@@ -1842,6 +3151,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       calendar,
       login,
       logout,
+      spyMode,
+      enterSpyMode,
+      exitSpyMode,
+      enablePushNotifications,
       canEditAll,
       canSendKpiObjectives: userCanSendKpiObjectives,
       canManageWorkloadLimits: userCanManageWorkloadLimits,
@@ -1869,6 +3182,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startTimer,
       stopTimer,
       markEventReminded,
+      markEventEmailReminded,
       assignments,
       myPendingAssignments,
       pendingAssignmentsCount,
@@ -1893,6 +3207,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addProject,
       updateProject,
       deleteProject,
+      acceptProject,
+      declineProject,
       employeePhones,
       setEmployeePhone,
       activityFeed,
@@ -1907,6 +3223,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       socialMetrics,
       addSocialEntry,
       deleteSocialEntry,
+      socialAccounts,
+      setSocialAccount,
+      extraProjects,
+      visibleExtraProjects,
+      addExtraProject,
+      updateExtraProject,
+      deleteExtraProject,
+      attendanceStore,
+      setAttendanceStatus,
+      managerObservations,
+      getManagerObservation: getManagerObservationFor,
+      setManagerObservation,
+      chatMessages,
+      sendChatMessage,
+      deleteChatMessage,
+      trackProjectMinutes,
+      addProjectProgress,
+      deleteProjectProgress,
+      allProjects,
     }),
     [
       user,
@@ -1914,6 +3249,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       calendar,
       login,
       logout,
+      spyMode,
+      enterSpyMode,
+      exitSpyMode,
+      enablePushNotifications,
       canEditAll,
       userCanSendKpiObjectives,
       userCanManageWorkloadLimits,
@@ -1940,6 +3279,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       startTimer,
       stopTimer,
       markEventReminded,
+      markEventEmailReminded,
       assignments,
       myPendingAssignments,
       pendingAssignmentsCount,
@@ -1963,6 +3303,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addProject,
       updateProject,
       deleteProject,
+      acceptProject,
+      declineProject,
       employeePhones,
       setEmployeePhone,
       activityFeed,
@@ -1977,6 +3319,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       socialMetrics,
       addSocialEntry,
       deleteSocialEntry,
+      socialAccounts,
+      setSocialAccount,
+      extraProjects,
+      visibleExtraProjects,
+      addExtraProject,
+      updateExtraProject,
+      deleteExtraProject,
+      attendanceStore,
+      setAttendanceStatus,
+      managerObservations,
+      getManagerObservationFor,
+      setManagerObservation,
+      chatMessages,
+      sendChatMessage,
+      deleteChatMessage,
+      trackProjectMinutes,
+      addProjectProgress,
+      deleteProjectProgress,
+      allProjects,
     ],
   );
 

@@ -5,6 +5,11 @@ export function isActiveProject(project: CreativeProject): boolean {
   return project.status !== 'terminado';
 }
 
+/** Cuenta para carga de trabajo (rechazados no saturan al colaborador). */
+export function countsTowardWorkload(project: CreativeProject): boolean {
+  return isActiveProject(project) && project.acceptanceStatus !== 'declined';
+}
+
 export function filterActiveProjects(projects: CreativeProject[]): CreativeProject[] {
   return projects.filter(isActiveProject);
 }
@@ -27,6 +32,7 @@ export function filterPendingAssignments(assignments: TaskAssignment[]): TaskAss
 }
 
 export function clearedTaskWork(_task?: EmployeeTask): Partial<EmployeeTask> {
+  void _task;
   return {
     currentWork: 'Sin tarea activa',
     status: 'sin_empezar',

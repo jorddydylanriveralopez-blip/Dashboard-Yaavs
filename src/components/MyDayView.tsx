@@ -6,21 +6,23 @@ import {
   PROJECT_STATUSES,
   labelFor,
 } from '../data/projectOptions';
-import { AssignmentBriefDetails } from './AssignmentBriefDetails';
-import { FileAttachmentsList } from './FileAttachments';
 import { assignmentTaskLine } from '../utils/assignmentBrief';
 import { isActiveProject } from '../utils/activeItems';
 import { formatShortDate } from '../utils/formatDate';
-import { getDeadlineInfo } from '../utils/deadline';
+import { formatDeadlineClock, getProjectTimelineInfo, projectDueDate } from '../utils/projectTimeline';
+import { useSharedNow } from '../hooks/useSharedNow';
 import {
   findProjectForTask,
   sortProjectsByUrgency,
   taskDuplicatesProject,
 } from '../utils/projectLink';
 import { ActivityFeedPanel } from './ActivityFeedPanel';
+import { HomeObservationsPanel } from './HomeObservationsPanel';
 import { KpiObjectiveInbox } from './KpiObjectiveInbox';
+import { buildPersonalObservationForEmployee } from '../utils/personalObservations';
 import type { CreativeProject, EmployeeTask } from '../types';
 import './MyDayView.css';
+import './ProjectTimelineCountdown.css';
 
 interface Props {
   onGoAssignments: () => void;
@@ -32,6 +34,8 @@ interface Props {
   onOpenProject: (project: CreativeProject) => void;
   onCompleteProject: (project: CreativeProject) => void;
 }
+
+const PROJECT_PREVIEW_LIMIT = 4;
 
 export function MyDayView({
   onGoAssignments,
@@ -51,6 +55,10 @@ export function MyDayView({
     myPendingKpiObjectives,
     calendar,
     activityFeed,
+    marketingTasks,
+    dailyKpiStore,
+    allProjects,
+    attendanceStore,
   } = useApp();
 
   const myActivity = useMemo(
@@ -78,7 +86,7 @@ export function MyDayView({
     let overdue = 0;
     let dueSoon = 0;
     for (const p of myProjects) {
-      const d = getDeadlineInfo(p.commitmentDate, 'en_progreso');
+      const d = getProjectTimelineInfo(p);
       if (d.tone === 'overdue') overdue += 1;
       else if (d.tone === 'urgent' || d.tone === 'soon') dueSoon += 1;
     }
@@ -112,14 +120,32 @@ export function MyDayView({
     [calendar.events, todayKey],
   );
 
+  const personalObservation = useMemo(() => {
+    if (!user?.employeeId) return null;
+    return buildPersonalObservationForEmployee(user.employeeId, {
+      tasks: marketingTasks,
+      dailyKpiStore,
+      allProjects,
+      attendanceStore,
+      activeProjects: myProjects,
+    });
+  }, [
+    user?.employeeId,
+    marketingTasks,
+    dailyKpiStore,
+    allProjects,
+    attendanceStore,
+    myProjects,
+  ]);
+
   const nextAction = useMemo(() => {
     if (myPendingKpiObjectives.length > 0) {
       const k = myPendingKpiObjectives[0];
       return {
         kind: 'kpi' as const,
         title: 'Objetivo KPI del mes',
-        detail: `${k.assignedByName} te asignó una meta para cumplir antes del ${formatShortDate(k.dueDate)}`,
-        actionLabel: 'Aceptar objetivo',
+        detail: `${k.assignedByName} · vence ${formatShortDate(k.dueDate)}`,
+        actionLabel: 'Aceptar',
         onAction: onGoKpis,
       };
     }
@@ -128,20 +154,20 @@ export function MyDayView({
       return {
         kind: 'assignment' as const,
         title: a.title,
-        detail: `Indicación del gerente · vence ${formatShortDate(a.dueDate)}`,
-        actionLabel: 'Revisar y aceptar',
+        detail: `Indicación · ${formatShortDate(a.dueDate)}`,
+        actionLabel: 'Revisar',
         onAction: onGoAssignments,
       };
     }
     const overdue = myProjects.find(
-      (p) => getDeadlineInfo(p.commitmentDate, 'en_progreso').tone === 'overdue',
+      (p) => getProjectTimelineInfo(p).tone === 'overdue',
     );
     if (overdue) {
       return {
         kind: 'project' as const,
         title: overdue.projectName.trim() || 'Proyecto sin nombre',
-        detail: 'Tiene retraso — prioriza la entrega con foto',
-        actionLabel: 'Entregar ahora',
+        detail: 'Con retraso — entrega con foto',
+        actionLabel: 'Entregar',
         onAction: () => onCompleteProject(overdue),
       };
     }
@@ -151,210 +177,198 @@ export function MyDayView({
         kind: 'project' as const,
         title: p.projectName.trim() || 'Proyecto sin nombre',
         detail: `Compromiso ${formatShortDate(p.commitmentDate)}`,
-        actionLabel: 'Ver proyecto',
+        actionLabel: 'Ver',
         onAction: () => onOpenProject(p),
       };
     }
     return null;
-  }, [myPendingKpiObjectives, myPendingAssignments, myProjects, onGoKpis, onGoAssignments, onCompleteProject, onOpenProject]);
+  }, [
+    myPendingKpiObjectives,
+    myPendingAssignments,
+    myProjects,
+    onGoKpis,
+    onGoAssignments,
+    onCompleteProject,
+    onOpenProject,
+  ]);
+
+  const showUrgentBlock =
+    myPendingAssignments.length > 1 ||
+    (myPendingAssignments.length === 1 && nextAction?.kind !== 'assignment');
+
+  const previewProjects = myProjects.slice(0, PROJECT_PREVIEW_LIMIT);
+  const hasMoreProjects = myProjects.length > PROJECT_PREVIEW_LIMIT;
+
+  const hasStats =
+    daySummary.total > 0 ||
+    daySummary.assignments > 0 ||
+    daySummary.kpiObjectives > 0;
 
   return (
-    <div className="my-day">
+    <div className="my-day my-day--compact">
+      <div className="my-day-top">
+        {hasStats && (
+          <div className="my-day-stats" role="status" aria-label="Resumen rápido">
+            {daySummary.kpiObjectives > 0 && (
+              <span className="my-day-stat my-day-stat--warn">KPI {daySummary.kpiObjectives}</span>
+            )}
+            {daySummary.assignments > 0 && (
+              <span className="my-day-stat my-day-stat--warn">
+                Indic. {daySummary.assignments}
+              </span>
+            )}
+            {daySummary.total > 0 && (
+              <span className="my-day-stat">Activos {daySummary.total}</span>
+            )}
+            {daySummary.overdue > 0 && (
+              <span className="my-day-stat my-day-stat--danger">
+                Retraso {daySummary.overdue}
+              </span>
+            )}
+            {daySummary.dueSoon > 0 && (
+              <span className="my-day-stat my-day-stat--soon">
+                Pronto {daySummary.dueSoon}
+              </span>
+            )}
+          </div>
+        )}
+
+        {nextAction && (
+          <section className="my-day-next my-day-next--inline" aria-label="Siguiente paso">
+            <div className="my-day-next-copy">
+              <span className="my-day-next-label">Siguiente</span>
+              <strong>{nextAction.title}</strong>
+              <span>{nextAction.detail}</span>
+            </div>
+            <button type="button" className="btn-primary my-day-next-btn" onClick={nextAction.onAction}>
+              {nextAction.actionLabel}
+            </button>
+          </section>
+        )}
+      </div>
+
       <KpiObjectiveInbox compact onGoKpis={onGoKpis} />
 
-      {nextAction && (
-        <section className="my-day-next" aria-label="Siguiente paso">
-          <span className="my-day-next-label">Tu siguiente paso</span>
-          <h2>{nextAction.title}</h2>
-          <p>{nextAction.detail}</p>
-          <button type="button" className="btn-primary" onClick={nextAction.onAction}>
-            {nextAction.actionLabel}
-          </button>
-        </section>
-      )}
-
-      {daySummary.total > 0 || daySummary.assignments > 0 || daySummary.kpiObjectives > 0 ? (
-        <div className="my-day-summary" role="status">
-          {daySummary.kpiObjectives > 0 && (
-            <span className="my-day-summary-chip my-day-summary-chip--warn">
-              Objetivo KPI por aceptar
-            </span>
-          )}
-          {daySummary.assignments > 0 && (
-            <span className="my-day-summary-chip my-day-summary-chip--warn">
-              {daySummary.assignments} indicación
-              {daySummary.assignments > 1 ? 'es' : ''} por aceptar
-            </span>
-          )}
-          {daySummary.total > 0 && (
-            <span className="my-day-summary-chip">
-              {daySummary.total} por entregar
-            </span>
-          )}
-          {daySummary.overdue > 0 && (
-            <span className="my-day-summary-chip my-day-summary-chip--danger">
-              {daySummary.overdue} con retraso
-            </span>
-          )}
-          {daySummary.dueSoon > 0 && (
-            <span className="my-day-summary-chip my-day-summary-chip--soon">
-              {daySummary.dueSoon} vencen pronto
-            </span>
-          )}
-        </div>
-      ) : null}
-
-      {myPendingAssignments.length > 0 && (
-        <section className="my-day-block my-day-urgent">
-          <h2>Requiere tu atención</h2>
-          <p>
-            Tienes {myPendingAssignments.length} indicación
-            {myPendingAssignments.length > 1 ? 'es' : ''} del gerente
+      {showUrgentBlock && (
+        <section className="my-day-block my-day-urgent my-day-block--tight">
+          <div className="my-day-block-head">
+            <h2>Indicaciones pendientes</h2>
+            <button type="button" className="btn-ghost my-day-link-all" onClick={onGoAssignments}>
+              Ver todas →
+            </button>
+          </div>
+          <p className="my-day-urgent-count">
+            {myPendingAssignments.length} por aceptar del gerente
           </p>
-          {myPendingAssignments[0] && (
-            <div className="my-day-assign-preview">
-              <h3>{myPendingAssignments[0].title}</h3>
-              {myPendingAssignments[0].brief && (
-                <AssignmentBriefDetails brief={myPendingAssignments[0].brief} compact />
-              )}
-              {(myPendingAssignments[0].attachments?.length ?? 0) > 0 && (
-                <FileAttachmentsList
-                  attachments={myPendingAssignments[0].attachments ?? []}
-                  compact
-                />
-              )}
-            </div>
-          )}
-          <button type="button" className="btn-primary" onClick={onGoAssignments}>
-            Revisar y aceptar
-          </button>
         </section>
       )}
 
-      <section className="my-day-block my-day-projects-block">
-        <div className="my-day-block-head">
-          <h2>Por entregar</h2>
-          <div className="my-day-head-links">
-            <button type="button" className="btn-ghost my-day-link-all" onClick={onGoProjects}>
-              Proyectos →
-            </button>
-            <button type="button" className="btn-ghost my-day-link-all" onClick={onGoCompleted}>
-              Concluidos →
-            </button>
-          </div>
-        </div>
-        <p className="my-day-section-sub">
-          Solo aparecen proyectos <strong>asignados a ti</strong>. La barra verde es el botón para
-          cerrar el trabajo (con foto), no significa que ya esté hecho. Cuando entregas, el proyecto
-          pasa a <strong>Concluidos ✓</strong>.
-        </p>
-
-        {myProjects.length === 0 ? (
-          <div className="my-day-empty-block">
-            <p className="my-day-empty">No tienes proyectos pendientes por entregar.</p>
-            <button type="button" className="btn-ghost" onClick={onGoCompleted}>
-              Ver trabajos concluidos →
-            </button>
-          </div>
-        ) : (
-          <ul className="my-day-project-list">
-            {myProjects.map((p) => (
-              <MyDayProjectCard
-                key={p.id}
-                project={p}
-                onOpenProject={onOpenProject}
-                onCompleteProject={onCompleteProject}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {myTask && !hideTaskSection && (
-        <section className="my-day-block">
-          <h2>
-            {linkedProject ? 'Indicación vinculada al proyecto' : 'Indicación en tu tablero'}
-          </h2>
-          {linkedProject ? (
-            <>
-              <p className="my-day-section-sub">
-                Tu indicación aceptada corresponde al proyecto{' '}
-                <strong>{linkedProject.projectName.trim() || 'Sin nombre'}</strong>. Gestiona la
-                entrega desde <strong>Por entregar</strong> (foto + Trabajo concluido).
-              </p>
-              <div className="my-day-linked-actions">
-                <button
-                  type="button"
-                  className="btn-primary"
-                  onClick={() => onOpenProject(linkedProject)}
-                >
-                  Abrir proyecto
+      <div className="my-day-grid">
+        <div className="my-day-main">
+          <section className="my-day-block my-day-projects-block my-day-block--tight">
+            <div className="my-day-block-head">
+              <h2>Por entregar</h2>
+              <div className="my-day-head-links">
+                <button type="button" className="btn-ghost my-day-link-all" onClick={onGoProjects}>
+                  Proyectos →
                 </button>
-                <button type="button" className="btn-ghost" onClick={() => onOpenTask(myTask)}>
-                  Ver tablero Equipo
+                <button type="button" className="btn-ghost my-day-link-all" onClick={onGoCompleted}>
+                  Concluidos →
                 </button>
               </div>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="my-day-task-card"
-              onClick={() => onOpenTask(myTask)}
-            >
-              <span
-                className="status-pill"
-                style={{ background: STATUS_COLORS[myTask.status] }}
-              >
-                {STATUS_LABELS[myTask.status]}
-              </span>
-              <strong>{myTask.currentWork}</strong>
-              {taskSummary && taskSummary !== myTask.currentWork && (
-                <span className="my-day-meta">{taskSummary}</span>
+            </div>
+
+            {myProjects.length === 0 ? (
+              <p className="my-day-empty my-day-empty--inline">
+                Sin proyectos pendientes.{' '}
+                <button type="button" className="my-day-inline-link" onClick={onGoCompleted}>
+                  Ver concluidos
+                </button>
+              </p>
+            ) : (
+              <>
+                <ul className="my-day-project-list my-day-project-list--compact">
+                  {previewProjects.map((p) => (
+                    <MyDayProjectCard
+                      key={p.id}
+                      project={p}
+                      onOpenProject={onOpenProject}
+                      onCompleteProject={onCompleteProject}
+                    />
+                  ))}
+                </ul>
+                {hasMoreProjects && (
+                  <button type="button" className="btn-ghost my-day-more-link" onClick={onGoProjects}>
+                    +{myProjects.length - PROJECT_PREVIEW_LIMIT} más en Proyectos →
+                  </button>
+                )}
+              </>
+            )}
+          </section>
+
+          {myTask && !hideTaskSection && (
+            <section className="my-day-block my-day-block--tight">
+              <h2>{linkedProject ? 'Indicación vinculada' : 'Tu tablero'}</h2>
+              {linkedProject ? (
+                <div className="my-day-linked-row">
+                  <span>{linkedProject.projectName.trim() || 'Sin nombre'}</span>
+                  <button type="button" className="btn-primary btn-sm" onClick={() => onOpenProject(linkedProject)}>
+                    Abrir
+                  </button>
+                </div>
+              ) : (
+                <button type="button" className="my-day-task-card my-day-task-card--compact" onClick={() => onOpenTask(myTask)}>
+                  <span className="status-pill" style={{ background: STATUS_COLORS[myTask.status] }}>
+                    {STATUS_LABELS[myTask.status]}
+                  </span>
+                  <strong>{myTask.currentWork}</strong>
+                  {taskSummary && taskSummary !== myTask.currentWork && (
+                    <span className="my-day-meta">{taskSummary}</span>
+                  )}
+                </button>
               )}
-              {myTask.assignedByName && (
-                <span className="my-day-assigned">
-                  Indicación de {myTask.assignedByName}
-                </span>
-              )}
-              <span
-                className={`due-chip tone-${getDeadlineInfo(myTask.dueDate, myTask.status).tone}`}
-              >
-                {getDeadlineInfo(myTask.dueDate, myTask.status).label}
-              </span>
-            </button>
+            </section>
           )}
-        </section>
-      )}
+        </div>
 
-      <section className="my-day-block">
-        <h2>Agenda de hoy</h2>
-        {todayEvents.length === 0 ? (
-          <p className="my-day-empty">Sin pendientes en el calendario para hoy.</p>
-        ) : (
-          <ul className="my-day-events">
-            {todayEvents.map((e) => (
-              <li key={e.id}>
-                <span className="my-day-time">{e.time}</span>
-                <span>{e.title}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <button type="button" className="btn-ghost" onClick={onGoCalendar}>
-          Ver calendario completo
-        </button>
-      </section>
+        <aside className="my-day-aside">
+          {personalObservation && (
+            <HomeObservationsPanel mode="personal" observation={personalObservation} compact />
+          )}
 
-      {myActivity.length > 0 && (
-        <section className="my-day-block">
-          <ActivityFeedPanel
-            events={myActivity}
-            limit={5}
-            title="Actividad que te involucra"
-            emptyMessage=""
-          />
-        </section>
-      )}
+          <section className="my-day-block my-day-block--tight my-day-agenda">
+            <div className="my-day-block-head">
+              <h2>Agenda hoy</h2>
+              <button type="button" className="btn-ghost my-day-link-all" onClick={onGoCalendar}>
+                Agenda →
+              </button>
+            </div>
+            {todayEvents.length === 0 ? (
+              <p className="my-day-empty my-day-empty--inline">Sin pendientes hoy.</p>
+            ) : (
+              <ul className="my-day-events my-day-events--compact">
+                {todayEvents.slice(0, 4).map((e) => (
+                  <li key={e.id}>
+                    <span className="my-day-time">{e.time}</span>
+                    <span>{e.title}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {myActivity.length > 0 && (
+            <section className="my-day-block my-day-block--tight my-day-activity">
+              <ActivityFeedPanel
+                events={myActivity}
+                limit={3}
+                title="Actividad"
+                emptyMessage=""
+              />
+            </section>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
@@ -368,37 +382,43 @@ function MyDayProjectCard({
   onOpenProject: (p: CreativeProject) => void;
   onCompleteProject: (p: CreativeProject) => void;
 }) {
-  const deadline = getDeadlineInfo(p.commitmentDate, 'en_progreso');
+  const now = useSharedNow();
+  const deadline = getProjectTimelineInfo(p, now);
+  const due = projectDueDate(p);
+  const clock = formatDeadlineClock(deadline);
   return (
-    <li className="my-day-project-card">
-      <div className="my-day-project-card-top">
-        <span
-          className="status-pill"
-          style={{ background: PROJECT_STATUS_COLORS[p.status] }}
-        >
-          {labelFor(PROJECT_STATUSES, p.status)}
-        </span>
-        <span className={`due-chip tone-${deadline.tone}`}>{deadline.label}</span>
+    <li className="my-day-project-card my-day-project-card--compact">
+      <div className="my-day-project-card-main">
+        <div className="my-day-project-card-top">
+          <span
+            className="status-pill status-pill--sm"
+            style={{ background: PROJECT_STATUS_COLORS[p.status] }}
+          >
+            {labelFor(PROJECT_STATUSES, p.status)}
+          </span>
+          <span className={`due-chip tone-${deadline.tone}`}>{deadline.label}</span>
+          {clock && (
+            <span className={`live-deadline-chip live-deadline-chip--${deadline.tone}`}>
+              ⏱ {clock}
+            </span>
+          )}
+        </div>
+        <h3>{p.projectName.trim() || 'Sin nombre'}</h3>
+        <p className="my-day-project-meta">
+          {due ? `Entrega ${formatShortDate(due)}` : 'Sin fecha de entrega'}
+          {p.requestedBy.trim() ? ` · ${p.requestedBy}` : ''}
+        </p>
       </div>
-      <h3>{p.projectName.trim() || 'Sin nombre'}</h3>
-      <p className="my-day-project-meta">
-        Compromiso: {formatShortDate(p.commitmentDate)}
-        {p.requestedBy.trim() ? ` · ${p.requestedBy}` : ''}
-      </p>
-      <p className="my-day-card-pending" role="status">
-        <span className="my-day-pending-dot" aria-hidden />
-        Pendiente de entrega — aún no envías la foto de prueba
-      </p>
-      <div className="my-day-project-actions">
-        <button type="button" className="btn-ghost" onClick={() => onOpenProject(p)}>
-          Ver proyecto
+      <div className="my-day-project-actions my-day-project-actions--compact">
+        <button type="button" className="btn-ghost btn-sm" onClick={() => onOpenProject(p)}>
+          Ver
         </button>
         <button
           type="button"
-          className="my-day-btn-deliver"
+          className="my-day-btn-deliver my-day-btn-deliver--sm"
           onClick={() => onCompleteProject(p)}
         >
-          Entregar con foto →
+          Entregar
         </button>
       </div>
     </li>

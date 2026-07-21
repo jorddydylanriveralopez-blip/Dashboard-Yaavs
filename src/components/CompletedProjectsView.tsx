@@ -48,10 +48,10 @@ export function CompletedProjectsView({ projects, filter, onSelect }: Props) {
         Aquí ves los proyectos marcados como <strong>Terminado</strong>.
         {canEditAll
           ? ' Abre uno para ver la prueba de entrega que subió el colaborador.'
-          : ' Los que tú cerraste con foto de entrega aparecen con el distintivo de prueba.'}
+          : ' Los que tú cerraste con evidencia de entrega aparecen con el distintivo de prueba.'}
       </p>
       <p className="completed-projects-hint-secondary">
-        El menú <strong>Historial</strong> (◷) es el historial mensual de KPIs, no la lista de
+        El menú <strong>Resultados del mes</strong> (◷) es el resumen mensual de KPIs, no la lista de
         proyectos.
       </p>
 
@@ -62,7 +62,8 @@ export function CompletedProjectsView({ projects, filter, onSelect }: Props) {
           </span>
           <p>No hay proyectos concluidos todavía.</p>
           <p className="completed-projects-empty-sub">
-            Cuando marques un trabajo como concluido (con foto de prueba), aparecerá aquí.
+            Cuando marques el status como <strong>Terminado</strong> (o uses Trabajo concluido),
+            el proyecto aparecerá aquí.
           </p>
         </div>
       ) : (

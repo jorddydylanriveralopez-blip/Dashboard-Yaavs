@@ -1,0 +1,33 @@
+.sidebar-pwa-install {
+  margin: 0 12px 12px;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(0, 85, 255, 0.08);
+  border: 1px solid rgba(0, 85, 255, 0.18);
+}
+
+.sidebar-pwa-install-title {
+  margin: 0 0 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--yaavs-ink);
+}
+
+.sidebar-pwa-install-hint {
+  margin: 0 0 10px;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+}
+
+.sidebar-pwa-install-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-pwa-install-actions .btn-sm {
+  width: 100%;
+  font-size: 0.75rem;
+  padding: 8px 10px;
+}

@@ -1,17 +1,19 @@
 import { useMemo } from 'react';
 import { useApp } from '../context/AppContext';
 import {
-  COLLABORATORS,
   labelFor,
   PROJECT_STATUS_COLORS,
   PROJECT_STATUSES,
 } from '../data/projectOptions';
 import { isActiveProject } from '../utils/activeItems';
-import { getDeadlineInfo } from '../utils/deadline';
 import { formatShortDate } from '../utils/formatDate';
-import { countOverdueProjects, sortProjectsByUrgency } from '../utils/projectLink';
+import { buildManagerTeamProjectBuckets } from '../utils/managerTeamProjects';
+import { labelForProjectCollaborators } from '../utils/projectCollaborators';
+import { getProjectTimelineInfo } from '../utils/projectTimeline';
 import { buildTeamCapacity } from '../utils/teamWorkload';
 import { ActivityFeedPanel } from './ActivityFeedPanel';
+import { HomeObservationsPanel } from './HomeObservationsPanel';
+import { buildTeamObservations } from '../utils/personalObservations';
 import type { CreativeProject } from '../types';
 import './ManagerHomeView.css';
 
@@ -34,23 +36,40 @@ export function ManagerHomeView({
   onGoTeam,
   onOpenProject,
 }: Props) {
-  const { assignments, activeUsers, activityFeed, workloadLimits, canManageWorkloadLimits } =
-    useApp();
+  const {
+    assignments,
+    activeUsers,
+    activityFeed,
+    workloadLimits,
+    canManageWorkloadLimits,
+    marketingTasks,
+    dailyKpiStore,
+    allProjects,
+    attendanceStore,
+  } = useApp();
+
+  const teamObservations = useMemo(
+    () =>
+      buildTeamObservations({
+        tasks: marketingTasks,
+        dailyKpiStore,
+        allProjects,
+        attendanceStore,
+      }),
+    [marketingTasks, dailyKpiStore, allProjects, attendanceStore],
+  );
 
   const activeProjects = useMemo(
     () => projects.filter(isActiveProject),
     [projects],
   );
 
-  const overdueProjects = useMemo(
-    () =>
-      sortProjectsByUrgency(
-        activeProjects.filter(
-          (p) => getDeadlineInfo(p.commitmentDate, 'en_progreso').tone === 'overdue',
-        ),
-      ),
-    [activeProjects],
+  const teamBuckets = useMemo(
+    () => buildManagerTeamProjectBuckets(projects),
+    [projects],
   );
+
+  const overdueProjects = teamBuckets.overdue;
 
   const teamPending = useMemo(
     () => assignments.filter((a) => a.status === 'pending'),
@@ -69,16 +88,11 @@ export function ManagerHomeView({
     [completedProjects],
   );
 
-  const overdueCount = countOverdueProjects(activeProjects);
+  const overdueCount = teamBuckets.counts.overdue;
 
   const capacity = useMemo(
     () => buildTeamCapacity(projects, assignments, activeUsers, workloadLimits),
     [projects, assignments, activeUsers, workloadLimits],
-  );
-
-  const saturatedCount = useMemo(
-    () => capacity.filter((row) => row.saturated).length,
-    [capacity],
   );
 
   const needsAttention = overdueCount > 0 || teamPending.length > 0;
@@ -124,22 +138,28 @@ export function ManagerHomeView({
         </section>
       )}
 
-      <section className="manager-home-kpis" aria-label="Resumen">
+      <HomeObservationsPanel mode="team" members={teamObservations} />
+
+      <section className="manager-home-kpis yaavs-stagger" aria-label="Resumen">
+        <div className="manager-kpi manager-kpi--warn">
+          <strong>{teamBuckets.counts.dueSoon}</strong>
+          <span>Por entregar</span>
+        </div>
         <div className="manager-kpi manager-kpi--danger">
           <strong>{overdueCount}</strong>
-          <span>Proyectos con retraso</span>
+          <span>Con retraso</span>
+        </div>
+        <div className="manager-kpi manager-kpi--ok">
+          <strong>{teamBuckets.counts.active}</strong>
+          <span>Activos</span>
+        </div>
+        <div className="manager-kpi">
+          <strong>{teamBuckets.counts.finishing}</strong>
+          <span>Por concluir</span>
         </div>
         <div className="manager-kpi manager-kpi--warn">
           <strong>{teamPending.length}</strong>
-          <span>Indicaciones sin aceptar</span>
-        </div>
-        <div className="manager-kpi manager-kpi--ok">
-          <strong>{activeProjects.length}</strong>
-          <span>En curso</span>
-        </div>
-        <div className={`manager-kpi${saturatedCount > 0 ? ' manager-kpi--warn' : ''}`}>
-          <strong>{saturatedCount}</strong>
-          <span>Al límite de carga</span>
+          <span>Indic. sin aceptar</span>
         </div>
         <div className="manager-kpi">
           <strong>{completedProjects.length}</strong>
@@ -160,6 +180,100 @@ export function ManagerHomeView({
         </button>
       </div>
 
+      <div className="manager-home-pipeline">
+        <section className="manager-home-block manager-home-block--pipeline">
+          <div className="manager-home-block-head">
+            <h2>Por entregar</h2>
+            <button type="button" className="btn-ghost manager-home-link" onClick={onGoProjects}>
+              Equipo →
+            </button>
+          </div>
+          <p className="manager-home-sub">
+            Entregas próximas del equipo — trabajo asignado a colaboradores.
+          </p>
+          {teamBuckets.dueSoon.length === 0 ? (
+            <p className="manager-home-empty">Nadie del equipo tiene entregas inminentes.</p>
+          ) : (
+            <ul className="manager-home-list">
+              {teamBuckets.dueSoon.slice(0, 6).map((p) => (
+                <ManagerProjectRow key={p.id} project={p} onOpen={() => onOpenProject(p)} />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="manager-home-block manager-home-block--pipeline">
+          <div className="manager-home-block-head">
+            <h2>Activos</h2>
+            <button type="button" className="btn-ghost manager-home-link" onClick={onGoProjects}>
+              Todos →
+            </button>
+          </div>
+          <p className="manager-home-sub">Proyectos en curso del equipo.</p>
+          {teamBuckets.active.length === 0 ? (
+            <p className="manager-home-empty">Sin proyectos activos.</p>
+          ) : (
+            <ul className="manager-home-list manager-home-list--compact">
+              {teamBuckets.active.slice(0, 6).map((p) => (
+                <ManagerProjectRow key={p.id} project={p} onOpen={() => onOpenProject(p)} compact />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="manager-home-block manager-home-block--pipeline">
+          <div className="manager-home-block-head">
+            <h2>Por concluir</h2>
+            <button type="button" className="btn-ghost manager-home-link" onClick={onGoProjects}>
+              Ver →
+            </button>
+          </div>
+          <p className="manager-home-sub">
+            En revisión, aprobados o en producción — casi listos para entregar.
+          </p>
+          {teamBuckets.finishing.length === 0 ? (
+            <p className="manager-home-empty">Ningún proyecto en fase final.</p>
+          ) : (
+            <ul className="manager-home-list manager-home-list--compact">
+              {teamBuckets.finishing.slice(0, 6).map((p) => (
+                <ManagerProjectRow key={p.id} project={p} onOpen={() => onOpenProject(p)} compact />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="manager-home-block manager-home-block--pipeline">
+          <div className="manager-home-block-head">
+            <h2>Concluidos</h2>
+            <button type="button" className="btn-ghost manager-home-link" onClick={onGoCompleted}>
+              Ver todos →
+            </button>
+          </div>
+          {recentCompleted.length === 0 ? (
+            <p className="manager-home-empty">Aún no hay entregas con prueba registradas.</p>
+          ) : (
+            <ul className="manager-home-list manager-home-list--compact">
+              {recentCompleted.slice(0, 6).map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    className="manager-completed-row"
+                    onClick={() => onOpenProject(p)}
+                  >
+                    <strong>{p.projectName.trim() || 'Sin nombre'}</strong>
+                    <span>
+                      {p.completedByName ?? labelForProjectCollaborators(p)}
+                      {p.finishedDate ? ` · ${formatShortDate(p.finishedDate)}` : ''}
+                      {p.hasCompletionProof ? ' · Con prueba' : ''}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+
       {capacity.length > 0 && (
         <section className="manager-home-block manager-home-block--capacity">
           <div className="manager-home-block-head">
@@ -176,8 +290,8 @@ export function ManagerHomeView({
             </div>
           </div>
           <p className="manager-home-sub">
-            Proyectos activos + indicaciones pendientes vs el máximo permitido. Si alguien está
-            saturado, no recibe más trabajo sin tu contraseña.
+            Proyectos activos + indicaciones pendientes vs el máximo de {workloadLimits.defaultMax}{' '}
+            trabajos. Si alguien está saturado, no recibe más sin tu contraseña.
           </p>
           <ul className="manager-workload-list">
             {capacity.map((row) => (
@@ -277,37 +391,6 @@ export function ManagerHomeView({
       </section>
 
       <section className="manager-home-block">
-        <div className="manager-home-block-head">
-          <h2>Últimos concluidos</h2>
-          <button type="button" className="btn-ghost manager-home-link" onClick={onGoCompleted}>
-            Concluidos →
-          </button>
-        </div>
-        {recentCompleted.length === 0 ? (
-          <p className="manager-home-empty">Aún no hay entregas con prueba registradas.</p>
-        ) : (
-          <ul className="manager-home-list manager-home-list--compact">
-            {recentCompleted.map((p) => (
-              <li key={p.id}>
-                <button
-                  type="button"
-                  className="manager-completed-row"
-                  onClick={() => onOpenProject(p)}
-                >
-                  <strong>{p.projectName.trim() || 'Sin nombre'}</strong>
-                  <span>
-                    {p.completedByName ?? labelFor(COLLABORATORS, p.collaborator)}
-                    {p.finishedDate ? ` · ${formatShortDate(p.finishedDate)}` : ''}
-                    {p.hasCompletionProof ? ' · Con prueba' : ''}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="manager-home-block">
         <ActivityFeedPanel events={activityFeed} limit={10} />
       </section>
     </div>
@@ -317,14 +400,21 @@ export function ManagerHomeView({
 function ManagerProjectRow({
   project: p,
   onOpen,
+  compact = false,
 }: {
   project: CreativeProject;
   onOpen: () => void;
+  compact?: boolean;
 }) {
-  const deadline = getDeadlineInfo(p.commitmentDate, 'en_progreso');
+  const timeline = getProjectTimelineInfo(p);
+  const dueLabel = timeline.dueDate ? formatShortDate(timeline.dueDate) : '—';
   return (
     <li>
-      <button type="button" className="manager-project-row" onClick={onOpen}>
+      <button
+        type="button"
+        className={`manager-project-row${compact ? ' manager-project-row--compact' : ''}`}
+        onClick={onOpen}
+      >
         <div className="manager-project-row-top">
           <span
             className="status-pill"
@@ -332,12 +422,11 @@ function ManagerProjectRow({
           >
             {labelFor(PROJECT_STATUSES, p.status)}
           </span>
-          <span className={`due-chip tone-${deadline.tone}`}>{deadline.label}</span>
+          <span className={`due-chip tone-${timeline.tone}`}>{timeline.shortLabel}</span>
         </div>
         <strong>{p.projectName.trim() || 'Sin nombre'}</strong>
         <span className="manager-project-row-meta">
-          {labelFor(COLLABORATORS, p.collaborator)} · Compromiso{' '}
-          {formatShortDate(p.commitmentDate)}
+          {labelForProjectCollaborators(p)} · Entrega {dueLabel}
         </span>
       </button>
     </li>

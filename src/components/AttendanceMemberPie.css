@@ -1,0 +1,80 @@
+.attendance-member-pie {
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 100%;
+}
+
+.attendance-member-pie-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.attendance-member-pie-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.attendance-member-pie-head strong {
+  display: block;
+  font-size: 0.9375rem;
+}
+
+.attendance-member-pie-head span {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.attendance-member-pie-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.attendance-member-pie-chart .pie-chart {
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.attendance-member-pie-chart .pie-chart-ring {
+  width: 150px !important;
+  height: 150px !important;
+}
+
+.attendance-member-pie-chart .pie-chart-legend {
+  min-width: 0;
+  width: 100%;
+}
+
+.attendance-member-pie-chart .pie-chart-hole strong {
+  font-size: 1.25rem;
+}
+
+.attendance-member-pie-meta {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.attendance-member-pie-empty {
+  margin: 24px 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}

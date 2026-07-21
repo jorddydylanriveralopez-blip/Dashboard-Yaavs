@@ -1,4 +1,5 @@
 import type { EmployeeTask } from '../types';
+import { buildPositionKpis, type PositionKpi } from './marketingPositions';
 
 export function kpiPercent(task: EmployeeTask): number {
   if (!task.kpiTarget) return 0;
@@ -21,19 +22,12 @@ export const KPI_BUCKET_LABELS: Record<KpiBucket, string> = {
   critico: 'Prioridad alta (menos de 25%)',
 };
 
-export interface DepartmentKpi {
-  department: string;
-  avgPct: number;
-  count: number;
-  tasks: EmployeeTask[];
-}
-
 export interface KpiMonthSummary {
   monthLabel: string;
   teamAvg: number;
   totalPeople: number;
   buckets: Record<KpiBucket, number>;
-  departments: DepartmentKpi[];
+  positions: PositionKpi[];
   sortedByKpi: EmployeeTask[];
 }
 
@@ -59,24 +53,7 @@ export function buildKpiMonthSummary(tasks: EmployeeTask[]): KpiMonthSummary {
     ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length)
     : 0;
 
-  const deptMap = new Map<string, EmployeeTask[]>();
-  for (const task of tasks) {
-    const key = task.roleTitle ?? task.department;
-    const list = deptMap.get(key) ?? [];
-    list.push(task);
-    deptMap.set(key, list);
-  }
-
-  const departments: DepartmentKpi[] = [...deptMap.entries()]
-    .map(([department, deptTasks]) => ({
-      department,
-      avgPct: Math.round(
-        deptTasks.reduce((sum, t) => sum + kpiPercent(t), 0) / deptTasks.length,
-      ),
-      count: deptTasks.length,
-      tasks: deptTasks,
-    }))
-    .sort((a, b) => b.avgPct - a.avgPct);
+  const positions = buildPositionKpis(tasks);
 
   const sortedByKpi = [...tasks].sort(
     (a, b) => kpiPercent(b) - kpiPercent(a),
@@ -87,7 +64,7 @@ export function buildKpiMonthSummary(tasks: EmployeeTask[]): KpiMonthSummary {
     teamAvg,
     totalPeople: tasks.length,
     buckets,
-    departments,
+    positions,
     sortedByKpi,
   };
 }

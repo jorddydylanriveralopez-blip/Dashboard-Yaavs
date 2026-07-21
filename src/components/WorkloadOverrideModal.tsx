@@ -39,8 +39,7 @@ export function WorkloadOverrideModal({ check, onClose, onConfirm }: Props) {
             <p>
               <strong>{check.employeeName}</strong> ya tiene{' '}
               <strong>{check.current.total}</strong> de <strong>{check.max}</strong> trabajos
-              activos ({check.current.projects} proyectos + {check.current.pendingAssignments}{' '}
-              indicaciones pendientes).
+              activos. Solo se cuentan sus proyectos activos actuales.
             </p>
           </div>
         </header>

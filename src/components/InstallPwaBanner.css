@@ -43,6 +43,62 @@
   flex-wrap: wrap;
 }
 
+.pwa-card {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(145deg, rgba(0, 85, 255, 0.08), rgba(0, 180, 255, 0.05));
+  border: 1px solid rgba(0, 85, 255, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.pwa-card-logo {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.pwa-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pwa-card-text strong {
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+}
+
+.pwa-card-text span {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.pwa-card-text small {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+  opacity: 0.9;
+}
+
+.pwa-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 100%;
+}
+
+.pwa-card-actions .btn-primary {
+  flex: 1;
+  min-width: 140px;
+}
+
 @media (max-width: 480px) {
   .pwa-banner {
     flex-direction: column;

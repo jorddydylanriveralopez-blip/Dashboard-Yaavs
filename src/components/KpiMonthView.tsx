@@ -8,6 +8,7 @@ import {
   kpiPercent,
   type KpiBucket,
 } from '../utils/kpiStats';
+import { positionTitleForEmployee } from '../utils/marketingPositions';
 import { getMonthKey } from '../utils/performanceHistory';
 import { hasActiveKpiObjective } from '../utils/kpiObjectives';
 import { KpiObjectiveInbox } from './KpiObjectiveInbox';
@@ -116,26 +117,34 @@ export function KpiMonthView({ tasks, onSendKpi, showPersonalPulse, employeeId }
       </section>
 
       <section className="kpi-section">
-        <h2>Por rol en Marketing</h2>
-        <div className="kpi-dept-grid">
-          {summary.departments.map((dept) => (
-            <div key={dept.department} className="kpi-dept-card">
+        <h2>Performance por posición</h2>
+        <div className="kpi-dept-grid yaavs-stagger">
+          {summary.positions.map((pos, i) => (
+            <div key={pos.positionId} className="kpi-dept-card">
               <div className="kpi-dept-head">
-                <h3>{dept.department}</h3>
-                <span className="kpi-dept-avg">{dept.avgPct}%</span>
+                <h3>{pos.position}</h3>
+                <span className="kpi-dept-avg">{pos.avgPct}%</span>
               </div>
               <div className="kpi-bar">
                 <div
                   className="kpi-bar-fill"
                   style={{
-                    width: `${dept.avgPct}%`,
-                    background: deptBarColor(dept.avgPct),
+                    width: `${pos.avgPct}%`,
+                    background: deptBarColor(pos.avgPct),
+                    ['--bar-i' as string]: i,
                   }}
                 />
               </div>
-              <p className="kpi-dept-meta">
-                {dept.count} {dept.count === 1 ? 'persona' : 'personas'}
-              </p>
+              <ul className="kpi-position-members">
+                {pos.members.map((member) => (
+                  <li key={member.employeeId}>
+                    <span className="kpi-position-name">{member.employeeName}</span>
+                    <span className="kpi-position-pct">
+                      {member.task ? `${member.pct}%` : 'Sin datos'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </div>
@@ -143,7 +152,7 @@ export function KpiMonthView({ tasks, onSendKpi, showPersonalPulse, employeeId }
 
       <section className="kpi-section">
         <h2>Detalle por colaborador</h2>
-        <div className="kpi-people-grid">
+        <div className="kpi-people-grid yaavs-stagger">
           {summary.sortedByKpi.map((task) => (
             <KpiPersonCard key={task.id} task={task} />
           ))}
@@ -169,7 +178,7 @@ function KpiPersonCard({ task }: { task: EmployeeTask }) {
         </div>
         <div className="kpi-person-info">
           <strong>{task.employeeName}</strong>
-          <span>{task.roleTitle ?? task.department}</span>
+          <span>{positionTitleForEmployee(task.employeeId) ?? task.roleTitle ?? task.department}</span>
           {task.kpiAssignedByName && (
             <span className="kpi-person-assigned">Objetivo de {task.kpiAssignedByName}</span>
           )}
