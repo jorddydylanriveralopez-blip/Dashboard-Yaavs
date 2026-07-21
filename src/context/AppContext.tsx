@@ -719,6 +719,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pendingRemote = useRef<AppSyncState | null>(null);
   /** Pedir otro push cuando termine el que está en vuelo. */
   const pushQueued = useRef(false);
+  /** Snapshot del board para reglas de sync sin closures obsoletas. */
+  const boardRef = useRef(board);
+  boardRef.current = board;
   // Modo espejo oculto: solo la cuenta de Dylan puede observar la vista de Orlando.
   const [spyMode, setSpyMode] = useState(false);
   const realSessionUserId = useRef<string | null>(
@@ -1108,8 +1111,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pendingRemote.current = remote;
       return;
     }
-    if (localEditAt.current && remote.updatedAt < localEditAt.current) return;
-    if (remote.updatedAt <= lastRemoteAt.current) return;
+    const remoteProjectCount = remote.board?.projects?.length ?? 0;
+    const remoteTaskCount = remote.board?.tasks?.length ?? 0;
+    const remoteHasData = remoteProjectCount > 0 || remoteTaskCount > 0;
+    // Si el remoto trae proyectos y el local está vacío, siempre aplicar:
+    // un localEditAt reciente de un tablero vacío no debe bloquear la sync.
+    const localBoardEmpty =
+      (boardRef.current?.projects?.length ?? 0) === 0 &&
+      (boardRef.current?.tasks?.length ?? 0) === 0;
+    const forceTakeRemote = remoteHasData && localBoardEmpty;
+    if (!forceTakeRemote && localEditAt.current && remote.updatedAt < localEditAt.current) {
+      return;
+    }
+    if (!forceTakeRemote && remote.updatedAt <= lastRemoteAt.current) return;
     lastRemoteAt.current = remote.updatedAt;
     applyingRemote.current = true;
     let preservedLocal = false;
