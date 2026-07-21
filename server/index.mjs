@@ -378,13 +378,21 @@ const HAS_REMOTE_DB = Boolean(
 
 app.listen(PORT, '0.0.0.0', async () => {
   console.log(`Yaavs API en el puerto ${PORT}`);
-  // Solo sembramos el archivo local cuando no hay base de datos remota (dev local).
-  if (!HAS_REMOTE_DB && !fs.existsSync(DB_PATH)) {
+  // Nunca crear un tablero vacío en producción (Hostinger/Render/Fly):
+  // eso borraría la sincronización si aún no está DATABASE_URL.
+  // Solo sembramos archivo local en desarrollo.
+  const isProd = process.env.NODE_ENV === 'production';
+  if (!isProd && !HAS_REMOTE_DB && !fs.existsSync(DB_PATH)) {
     try {
       await saveAppState(emptyAppState());
       console.log('Base de datos inicial creada en server/data/store.json');
     } catch (error) {
       console.error('No se pudo crear la base local:', error?.message ?? error);
     }
+  }
+  if (isProd && !HAS_REMOTE_DB) {
+    console.warn(
+      'DATABASE_URL no está configurada. Configúrala en Hostinger/Render con la misma Neon para no perder proyectos.',
+    );
   }
 });
