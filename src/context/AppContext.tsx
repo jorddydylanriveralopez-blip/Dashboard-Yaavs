@@ -1236,7 +1236,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       needsRepushAfterRemote.current = true;
     }
 
-    const remoteProjectCount = remote.board?.projects?.length ?? 0;
     const localProjectCount = boardRef.current?.projects?.length ?? 0;
     // Si el remoto trae proyectos vivos y el local no tiene ninguno, siempre aplicar.
     const liveRemoteCount = (remote.board?.projects ?? []).filter(
