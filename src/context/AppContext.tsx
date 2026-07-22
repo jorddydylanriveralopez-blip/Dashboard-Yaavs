@@ -120,6 +120,7 @@ import { MAX_PROGRESS_FILES } from '../utils/fileAttachments';
 import {
   formatOvertimeShort,
   overtimeSecondsAfterSix,
+  sixPmMsOnLocalDay,
   todayDateKey,
 } from '../utils/officeOvertime';
 import {
@@ -3617,6 +3618,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!user?.employeeId) return false;
     if (user.employeeId === 'emp-orlando') return false;
     const nowMs = Date.now();
+    // Solo después de las 6:00 p.m. hora local.
+    if (nowMs < sixPmMsOnLocalDay(nowMs)) return false;
     const now = new Date(nowMs).toISOString();
     const today = todayDateKey(nowMs);
     setOfficeOvertime((prev) => {

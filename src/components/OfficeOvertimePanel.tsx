@@ -34,35 +34,42 @@ export function OfficeOvertimePanel({ mode, compact }: Props) {
     const entry = officeOvertime[employeeId!];
     const running = isOvertimeRunning(entry);
     const seconds = liveOvertimeSeconds(entry, now);
-    const waitingForSix = running && isBeforeSixPm(now) && seconds === 0;
+    const beforeSix = isBeforeSixPm(now);
 
     if (!running) {
       return (
         <section
-          className={`office-ot office-ot--invite${compact ? ' office-ot--compact' : ''}`}
+          className={`office-ot office-ot--invite${compact ? ' office-ot--compact' : ''}${beforeSix ? ' office-ot--locked' : ''}`}
           aria-label="Tiempo extra en oficina"
         >
           <div className="office-ot-copy">
             <span className="office-ot-label">Oficina</span>
             <strong className="office-ot-question">¿Te vas a quedar más tiempo?</strong>
             <span className="office-ot-hint">
-              Si te quedas después de las 6:00 p.m., inicia el cronómetro. Al terminar, Orlando
-              recibe el tiempo extra.
+              {beforeSix
+                ? 'El cronómetro se habilita a las 6:00 p.m. Hasta entonces no puedes iniciarlo.'
+                : 'Inicia el cronómetro si te quedas. Al terminar, Orlando recibe el tiempo extra después de las 6:00 p.m.'}
             </span>
           </div>
           <div className="office-ot-actions">
             <button
               type="button"
               className="btn-primary office-ot-btn"
+              disabled={beforeSix}
+              title={beforeSix ? 'Disponible a partir de las 6:00 p.m.' : undefined}
               onClick={() => {
+                if (beforeSix) {
+                  toast.info('El cronómetro se habilita a las 6:00 p.m.');
+                  return;
+                }
                 if (startOfficeOvertime()) {
                   toast.success('Cronómetro iniciado. Al terminar se avisa a Orlando.');
                 } else {
-                  toast.info('No se pudo iniciar el cronómetro');
+                  toast.info('Solo puedes iniciar el cronómetro después de las 6:00 p.m.');
                 }
               }}
             >
-              Sí, me quedo
+              {beforeSix ? 'Disponible a las 6:00 p.m.' : 'Sí, me quedo'}
             </button>
           </div>
           {seconds > 0 && (
@@ -85,9 +92,7 @@ export function OfficeOvertimePanel({ mode, compact }: Props) {
             {formatOvertimeClock(seconds)}
           </strong>
           <span className="office-ot-hint">
-            {waitingForSix
-              ? 'Aún no son las 6:00 p.m. — el tiempo extra empieza a contar desde entonces.'
-              : 'Tiempo extra después de las 6:00 p.m. Cuando te vayas, pulsa Terminar.'}
+            Tiempo extra después de las 6:00 p.m. Cuando te vayas, pulsa Terminar.
           </span>
         </div>
         <div className="office-ot-actions">

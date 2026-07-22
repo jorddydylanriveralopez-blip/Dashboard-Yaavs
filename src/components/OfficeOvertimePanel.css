@@ -23,6 +23,18 @@
   );
 }
 
+.office-ot--locked {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--bg-muted, #f8fafc) 80%, #fff);
+  opacity: 0.96;
+}
+
+.office-ot-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(0.15);
+}
+
 .office-ot--running {
   border-color: color-mix(in srgb, #16a34a 40%, var(--border));
   background: linear-gradient(
