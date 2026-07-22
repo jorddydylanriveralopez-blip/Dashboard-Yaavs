@@ -574,11 +574,22 @@ export interface ExtraProjectEntry {
   /** Fecha de compromiso (YYYY-MM-DD). */
   doneDate: string;
   notes?: string;
-  /** Proyecto activo creado automáticamente al registrar este extra. */
+  /**
+   * Estado de aprobación por Orlando.
+   * Registros antiguos sin status se tratan como approved.
+   */
+  status?: ExtraProjectStatus;
+  reviewedAt?: string;
+  reviewedById?: string;
+  reviewedByName?: string;
+  rejectReason?: string;
+  /** Proyecto activo creado al aprobar este extra. */
   linkedProjectId?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+export type ExtraProjectStatus = 'pending' | 'approved' | 'rejected';
 
 export interface AppSyncState {
   board: BoardState;

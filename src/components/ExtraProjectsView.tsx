@@ -6,7 +6,7 @@ import { formatShortDate } from '../utils/formatDate';
 import { formatHoursMinutes } from '../utils/projectHours';
 import { assignableMarketingTasks } from '../utils/assignmentBrief';
 import { EmployeeMultiSelect } from './EmployeeMultiSelect';
-import type { ExtraProjectEntry } from '../types';
+import type { ExtraProjectEntry, ExtraProjectStatus } from '../types';
 import './ExtraProjectsView.css';
 
 function todayIso(): string {
@@ -21,6 +21,16 @@ function parseHoursInput(raw: string): number | null {
   return Math.round(n * 60);
 }
 
+function extraStatus(e: ExtraProjectEntry): ExtraProjectStatus {
+  return e.status ?? 'approved';
+}
+
+const STATUS_LABEL: Record<ExtraProjectStatus, string> = {
+  pending: 'Por aprobar',
+  approved: 'Aprobado',
+  rejected: 'Rechazado',
+};
+
 export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
   const {
     user,
@@ -28,9 +38,12 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
     activeUsers,
     canEditAll,
     visibleExtraProjects,
+    pendingExtraProjects,
     addExtraProject,
     updateExtraProject,
     deleteExtraProject,
+    approveExtraProject,
+    rejectExtraProject,
   } = useApp();
   const { confirm } = useConfirm();
   const toast = useToast();
@@ -43,6 +56,8 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
   const [doneDate, setDoneDate] = useState(todayIso);
   const [notes, setNotes] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
 
   const q = filter.trim().toLowerCase();
   const assignable = useMemo(
@@ -55,7 +70,7 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
       (e) =>
         e.projectName.toLowerCase().includes(q) ||
         e.employeeName.toLowerCase().includes(q) ||
-        e.employeeNames?.some((name) => name.toLowerCase().includes(q)) ||
+        e.employeeNames?.some((n) => n.toLowerCase().includes(q)) ||
         (e.notes ?? '').toLowerCase().includes(q),
     );
   }, [visibleExtraProjects, q]);
@@ -66,8 +81,8 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
       const ids = e.employeeIds?.length ? e.employeeIds : [e.employeeId];
       const names = e.employeeNames?.length ? e.employeeNames : [e.employeeName];
       ids.forEach((employeeId, index) => {
-        const name = names[index] ?? e.employeeName;
-        const group = map.get(employeeId) ?? { name, items: [] };
+        const personName = names[index] ?? e.employeeName;
+        const group = map.get(employeeId) ?? { name: personName, items: [] };
         group.items.push(e);
         map.set(employeeId, group);
       });
@@ -124,7 +139,16 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
         notes: notes.trim() || undefined,
       });
       if (ok) {
-        toast.success('Proyecto extra actualizado.');
+        const wasRejected =
+          extraStatus(
+            visibleExtraProjects.find((x) => x.id === editingId) ??
+              ({ status: 'pending' } as ExtraProjectEntry),
+          ) === 'rejected';
+        toast.success(
+          wasRejected && !canEditAll
+            ? 'Corregido y reenviado a Orlando para aprobación.'
+            : 'Proyecto extra actualizado.',
+        );
         resetForm();
       } else {
         toast.error('No pudiste editar este registro.');
@@ -139,7 +163,11 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
       notes: notes.trim() || undefined,
     });
     if (created) {
-      toast.success('Proyecto extra agregado a Activos.');
+      toast.success(
+        canEditAll
+          ? 'Proyecto extra aprobado y agregado a Activos.'
+          : 'Enviado a Orlando para aprobación.',
+      );
       resetForm();
     } else {
       toast.error('No se pudo guardar.');
@@ -149,7 +177,7 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
   const handleDelete = async (e: ExtraProjectEntry) => {
     const ok = await confirm({
       title: 'Eliminar proyecto extra',
-      message: `¿Borrar «${e.projectName}» de tu bitácora?`,
+      message: `¿Borrar «${e.projectName}» de la bitácora?`,
       confirmLabel: 'Eliminar',
       danger: true,
     });
@@ -160,9 +188,36 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
     }
   };
 
+  const handleApprove = (e: ExtraProjectEntry) => {
+    if (approveExtraProject(e.id)) {
+      toast.success(`«${e.projectName}» aprobado · ya está en Activos.`);
+    } else {
+      toast.error('No se pudo aprobar.');
+    }
+  };
+
+  const confirmReject = () => {
+    if (!rejectingId) return;
+    const target = pendingExtraProjects.find((e) => e.id === rejectingId);
+    if (rejectExtraProject(rejectingId, rejectReason)) {
+      toast.info(
+        target
+          ? `«${target.projectName}» rechazado. El colaborador puede corregirlo.`
+          : 'Proyecto extra rechazado.',
+      );
+    }
+    setRejectingId(null);
+    setRejectReason('');
+  };
+
   const canEditEntry = (e: ExtraProjectEntry) => {
     const myId = user?.employeeId || user?.id;
-    return canEditAll || e.employeeId === myId;
+    const isOwner =
+      e.employeeId === myId || Boolean(myId && e.employeeIds?.includes(myId));
+    const status = extraStatus(e);
+    if (canEditAll) return true;
+    if (!isOwner) return false;
+    return status === 'pending' || status === 'rejected';
   };
 
   return (
@@ -171,13 +226,20 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
         <div>
           <h2>Proyectos extra</h2>
           <p>
-            Registra trabajos adicionales y elige a todas las personas que participan.
-            Al guardarlos aparecerán automáticamente en Proyectos activos.
+            {canEditAll
+              ? 'Aprueba o rechaza lo que el equipo envía. Al aprobar, el proyecto pasa a Activos.'
+              : 'Registra trabajos adicionales y envíalos a Orlando. Cuando los apruebe aparecerán en Activos.'}
           </p>
         </div>
         <div className="extra-projects-summary" aria-live="polite">
           <strong>{filtered.length}</strong>
           <span>registro{filtered.length === 1 ? '' : 's'}</span>
+          {canEditAll && pendingExtraProjects.length > 0 && (
+            <>
+              <strong>{pendingExtraProjects.length}</strong>
+              <span>por aprobar</span>
+            </>
+          )}
           {totalMinutes > 0 && (
             <>
               <strong>{formatHoursMinutes(totalMinutes)}</strong>
@@ -187,8 +249,52 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
         </div>
       </header>
 
+      {canEditAll && pendingExtraProjects.length > 0 && (
+        <section className="extra-projects-approval" aria-label="Por aprobar">
+          <h3>
+            Por aprobar
+            <span className="extra-projects-badge">{pendingExtraProjects.length}</span>
+          </h3>
+          <ul className="extra-projects-approval-list">
+            {pendingExtraProjects.map((e) => (
+              <li key={e.id} className="extra-projects-approval-card">
+                <div className="extra-projects-row-main">
+                  <strong>{e.projectName}</strong>
+                  <span className="extra-projects-row-meta">
+                    {e.employeeNames?.join(', ') || e.employeeName}
+                    {' · '}
+                    Compromiso: {formatShortDate(e.doneDate)}
+                    {e.minutes ? ` · ${formatHoursMinutes(e.minutes)}` : ''}
+                  </span>
+                  {e.notes && <p className="extra-projects-row-notes">{e.notes}</p>}
+                </div>
+                <div className="extra-projects-row-actions">
+                  <button
+                    type="button"
+                    className="btn-primary btn-sm"
+                    onClick={() => handleApprove(e)}
+                  >
+                    Aprobar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    onClick={() => {
+                      setRejectingId(e.id);
+                      setRejectReason('');
+                    }}
+                  >
+                    Rechazar
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <form className="extra-projects-form" onSubmit={handleSubmit}>
-        <h3>{editingId ? 'Editar registro' : 'Agregar proyecto extra'}</h3>
+        <h3>{editingId ? 'Editar registro' : 'Enviar proyecto extra'}</h3>
         <div className="extra-projects-form-grid">
           <label>
             Nombre del proyecto
@@ -244,7 +350,13 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
             </button>
           )}
           <button type="submit" className="btn-primary">
-            {editingId ? 'Guardar cambios' : '+ Agregar a Activos'}
+            {editingId
+              ? canEditAll
+                ? 'Guardar cambios'
+                : 'Guardar y reenviar'
+              : canEditAll
+                ? '+ Agregar a Activos'
+                : 'Enviar a aprobación'}
           </button>
         </div>
       </form>
@@ -253,7 +365,7 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
         <p className="extra-projects-empty">
           {q
             ? 'Nada coincide con la búsqueda.'
-            : 'Aún no hay proyectos extra. Agrega el primero arriba.'}
+            : 'Aún no hay proyectos extra. Envía el primero arriba.'}
         </p>
       ) : (
         <div className="extra-projects-groups">
@@ -274,48 +386,120 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
                   </span>
                 </header>
                 <ul className="extra-projects-list">
-                  {group.items.map((e) => (
-                    <li key={e.id} className="extra-projects-row">
-                      <div className="extra-projects-row-main">
-                        <strong>{e.projectName}</strong>
-                        <span className="extra-projects-row-meta">
-                          Compromiso: {formatShortDate(e.doneDate)}
-                          {e.minutes
-                            ? ` · ${formatHoursMinutes(e.minutes)}`
-                            : ''}
-                          {(e.employeeNames?.length ?? 0) > 1
-                            ? ` · ${e.employeeNames!.join(', ')}`
-                            : ''}
-                          {canEditAll && e.employeeId !== user?.employeeId
-                            ? ` · ${e.employeeName}`
-                            : ''}
-                        </span>
-                        {e.notes && <p className="extra-projects-row-notes">{e.notes}</p>}
-                      </div>
-                      {canEditEntry(e) && (
-                        <div className="extra-projects-row-actions">
-                          <button
-                            type="button"
-                            className="btn-ghost btn-sm"
-                            onClick={() => startEdit(e)}
-                          >
-                            Editar
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-ghost btn-sm extra-projects-delete"
-                            onClick={() => void handleDelete(e)}
-                          >
-                            Borrar
-                          </button>
+                  {group.items.map((e) => {
+                    const status = extraStatus(e);
+                    return (
+                      <li
+                        key={`${employeeId}-${e.id}`}
+                        className={`extra-projects-row extra-projects-row--${status}`}
+                      >
+                        <div className="extra-projects-row-main">
+                          <div className="extra-projects-row-title">
+                            <strong>{e.projectName}</strong>
+                            <span
+                              className={`extra-status-chip extra-status-chip--${status}`}
+                            >
+                              {STATUS_LABEL[status]}
+                            </span>
+                          </div>
+                          <span className="extra-projects-row-meta">
+                            Compromiso: {formatShortDate(e.doneDate)}
+                            {e.minutes
+                              ? ` · ${formatHoursMinutes(e.minutes)}`
+                              : ''}
+                            {(e.employeeNames?.length ?? 0) > 1
+                              ? ` · ${e.employeeNames!.join(', ')}`
+                              : ''}
+                            {canEditAll && e.employeeId !== user?.employeeId
+                              ? ` · ${e.employeeName}`
+                              : ''}
+                          </span>
+                          {e.notes && (
+                            <p className="extra-projects-row-notes">{e.notes}</p>
+                          )}
+                          {status === 'rejected' && e.rejectReason && (
+                            <p className="extra-projects-reject-reason">
+                              Motivo: {e.rejectReason}
+                            </p>
+                          )}
                         </div>
-                      )}
-                    </li>
-                  ))}
+                        <div className="extra-projects-row-actions">
+                          {canEditAll && status === 'pending' && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-primary btn-sm"
+                                onClick={() => handleApprove(e)}
+                              >
+                                Aprobar
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-ghost btn-sm"
+                                onClick={() => {
+                                  setRejectingId(e.id);
+                                  setRejectReason('');
+                                }}
+                              >
+                                Rechazar
+                              </button>
+                            </>
+                          )}
+                          {canEditEntry(e) && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn-ghost btn-sm"
+                                onClick={() => startEdit(e)}
+                              >
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-ghost btn-sm extra-projects-delete"
+                                onClick={() => void handleDelete(e)}
+                              >
+                                Borrar
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             );
           })}
+        </div>
+      )}
+
+      {rejectingId && (
+        <div className="extra-reject-overlay" role="presentation">
+          <div className="extra-reject-panel" role="dialog" aria-modal="true">
+            <h3>¿Por qué rechazas este extra?</h3>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={3}
+              placeholder="Opcional: indica qué debe corregir el colaborador"
+            />
+            <div className="extra-reject-actions">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => {
+                  setRejectingId(null);
+                  setRejectReason('');
+                }}
+              >
+                Volver
+              </button>
+              <button type="button" className="btn-danger" onClick={confirmReject}>
+                Confirmar rechazo
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

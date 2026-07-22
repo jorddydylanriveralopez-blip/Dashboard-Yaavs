@@ -14,7 +14,8 @@ interface Props {
 }
 
 export function ProjectsHub({ filter, onSelect, initialTab }: Props) {
-  const { canEditAll, visibleProjects, visibleCompletedProjects } = useApp();
+  const { canEditAll, visibleProjects, visibleCompletedProjects, pendingExtraProjects } =
+    useApp();
   const [tab, setTab] = useState<ProjectsTab>(
     () => initialTab ?? (sessionStorage.getItem('yaavs-projects-tab') as ProjectsTab) ?? 'active',
   );
@@ -67,6 +68,9 @@ export function ProjectsHub({ filter, onSelect, initialTab }: Props) {
           onClick={() => setTab('extras')}
         >
           Extras
+          {canEditAll && pendingExtraProjects.length > 0 && (
+            <span className="projects-hub-tab-badge">{pendingExtraProjects.length}</span>
+          )}
         </button>
         {canEditAll && (
           <button

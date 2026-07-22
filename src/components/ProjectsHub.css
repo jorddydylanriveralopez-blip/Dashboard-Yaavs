@@ -20,9 +20,32 @@
   font-weight: 600;
   color: var(--text-secondary);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   transition:
     background 0.15s,
     color 0.15s;
+}
+
+.projects-hub-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.projects-hub-tabs button.active .projects-hub-tab-badge {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--accent);
 }
 
 .projects-hub-tabs button.active {

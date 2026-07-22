@@ -303,6 +303,9 @@ interface AppContextValue {
     >,
   ) => boolean;
   deleteExtraProject: (id: string) => boolean;
+  approveExtraProject: (id: string) => boolean;
+  rejectExtraProject: (id: string, reason?: string) => boolean;
+  pendingExtraProjects: ExtraProjectEntry[];
   setAttendanceStatus: (input: {
     employeeId: string;
     employeeName: string;
@@ -550,6 +553,11 @@ function loadExtraProjects(): ExtraProjectEntry[] {
       if (Array.isArray(parsed)) {
         return parsed
           .filter((e) => e && typeof e.id === 'string' && typeof e.employeeId === 'string')
+          .map((e) => ({
+            ...e,
+            // Extras viejos ya estaban en Activos → se consideran aprobados.
+            status: e.status ?? 'approved',
+          }))
           .sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
       }
     }
@@ -2161,6 +2169,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   }, [canEditAll, extraProjects, user]);
 
+  const pendingExtraProjects = useMemo(
+    () =>
+      canEditAll
+        ? extraProjects
+            .filter((e) => (e.status ?? 'approved') === 'pending')
+            .sort(
+              (a, b) =>
+                new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+            )
+        : [],
+    [canEditAll, extraProjects],
+  );
+
+  const buildExtraActiveProject = useCallback(
+    (
+      entry: ExtraProjectEntry,
+      collaborators: Collaborator[],
+      employeeIds: string[],
+      employeeNames: string[],
+      requestedByName: string,
+      projectId: string,
+      now: string,
+    ): CreativeProject => ({
+      id: projectId,
+      requestDate: now.slice(0, 10),
+      projectName: entry.projectName,
+      businessUnit: 'yaavs_general',
+      requestedBy: requestedByName,
+      requestingDepartment: 'marketing',
+      projectType: 'diseno_grafico',
+      priority: 'media',
+      commitmentDate: entry.doneDate,
+      internalArea: 'diseno_grafico',
+      collaborator: collaborators[0],
+      collaborators,
+      assignedEmployeeId: employeeIds.length === 1 ? employeeIds[0] : undefined,
+      acceptanceStatus: 'accepted',
+      acceptedAt: now,
+      acceptedByName: employeeNames.join(', '),
+      status: 'en_proceso',
+      comments: entry.notes ?? 'Proyecto extra',
+      estimatedHours: entry.minutes ? entry.minutes / 60 : undefined,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    [],
+  );
+
   const addExtraProject = useCallback(
     (input: {
       projectName: string;
@@ -2189,7 +2245,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? Math.max(1, Math.round(input.minutes))
           : undefined;
       const now = new Date().toISOString();
-      const projectId = `extra-project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      // Orlando/admin puede publicar directo; el resto espera aprobación.
+      const autoApprove = canEditAll;
+      const projectId = autoApprove
+        ? `extra-project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        : undefined;
       const entry: ExtraProjectEntry = {
         id: `extra-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         employeeId: employeeIds[0],
@@ -2200,52 +2260,65 @@ export function AppProvider({ children }: { children: ReactNode }) {
         minutes,
         doneDate: input.doneDate || now.slice(0, 10),
         notes: input.notes?.trim() || undefined,
+        status: autoApprove ? 'approved' : 'pending',
+        reviewedAt: autoApprove ? now : undefined,
+        reviewedById: autoApprove ? user.id : undefined,
+        reviewedByName: autoApprove ? user.name : undefined,
         linkedProjectId: projectId,
         createdAt: now,
         updatedAt: now,
       };
       if (!entry.projectName) return null;
 
-      const activeProject: CreativeProject = {
-        id: projectId,
-        requestDate: now.slice(0, 10),
-        projectName: entry.projectName,
-        businessUnit: 'yaavs_general',
-        requestedBy: user.name,
-        requestingDepartment: 'marketing',
-        projectType: 'diseno_grafico',
-        priority: 'media',
-        commitmentDate: entry.doneDate,
-        internalArea: 'diseno_grafico',
-        collaborator: collaborators[0],
-        collaborators,
-        assignedEmployeeId:
-          employeeIds.length === 1 ? employeeIds[0] : undefined,
-        acceptanceStatus: 'accepted',
-        acceptedAt: now,
-        acceptedByName: employeeNames.join(', '),
-        status: 'en_proceso',
-        comments: entry.notes ?? 'Proyecto extra',
-        estimatedHours: minutes ? minutes / 60 : undefined,
-        createdAt: now,
-        updatedAt: now,
-      };
-
       setExtraProjects((prev) => [entry, ...prev]);
-      setBoard((prev) => ({
-        ...prev,
-        projects: [activeProject, ...(prev.projects ?? [])],
-      }));
-      logActivity(
-        'project_progress',
-        `${user.name} registró proyecto extra «${entry.projectName}» para ${employeeNames.join(', ')}${
-          minutes ? ` (${Math.round((minutes / 60) * 10) / 10} h)` : ''
-        }`,
-        user.name,
-      );
+
+      if (autoApprove && projectId) {
+        const activeProject = buildExtraActiveProject(
+          entry,
+          collaborators,
+          employeeIds,
+          employeeNames,
+          user.name,
+          projectId,
+          now,
+        );
+        setBoard((prev) => ({
+          ...prev,
+          projects: [activeProject, ...(prev.projects ?? [])],
+        }));
+        logActivity(
+          'project_progress',
+          `${user.name} registró proyecto extra «${entry.projectName}» para ${employeeNames.join(', ')}${
+            minutes ? ` (${Math.round((minutes / 60) * 10) / 10} h)` : ''
+          }`,
+          user.name,
+        );
+      } else {
+        logActivity(
+          'project_progress',
+          `${user.name} envió proyecto extra «${entry.projectName}» para aprobación`,
+          user.name,
+        );
+        notifyPush({
+          audience: 'employees',
+          employeeIds: ['emp-orlando', 'emp-juancarlos'],
+          excludeUserId: user.id,
+          title: 'Proyecto extra por aprobar',
+          body: `${user.name}: «${entry.projectName}» · ${employeeNames.join(', ')}`,
+          url: '/proyectos',
+          tag: `extra-pending-${entry.id}`,
+        });
+      }
       return entry;
     },
-    [user, board.tasks, activeUsers, logActivity],
+    [
+      user,
+      canEditAll,
+      board.tasks,
+      activeUsers,
+      logActivity,
+      buildExtraActiveProject,
+    ],
   );
 
   const updateExtraProject = useCallback(
@@ -2269,6 +2342,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ) {
         return false;
       }
+      // Colaboradores solo editan pendientes o rechazados (reenvío).
+      const status = current.status ?? 'approved';
+      if (!canEditAll && status === 'approved') return false;
 
       const employeeIds = patch.employeeIds?.length
         ? [...new Set(patch.employeeIds)]
@@ -2302,13 +2378,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           patch.notes !== undefined
             ? patch.notes.trim() || undefined
             : current.notes,
+        // Si estaba rechazado y el colaborador edita, vuelve a pendiente.
+        status:
+          !canEditAll && status === 'rejected' ? 'pending' : current.status,
+        rejectReason:
+          !canEditAll && status === 'rejected' ? undefined : current.rejectReason,
         updatedAt: new Date().toISOString(),
       };
 
       setExtraProjects((prev) =>
         prev.map((entry) => (entry.id === id ? next : entry)),
       );
-      if (next.linkedProjectId) {
+      if (next.linkedProjectId && (next.status ?? 'approved') === 'approved') {
         setBoard((prev) => ({
           ...prev,
           projects: (prev.projects ?? []).map((project) =>
@@ -2330,6 +2411,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
               : project,
           ),
         }));
+      }
+      if (!canEditAll && status === 'rejected') {
+        notifyPush({
+          audience: 'employees',
+          employeeIds: ['emp-orlando', 'emp-juancarlos'],
+          excludeUserId: user.id,
+          title: 'Proyecto extra reenviado',
+          body: `${user.name} corrigió «${next.projectName}» y pide de nuevo aprobación`,
+          url: '/proyectos',
+          tag: `extra-pending-${next.id}`,
+        });
       }
       return true;
     },
@@ -2353,6 +2445,148 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return true;
     },
     [user, canEditAll, extraProjects],
+  );
+
+  const approveExtraProject = useCallback(
+    (id: string): boolean => {
+      if (!user || !canEditAll) return false;
+      const current = extraProjects.find((e) => e.id === id);
+      if (!current) return false;
+      if ((current.status ?? 'approved') === 'approved' && current.linkedProjectId) {
+        return true;
+      }
+
+      const employeeIds = current.employeeIds?.length
+        ? current.employeeIds
+        : [current.employeeId];
+      const employeeNames = current.employeeNames?.length
+        ? current.employeeNames
+        : [current.employeeName];
+      const collaborators = employeeIds
+        .map(collaboratorForEmployeeId)
+        .filter((value): value is Collaborator => Boolean(value));
+      if (!collaborators.length) return false;
+
+      const now = new Date().toISOString();
+      const projectId =
+        current.linkedProjectId ??
+        `extra-project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const next: ExtraProjectEntry = {
+        ...current,
+        status: 'approved',
+        reviewedAt: now,
+        reviewedById: user.id,
+        reviewedByName: user.name,
+        rejectReason: undefined,
+        linkedProjectId: projectId,
+        updatedAt: now,
+      };
+      const activeProject = buildExtraActiveProject(
+        next,
+        collaborators,
+        employeeIds,
+        employeeNames,
+        current.employeeName,
+        projectId,
+        now,
+      );
+
+      setExtraProjects((prev) =>
+        prev.map((entry) => (entry.id === id ? next : entry)),
+      );
+      setBoard((prev) => {
+        const exists = (prev.projects ?? []).some((p) => p.id === projectId);
+        return {
+          ...prev,
+          projects: exists
+            ? (prev.projects ?? []).map((p) =>
+                p.id === projectId
+                  ? {
+                      ...p,
+                      projectName: next.projectName,
+                      commitmentDate: next.doneDate,
+                      comments: next.notes ?? 'Proyecto extra',
+                      estimatedHours: next.minutes
+                        ? next.minutes / 60
+                        : undefined,
+                      collaborators,
+                      collaborator: collaborators[0],
+                      assignedEmployeeId:
+                        employeeIds.length === 1 ? employeeIds[0] : undefined,
+                      acceptanceStatus: 'accepted',
+                      status: 'en_proceso',
+                      updatedAt: now,
+                    }
+                  : p,
+              )
+            : [activeProject, ...(prev.projects ?? [])],
+        };
+      });
+      logActivity(
+        'project_progress',
+        `${user.name} aprobó proyecto extra «${next.projectName}»`,
+        user.name,
+      );
+      notifyPush({
+        audience: 'employees',
+        employeeIds,
+        excludeUserId: user.id,
+        title: 'Proyecto extra aprobado',
+        body: `«${next.projectName}» ya está en Activos`,
+        url: '/proyectos',
+        tag: `extra-approved-${next.id}`,
+      });
+      return true;
+    },
+    [
+      user,
+      canEditAll,
+      extraProjects,
+      buildExtraActiveProject,
+      logActivity,
+    ],
+  );
+
+  const rejectExtraProject = useCallback(
+    (id: string, reason?: string): boolean => {
+      if (!user || !canEditAll) return false;
+      const current = extraProjects.find((e) => e.id === id);
+      if (!current) return false;
+      const now = new Date().toISOString();
+      const next: ExtraProjectEntry = {
+        ...current,
+        status: 'rejected',
+        reviewedAt: now,
+        reviewedById: user.id,
+        reviewedByName: user.name,
+        rejectReason: reason?.trim() || undefined,
+        updatedAt: now,
+      };
+      setExtraProjects((prev) =>
+        prev.map((entry) => (entry.id === id ? next : entry)),
+      );
+      logActivity(
+        'project_progress',
+        `${user.name} rechazó proyecto extra «${next.projectName}»`,
+        user.name,
+      );
+      const employeeIds = current.employeeIds?.length
+        ? current.employeeIds
+        : [current.employeeId];
+      notifyPush({
+        audience: 'employees',
+        employeeIds,
+        excludeUserId: user.id,
+        title: 'Proyecto extra rechazado',
+        body: reason?.trim()
+          ? `«${next.projectName}»: ${reason.trim().slice(0, 100)}`
+          : `«${next.projectName}» necesita correcciones`,
+        url: '/proyectos',
+        tag: `extra-rejected-${next.id}`,
+      });
+      return true;
+    },
+    [user, canEditAll, extraProjects, logActivity],
   );
 
   const acceptProject = useCallback(
@@ -3264,9 +3498,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSocialAccount,
       extraProjects,
       visibleExtraProjects,
+      pendingExtraProjects,
       addExtraProject,
       updateExtraProject,
       deleteExtraProject,
+      approveExtraProject,
+      rejectExtraProject,
       attendanceStore,
       setAttendanceStatus,
       importAttendanceRows,
@@ -3361,9 +3598,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSocialAccount,
       extraProjects,
       visibleExtraProjects,
+      pendingExtraProjects,
       addExtraProject,
       updateExtraProject,
       deleteExtraProject,
+      approveExtraProject,
+      rejectExtraProject,
       attendanceStore,
       setAttendanceStatus,
       importAttendanceRows,
