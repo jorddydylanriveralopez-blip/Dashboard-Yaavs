@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode, type PointerEvent, type MouseEvent } from 'react';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { notifyPush } from '../api/pushClient';
@@ -10,8 +10,10 @@ import {
 } from '../utils/whatsappAbsence';
 import './AbsenceReportControl.css';
 
+const LOGO_HOLD_MS = 550;
+
 interface Props {
-  /** Variante: logo clickeable o botón de texto. */
+  /** Variante: logo (mantener oprimido) o botón de texto. */
   variant?: 'logo' | 'button';
   children?: ReactNode;
   className?: string;
@@ -38,11 +40,52 @@ export function AbsenceReportControl({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
+  const [holding, setHolding] = useState(false);
+  const holdTimerRef = useRef<number | null>(null);
+  const holdFiredRef = useRef(false);
 
   if (!canReportAbsence(user?.employeeId)) {
     if (variant === 'logo') return <>{children}</>;
     return null;
   }
+
+  const clearHoldTimer = () => {
+    if (holdTimerRef.current != null) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+    setHolding(false);
+  };
+
+  const openAbsenceForm = () => {
+    holdFiredRef.current = true;
+    setHolding(false);
+    setOpen(true);
+    try {
+      navigator.vibrate?.(25);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const onLogoPointerDown = (e: PointerEvent<HTMLButtonElement>) => {
+    if (e.button !== 0) return;
+    holdFiredRef.current = false;
+    setHolding(true);
+    holdTimerRef.current = window.setTimeout(openAbsenceForm, LOGO_HOLD_MS);
+  };
+
+  const onLogoPointerEnd = () => {
+    clearHoldTimer();
+  };
+
+  const onLogoClick = (e: MouseEvent<HTMLButtonElement>) => {
+    // Solo long-press abre el modal; el click corto no hace nada.
+    if (holdFiredRef.current) {
+      e.preventDefault();
+      holdFiredRef.current = false;
+    }
+  };
 
   const submit = () => {
     if (!user?.employeeId || busy) return;
@@ -50,6 +93,9 @@ export function AbsenceReportControl({
     try {
       const { dateKey, monthKey } = todayKeys();
       const cleanReason = reason.trim();
+      const notifBody = cleanReason
+        ? `${user.name} no pudo venir: ${cleanReason}`
+        : `${user.name} avisó que no pudo venir hoy`;
 
       setAttendanceStatus({
         employeeId: user.employeeId,
@@ -65,28 +111,22 @@ export function AbsenceReportControl({
         employeeIds: [...ABSENCE_NOTIFY_EMPLOYEE_IDS],
         excludeUserId: user.id,
         title: 'No pudo asistir',
-        body: cleanReason
-          ? `${user.name}: ${cleanReason.slice(0, 120)}`
-          : `${user.name} avisó que no pudo venir hoy`,
+        body: notifBody.slice(0, 180),
         url: '/asistencia',
         tag: `absence-${user.employeeId}-${dateKey}`,
       });
 
-      const { missingPhones } = openAbsenceWhatsAppToManagers(
+      openAbsenceWhatsAppToManagers(
         user.name,
         employeePhones,
         cleanReason || undefined,
       );
 
-      if (missingPhones.length > 0) {
-        toast.info(
-          'Aviso enviado. Si falta un WhatsApp, agrega el teléfono de Orlando/Carlos en el equipo.',
-        );
-      } else {
-        toast.success(
-          'Aviso enviado a Orlando y Carlos. Se abrió WhatsApp con el mensaje listo.',
-        );
-      }
+      toast.success(
+        cleanReason
+          ? `Notificación enviada a Orlando y Carlos con tu causa.`
+          : 'Notificación enviada a Orlando y Carlos.',
+      );
       setOpen(false);
       setReason('');
     } finally {
@@ -99,10 +139,15 @@ export function AbsenceReportControl({
       {variant === 'logo' ? (
         <button
           type="button"
-          className={`absence-logo-hit ${className}`.trim()}
-          title="Avisar que no pude asistir"
-          aria-label="Avisar que no pude asistir (logo Yaavs)"
-          onClick={() => setOpen(true)}
+          className={`absence-logo-hit ${holding ? 'is-holding' : ''} ${className}`.trim()}
+          title="Mantén oprimido el logo para avisar que no pudiste venir"
+          aria-label="Mantén oprimido el logo Yaavs para avisar que no pudiste venir"
+          onPointerDown={onLogoPointerDown}
+          onPointerUp={onLogoPointerEnd}
+          onPointerLeave={onLogoPointerEnd}
+          onPointerCancel={onLogoPointerEnd}
+          onClick={onLogoClick}
+          onContextMenu={(e) => e.preventDefault()}
         >
           {children}
         </button>
@@ -131,17 +176,18 @@ export function AbsenceReportControl({
           >
             <h3 id="absence-title">¿No pudiste venir hoy?</h3>
             <p>
-              Se avisará a <strong>Orlando</strong> y <strong>Carlos</strong> en el panel y se
-              abrirá WhatsApp con un mensaje listo para ambos.
+              Escribe la causa y se enviará una notificación a{' '}
+              <strong>Orlando</strong> y <strong>Carlos</strong> con tu mensaje.
             </p>
             <label className="absence-field">
-              Motivo (opcional)
+              Causa / motivo
               <SpellCheckTextarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 rows={3}
                 maxLength={280}
-                placeholder="Ej. cita médica, imprevisto familiar…"
+                placeholder="Ej. cita médica, imprevisto familiar, tráfico…"
+                autoFocus
               />
             </label>
             <div className="absence-actions">
@@ -154,7 +200,7 @@ export function AbsenceReportControl({
                 Cancelar
               </button>
               <button type="button" className="btn-primary" disabled={busy} onClick={submit}>
-                {busy ? 'Enviando…' : 'Avisar ahora'}
+                {busy ? 'Enviando…' : 'Enviar aviso'}
               </button>
             </div>
           </div>

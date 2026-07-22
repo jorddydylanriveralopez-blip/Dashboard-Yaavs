@@ -8,6 +8,16 @@
   background: transparent;
   cursor: pointer;
   border-radius: var(--radius);
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.absence-logo-hit.is-holding {
+  transform: scale(0.94);
+  opacity: 0.82;
 }
 
 .absence-logo-hit:hover {
