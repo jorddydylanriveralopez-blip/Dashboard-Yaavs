@@ -1,15 +1,7 @@
 import webpush from 'web-push';
+import { databaseUrl, sql } from './db.mjs';
 
 let vapidReady = false;
-
-function databaseUrl() {
-  return (
-    process.env.DATABASE_URL ||
-    process.env.POSTGRES_URL ||
-    process.env.NEON_DATABASE_URL ||
-    null
-  );
-}
 
 function ensureVapid() {
   if (vapidReady) return true;
@@ -25,14 +17,8 @@ function ensureVapid() {
   return true;
 }
 
-async function getSql() {
-  const { neon } = await import('@neondatabase/serverless');
-  return neon(databaseUrl());
-}
-
 export async function saveSubscription({ subscription, userId, userName, employeeId }) {
   if (!subscription?.endpoint) throw new Error('Suscripción inválida');
-  const sql = await getSql();
   const json = JSON.stringify(subscription);
   await sql`
     INSERT INTO push_subscriptions (endpoint, subscription, user_id, user_name, employee_id, updated_at)
@@ -48,12 +34,10 @@ export async function saveSubscription({ subscription, userId, userName, employe
 
 export async function removeSubscription(endpoint) {
   if (!endpoint) return;
-  const sql = await getSql();
   await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
 }
 
 async function fetchTargets({ audience, employeeIds, excludeUserId }) {
-  const sql = await getSql();
   const rows = await sql`SELECT endpoint, subscription, user_id, employee_id FROM push_subscriptions`;
   return rows.filter((row) => {
     if (excludeUserId && row.user_id === excludeUserId) return false;

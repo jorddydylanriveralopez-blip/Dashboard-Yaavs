@@ -107,14 +107,9 @@ function writeLocalState(state) {
   fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(state, null, 2));
 }
 
-async function getSql() {
-  const { neon } = await import('@neondatabase/serverless');
-  return neon(databaseUrl());
-}
-
 async function loadStateFromPostgres() {
   try {
-    const sql = await getSql();
+    const { sql } = await import('./db.mjs');
     const rows = await sql`SELECT state FROM app_state WHERE key = ${STATE_KEY} LIMIT 1`;
     if (rows.length && rows[0].state) return rows[0].state;
     return null;
@@ -125,7 +120,7 @@ async function loadStateFromPostgres() {
 }
 
 async function saveStateToPostgres(state) {
-  const sql = await getSql();
+  const { sql } = await import('./db.mjs');
   const json = JSON.stringify(state);
   await sql`
     INSERT INTO app_state (key, state, updated_at)
