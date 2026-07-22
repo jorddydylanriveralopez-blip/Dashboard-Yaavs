@@ -1,7 +1,7 @@
 .projects-status {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 .projects-status-hint {
@@ -11,22 +11,41 @@
   line-height: 1.45;
 }
 
+.projects-status-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .projects-status-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  padding: 12px 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--status-accent, var(--border)) 28%, var(--border));
+  background: color-mix(in srgb, var(--status-accent, transparent) 5%, var(--bg-surface));
 }
 
 .projects-status-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   margin: 0;
+}
+
+.projects-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex-shrink: 0;
 }
 
 .projects-status-head h3 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9375rem;
+  flex: 1;
+  min-width: 0;
 }
 
 .projects-status-count {
@@ -38,9 +57,8 @@
   color: var(--text-secondary);
 }
 
-.projects-status-section--urgent .projects-status-count {
-  background: rgba(226, 68, 92, 0.12);
-  color: #e2445c;
+.projects-status-section--done {
+  --status-accent: #10b981;
 }
 
 .projects-status-section--done .projects-status-count {
@@ -50,13 +68,13 @@
 
 .projects-status-empty {
   margin: 0;
-  padding: 20px;
+  padding: 14px 12px;
   text-align: center;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   color: var(--text-secondary);
   border: 1px dashed var(--border);
   border-radius: var(--radius);
-  background: var(--bg-muted);
+  background: rgba(255, 255, 255, 0.55);
 }
 
 .projects-status-list {
@@ -64,94 +82,89 @@
   margin: 0;
   padding: 0;
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
-@media (min-width: 720px) {
-  .projects-status-list {
+@media (min-width: 900px) {
+  .projects-status-columns {
+    display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .projects-status-columns {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
 .projects-status-card {
   width: 100%;
   text-align: left;
-  padding: 14px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--bg-surface);
+  background: rgba(255, 255, 255, 0.92);
   cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .projects-status-card:hover {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-sm);
-}
-
-.projects-status-section--urgent .projects-status-card {
-  border-left: 3px solid #e2445c;
-}
-
-.projects-status-section--done .projects-status-card {
-  border-left: 3px solid #10b981;
+  border-color: color-mix(in srgb, var(--status-accent, var(--accent)) 45%, var(--border));
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
 }
 
 .projects-status-card-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 6px;
+  gap: 8px;
 }
 
 .projects-status-card-top h4 {
   margin: 0;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   line-height: 1.3;
+  color: var(--yaavs-ink, var(--text-primary));
+}
+
+.projects-status-meta,
+.projects-status-deadline {
+  margin: 6px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.projects-status-deadline--overdue,
+.projects-status-deadline--urgent {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.projects-status-deadline--soon {
+  color: #b45309;
+  font-weight: 600;
 }
 
 .projects-status-urgent-badge,
 .projects-status-done-badge {
   flex-shrink: 0;
   font-size: 0.625rem;
-  font-weight: 700;
-  text-transform: uppercase;
+  font-weight: 750;
   letter-spacing: 0.03em;
-  padding: 3px 8px;
+  text-transform: uppercase;
+  padding: 3px 7px;
   border-radius: 999px;
   color: #fff;
   background: #e2445c;
 }
 
-.projects-status-meta {
-  margin: 0 0 6px;
-  font-size: 0.75rem;
-  color: var(--text-secondary);
-}
-
-.projects-status-deadline {
-  margin: 0 0 8px;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.projects-status-deadline--overdue {
-  color: #e2445c;
-}
-
-.projects-status-deadline--urgent {
-  color: #d97706;
-}
-
-.projects-status-deadline--soon {
-  color: #b45309;
-}
-
 .projects-status-proof {
   display: inline-block;
-  margin-top: 4px;
+  margin-top: 6px;
   font-size: 0.6875rem;
+  color: #059669;
   font-weight: 600;
-  color: var(--accent);
 }

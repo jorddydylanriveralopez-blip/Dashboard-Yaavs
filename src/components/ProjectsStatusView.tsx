@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type CSSProperties } from 'react';
 import { useApp } from '../context/AppContext';
 import { projectVisibleToUser } from '../utils/collaboratorMap';
 import {
@@ -10,10 +10,10 @@ import {
 import { formatShortDate } from '../utils/formatDate';
 import { fuzzyIncludes } from '../utils/fuzzyMatch';
 import { getDeadlineInfo } from '../utils/deadline';
-import { calcProjectDurationDays, formatDuration } from '../utils/projectDuration';
 import { sortProjectsByUrgency } from '../utils/projectLink';
+import { labelForProjectCollaborators } from '../utils/projectCollaborators';
 import { ProjectHoursBadge } from './ProjectHoursBadge';
-import type { CreativeProject } from '../types';
+import type { CreativeProject, ProjectStatus } from '../types';
 import './ProjectsStatusView.css';
 
 interface Props {
@@ -29,9 +29,12 @@ function matchesSearch(p: CreativeProject, q: string): boolean {
     fuzzyIncludes(p.projectName, q) ||
     fuzzyIncludes(p.requestedBy, q) ||
     fuzzyIncludes(labelFor(COLLABORATORS, p.collaborator), q) ||
+    fuzzyIncludes(labelForProjectCollaborators(p), q) ||
     fuzzyIncludes(p.completedByName ?? '', q)
   );
 }
+
+const ACTIVE_STATUSES = PROJECT_STATUSES.filter((s) => s.value !== 'terminado');
 
 export function ProjectsStatusView({
   projects,
@@ -43,16 +46,32 @@ export function ProjectsStatusView({
   const q = filter.trim();
 
   const visibleActive = useMemo(
-    () => projects.filter((p) => projectVisibleToUser(p, user, canEditAll, activeUsers)),
-    [projects, user, canEditAll, activeUsers],
+    () =>
+      projects.filter(
+        (p) =>
+          p.status !== 'terminado' &&
+          projectVisibleToUser(p, user, canEditAll, activeUsers) &&
+          matchesSearch(p, q),
+      ),
+    [projects, user, canEditAll, activeUsers, q],
   );
 
-  const urgentProjects = useMemo(() => {
-    const list = visibleActive.filter(
-      (p) => p.priority === 'alta_urgente' && matchesSearch(p, q),
-    );
-    return sortProjectsByUrgency(list);
-  }, [visibleActive, q]);
+  const byStatus = useMemo(() => {
+    const map = new Map<ProjectStatus, CreativeProject[]>();
+    for (const s of ACTIVE_STATUSES) map.set(s.value, []);
+    for (const p of visibleActive) {
+      const list = map.get(p.status);
+      if (list) list.push(p);
+      else {
+        // Estatus raro/legacy: meter en "Nuevo" para no perderlo.
+        map.get('nuevo')?.push(p);
+      }
+    }
+    for (const [status, list] of map) {
+      map.set(status, sortProjectsByUrgency(list));
+    }
+    return map;
+  }, [visibleActive]);
 
   const finishedProjects = useMemo(() => {
     const list = completedProjects.filter((p) => matchesSearch(p, q));
@@ -66,90 +85,113 @@ export function ProjectsStatusView({
   return (
     <div className="projects-status">
       <p className="projects-status-hint">
-        Resumen rápido: proyectos <strong>urgentes</strong> pendientes de entrega y trabajos ya{' '}
-        <strong>terminados</strong>.
+        Tus trabajos por <strong>estatus</strong>. Aunque una columna esté vacía, la ves para
+        saber cómo va el progreso. Cuando Orlando cambia el estatus, se actualiza aquí.
       </p>
 
-      <section className="projects-status-section projects-status-section--urgent">
-        <header className="projects-status-head">
-          <h3>Urgentes por terminar</h3>
-          <span className="projects-status-count">{urgentProjects.length}</span>
-        </header>
-        {urgentProjects.length === 0 ? (
-          <p className="projects-status-empty">No hay proyectos urgentes pendientes.</p>
-        ) : (
-          <ul className="projects-status-list">
-            {urgentProjects.map((p) => {
-              const deadline = getDeadlineInfo(p.commitmentDate, p.status);
-              return (
-                <li key={p.id}>
-                  <button type="button" className="projects-status-card" onClick={() => onSelect(p)}>
-                    <div className="projects-status-card-top">
-                      <h4>{p.projectName.trim() || 'Sin nombre'}</h4>
-                      <span className="projects-status-urgent-badge">Urgente</span>
-                    </div>
-                    <p className="projects-status-meta">
-                      {labelFor(COLLABORATORS, p.collaborator)} ·{' '}
-                      {labelFor(PROJECT_STATUSES, p.status)}
-                    </p>
-                    <p className={`projects-status-deadline projects-status-deadline--${deadline.tone}`}>
-                      Solicitud {formatShortDate(p.requestDate)}
-                      {p.finishedDate
-                        ? ` · Finalizado ${formatShortDate(p.finishedDate)}`
-                        : ` · ${deadline.label}`}
-                    </p>
-                    <ProjectHoursBadge project={p} compact />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+      <div className="projects-status-columns">
+        {ACTIVE_STATUSES.map(({ value, label }) => {
+          const list = byStatus.get(value) ?? [];
+          const color = PROJECT_STATUS_COLORS[value];
+          return (
+            <section
+              key={value}
+              className="projects-status-section"
+              style={{ '--status-accent': color } as CSSProperties}
+            >
+              <header className="projects-status-head">
+                <span
+                  className="projects-status-dot"
+                  style={{ background: color }}
+                  aria-hidden
+                />
+                <h3>{label}</h3>
+                <span className="projects-status-count">{list.length}</span>
+              </header>
+              {list.length === 0 ? (
+                <p className="projects-status-empty">Sin proyectos en este estatus</p>
+              ) : (
+                <ul className="projects-status-list">
+                  {list.map((p) => {
+                    const deadline = getDeadlineInfo(p.commitmentDate, p.status);
+                    return (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          className="projects-status-card"
+                          onClick={() => onSelect(p)}
+                        >
+                          <div className="projects-status-card-top">
+                            <h4>{p.projectName.trim() || 'Sin nombre'}</h4>
+                            {p.priority === 'alta_urgente' && (
+                              <span className="projects-status-urgent-badge">Urgente</span>
+                            )}
+                          </div>
+                          <p className="projects-status-meta">
+                            {labelForProjectCollaborators(p)}
+                            {p.requestedBy ? ` · ${p.requestedBy}` : ''}
+                          </p>
+                          <p
+                            className={`projects-status-deadline projects-status-deadline--${deadline.tone}`}
+                          >
+                            Solicitud {formatShortDate(p.requestDate)}
+                            {p.finishedDate
+                              ? ` · Finalizado ${formatShortDate(p.finishedDate)}`
+                              : ` · ${deadline.label}`}
+                          </p>
+                          <ProjectHoursBadge project={p} compact />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div>
 
       <section className="projects-status-section projects-status-section--done">
         <header className="projects-status-head">
-          <h3>Trabajos terminados</h3>
+          <span
+            className="projects-status-dot"
+            style={{ background: PROJECT_STATUS_COLORS.terminado }}
+            aria-hidden
+          />
+          <h3>Concluido</h3>
           <span className="projects-status-count">{finishedProjects.length}</span>
         </header>
         {finishedProjects.length === 0 ? (
-          <p className="projects-status-empty">Aún no hay trabajos marcados como terminados.</p>
+          <p className="projects-status-empty">Sin proyectos concluidos todavía</p>
         ) : (
           <ul className="projects-status-list">
-            {finishedProjects.map((p) => {
-              const duration = calcProjectDurationDays(
-                p.requestDate,
-                p.finishedDate,
-                p.status,
-              );
-              return (
-                <li key={p.id}>
-                  <button type="button" className="projects-status-card" onClick={() => onSelect(p)}>
-                    <div className="projects-status-card-top">
-                      <h4>{p.projectName.trim() || 'Sin nombre'}</h4>
-                      <span
-                        className="projects-status-done-badge"
-                        style={{ background: PROJECT_STATUS_COLORS.terminado }}
-                      >
-                        Terminado
-                      </span>
-                    </div>
-                    <p className="projects-status-meta">
-                      {labelFor(COLLABORATORS, p.collaborator)}
-                      {p.completedByName ? ` · Cerrado por ${p.completedByName}` : ''}
-                    </p>
-                    <p className="projects-status-deadline">
-                      Finalizado:{' '}
-                      {p.finishedDate ? formatShortDate(p.finishedDate) : '—'} · Duración:{' '}
-                      {formatDuration(duration)}
-                    </p>
-                    {p.hasCompletionProof && (
-                      <span className="projects-status-proof">📷 Con prueba de entrega</span>
-                    )}
-                  </button>
-                </li>
-              );
-            })}
+            {finishedProjects.slice(0, 12).map((p) => (
+              <li key={p.id}>
+                <button
+                  type="button"
+                  className="projects-status-card"
+                  onClick={() => onSelect(p)}
+                >
+                  <div className="projects-status-card-top">
+                    <h4>{p.projectName.trim() || 'Sin nombre'}</h4>
+                    <span
+                      className="projects-status-done-badge"
+                      style={{ background: PROJECT_STATUS_COLORS.terminado }}
+                    >
+                      Concluido
+                    </span>
+                  </div>
+                  <p className="projects-status-meta">
+                    {labelForProjectCollaborators(p)}
+                    {p.completedByName ? ` · Cerrado por ${p.completedByName}` : ''}
+                  </p>
+                  <p className="projects-status-deadline">
+                    Finalizado:{' '}
+                    {p.finishedDate ? formatShortDate(p.finishedDate) : '—'}
+                  </p>
+                </button>
+              </li>
+            ))}
           </ul>
         )}
       </section>

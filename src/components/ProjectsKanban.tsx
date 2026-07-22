@@ -43,8 +43,9 @@ export function ProjectsKanban({ projects, onSelect, statusFilter = 'all' }: Pro
     if (statusFilter !== 'all') {
       return KANBAN_COLUMNS.filter((s) => s === statusFilter);
     }
-    return KANBAN_COLUMNS.filter((s) => (byStatus.get(s)?.length ?? 0) > 0);
-  }, [byStatus, statusFilter]);
+    // Mostrar todas las columnas (aunque vacías) para transparencia del pipeline.
+    return KANBAN_COLUMNS;
+  }, [statusFilter]);
 
   const canDrag = (p: CreativeProject) =>
     canEditAll || projectVisibleToUser(p, user, false, activeUsers);
@@ -67,10 +68,10 @@ export function ProjectsKanban({ projects, onSelect, statusFilter = 'all' }: Pro
   return (
     <div className="projects-kanban">
       <p className="projects-kanban-hint">
-        Proyectos por columna de estatus.{' '}
+        Columnas de estatus (también las vacías, para ver el avance).{' '}
         {canEditAll
-          ? 'Arrastra una tarjeta para cambiar de columna.'
-          : 'Toca una tarjeta para ver el detalle.'}
+          ? 'Arrastra una tarjeta para cambiar de columna; el equipo lo ve al sincronizar.'
+          : 'Toca una tarjeta para ver el detalle. El estatus lo actualiza Orlando.'}
       </p>
       <div
         className={`kanban-board${visibleColumns.length <= 3 ? ' kanban-board--wide' : ''}`}

@@ -104,6 +104,7 @@ import {
   employeeIdForCollaboratorSlug,
   projectVisibleToUser,
 } from '../utils/collaboratorMap';
+import { labelFor, PROJECT_STATUSES } from '../data/projectOptions';
 import {
   getProjectCollaborators,
   normalizeProjectCollaborators,
@@ -2310,6 +2311,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return merged;
         }),
       }));
+
+      if (
+        nextPatch.status !== undefined &&
+        nextPatch.status !== current.status
+      ) {
+        const name = current.projectName?.trim() || 'Proyecto';
+        const statusLabel = labelFor(PROJECT_STATUSES, nextPatch.status);
+        const who = user?.name ?? 'Gerente';
+        logActivity(
+          'project_status',
+          `${who} movió «${name}» a ${statusLabel}`,
+          who,
+        );
+        const mergedForNotify = { ...current, ...nextPatch };
+        const collabs = getProjectCollaborators(mergedForNotify);
+        let employeeIds: string[] = [];
+        if (collabs.includes('todos')) {
+          employeeIds = activeUsers
+            .map((u) => u.employeeId)
+            .filter((eid): eid is string => Boolean(eid) && eid !== 'emp-orlando');
+        } else {
+          employeeIds = collabs
+            .map((slug) => employeeIdForCollaboratorSlug(slug, activeUsers))
+            .filter((eid): eid is string => Boolean(eid));
+        }
+        if (mergedForNotify.assignedEmployeeId) {
+          employeeIds.push(mergedForNotify.assignedEmployeeId);
+        }
+        employeeIds = [...new Set(employeeIds)];
+        if (employeeIds.length > 0) {
+          notifyPush({
+            audience: 'employees',
+            employeeIds,
+            excludeUserId: user?.id,
+            title: 'Estatus actualizado',
+            body: `«${name}» → ${statusLabel}`,
+            url: '/proyectos',
+            tag: `proj-status-${id}`,
+          });
+        }
+      }
+
       return { ok: true };
     },
     [
@@ -2318,6 +2361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       board.projects,
       board.tasks,
       user?.name,
+      user?.id,
       logActivity,
       getWorkloadCheck,
       verifyManagerPassword,

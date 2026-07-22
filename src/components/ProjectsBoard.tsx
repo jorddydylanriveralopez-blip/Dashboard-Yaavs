@@ -35,7 +35,9 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
   const { canEditAll, addProject, visibleCompletedProjects } = useApp();
   const [statusFilter, setStatusFilter] = useState<ProjectStatus | 'all'>('all');
   const [deadlineFilter, setDeadlineFilter] = useState<ProjectDeadlineFilter>('all');
-  const [layoutMode, setLayoutMode] = useState<'projects' | 'status'>('projects');
+  const [layoutMode, setLayoutMode] = useState<'projects' | 'status'>(() =>
+    canEditAll ? 'projects' : 'status',
+  );
   const activeProjects = useMemo(
     () => projects.filter(isActiveProject),
     [projects],
@@ -78,10 +80,12 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
       { id: 'all', count: counts.all },
     ];
     for (const s of STATUS_ORDER) {
-      if ((counts[s] ?? 0) > 0) chips.push({ id: s, count: counts[s] ?? 0 });
+      const count = counts[s] ?? 0;
+      // Colaboradores ven todos los estatus (aunque vacíos) para transparencia.
+      if (!canEditAll || count > 0) chips.push({ id: s, count });
     }
     return chips;
-  }, [counts]);
+  }, [counts, canEditAll]);
 
   return (
     <div className="projects-board">
@@ -101,8 +105,8 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
           </>
         ) : (
           <>
-            Solo ves proyectos <strong>asignados a ti</strong>. Los de otros colaboradores no
-            aparecen aquí.
+            Solo ves proyectos <strong>asignados a ti</strong>, agrupados por estatus (Nuevo,
+            En desarrollo, etc.). Si Orlando cambia el estatus, lo verás aquí al actualizar.
           </>
         )}
       </p>
