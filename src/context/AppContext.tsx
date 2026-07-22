@@ -464,6 +464,62 @@ function mergeDeletedProjectIds(
   return pruneDeletedProjectIds(merged);
 }
 
+function normalizeExtraProjectName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function collaboratorKey(collaborators: string[] | undefined): string {
+  return [...(collaborators ?? [])].map(String).sort().join('|');
+}
+
+/** Misma entrada Extra no debe generar varios proyectos en el board. */
+function boardIdForExtraEntry(entryId: string): string {
+  return `extra-project-${entryId}`;
+}
+
+/**
+ * Quita duplicados blandos: mismo nombre + mismos colaboradores.
+ * Conserva el más reciente (updatedAt) y prioriza ids `extra-project-*`.
+ */
+function softDedupeProjectsByNameAndCollaborators<
+  T extends {
+    id: string;
+    projectName?: string;
+    collaborators?: string[];
+    collaborator?: string;
+    updatedAt?: string;
+  },
+>(projects: T[]): T[] {
+  const byKey = new Map<string, T>();
+  for (const project of projects) {
+    const name = normalizeExtraProjectName(project.projectName ?? '');
+    if (!name) {
+      byKey.set(`id:${project.id}`, project);
+      continue;
+    }
+    const collab =
+      collaboratorKey(project.collaborators) ||
+      collaboratorKey(project.collaborator ? [project.collaborator] : undefined);
+    const key = `${name}::${collab}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, project);
+      continue;
+    }
+    const existingExtra = existing.id.startsWith('extra-project-');
+    const nextExtra = project.id.startsWith('extra-project-');
+    const existingNewer =
+      (existing.updatedAt || '') >= (project.updatedAt || '');
+    if (existingExtra && !nextExtra) continue;
+    if (!existingExtra && nextExtra) {
+      byKey.set(key, project);
+      continue;
+    }
+    if (!existingNewer) byKey.set(key, project);
+  }
+  return [...byKey.values()];
+}
+
 function loadDeletedProjectIds(): Record<string, string> {
   try {
     const raw = localStorage.getItem(DELETED_PROJECTS_KEY);
@@ -692,6 +748,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   const [deletedProjectIds, setDeletedProjectIds] =
     useState<Record<string, string>>(loadDeletedProjectIds);
+  const deletedProjectIdsRef = useRef(deletedProjectIds);
+  deletedProjectIdsRef.current = deletedProjectIds;
   const [calendarStore, setCalendarStore] = useState<CalendarStore>(loadCalendarStore);
   const [assignments, setAssignments] = useState<TaskAssignment[]>(loadAssignments);
   const [passwordOverrides, setPasswordOverrides] = useState(loadPasswordOverrides);
@@ -1035,13 +1093,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [marketingTasks, assignments, closeCurrentMonthWithRecords]);
 
   const buildSyncState = useCallback((): AppSyncState => {
+    const deleted = deletedProjectIdsRef.current;
     const leanBoard: BoardState = {
       ...board,
-      projects: (board.projects ?? []).map((p) => {
-        const { attachments, ...base } = { ...p, ...sanitizeProjectCollaborators(p) };
-        if (!attachments?.length) return base;
-        return { ...base, attachmentCount: attachments.length };
-      }),
+      projects: (board.projects ?? [])
+        .filter((p) => !deleted[p.id])
+        .map((p) => {
+          const { attachments, ...base } = { ...p, ...sanitizeProjectCollaborators(p) };
+          if (!attachments?.length) return base;
+          return { ...base, attachmentCount: attachments.length };
+        }),
     };
     const leanAssignments = assignments.map((a) => {
       if (!a.attachments?.length) return a;
@@ -1057,7 +1118,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       performanceHistory,
       teamRoster,
       socialAccounts,
-      deletedProjectIds,
+      deletedProjectIds: deleted,
       extraProjects,
       updatedAt: new Date().toISOString(),
     };
@@ -1070,7 +1131,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     performanceHistory,
     teamRoster,
     socialAccounts,
-    deletedProjectIds,
     extraProjects,
   ]);
 
@@ -1124,15 +1184,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pendingRemote.current = remote;
       return;
     }
+
+    // Tombstones SIEMPRE se mezclan (aunque salgamos temprano del merge del board).
+    // Así un delete local no se pierde y un proyecto borrado no "revive".
+    const deleted = mergeDeletedProjectIds(
+      deletedProjectIdsRef.current,
+      remote.deletedProjectIds,
+    );
+    deletedProjectIdsRef.current = deleted;
+    setDeletedProjectIds(deleted);
+
+    const stripLocalDeleted = () => {
+      setBoard((prev) => {
+        const nextProjects = (prev.projects ?? []).filter((p) => !deleted[p.id]);
+        if (nextProjects.length === (prev.projects ?? []).length) return prev;
+        return { ...prev, projects: nextProjects };
+      });
+    };
+    stripLocalDeleted();
+
+    const remoteStillHasDeleted = (remote.board?.projects ?? []).some(
+      (p) => Boolean(deleted[p.id]),
+    );
+    if (remoteStillHasDeleted) {
+      needsRepushAfterRemote.current = true;
+    }
+
     const remoteProjectCount = remote.board?.projects?.length ?? 0;
     const localProjectCount = boardRef.current?.projects?.length ?? 0;
-    // Si el remoto trae proyectos y el local no tiene ninguno, siempre aplicar.
-    // (Antes también exigía 0 tareas locales; el seed local bloqueaba la sync.)
-    const forceTakeRemote = remoteProjectCount > 0 && localProjectCount === 0;
+    // Si el remoto trae proyectos vivos y el local no tiene ninguno, siempre aplicar.
+    const liveRemoteCount = (remote.board?.projects ?? []).filter(
+      (p) => !deleted[p.id],
+    ).length;
+    const forceTakeRemote = liveRemoteCount > 0 && localProjectCount === 0;
+
     if (!forceTakeRemote && localEditAt.current && remote.updatedAt < localEditAt.current) {
+      if (needsRepushAfterRemote.current) {
+        window.setTimeout(() => {
+          needsRepushAfterRemote.current = false;
+          schedulePush();
+        }, 80);
+      }
       return;
     }
-    if (!forceTakeRemote && remote.updatedAt <= lastRemoteAt.current) return;
+    if (!forceTakeRemote && remote.updatedAt <= lastRemoteAt.current) {
+      if (needsRepushAfterRemote.current) {
+        window.setTimeout(() => {
+          needsRepushAfterRemote.current = false;
+          schedulePush();
+        }, 80);
+      }
+      return;
+    }
     lastRemoteAt.current = remote.updatedAt;
     applyingRemote.current = true;
     let preservedLocal = false;
@@ -1140,12 +1243,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const remoteRoster = remote.teamRoster ?? defaultTeamRoster();
     const removedEmpIds = getRemovedEmployeeIds(remoteRoster);
     setTeamRoster(remoteRoster);
-
-    const deleted = mergeDeletedProjectIds(
-      deletedProjectIds,
-      remote.deletedProjectIds,
-    );
-    setDeletedProjectIds(deleted);
 
     setBoard((prev) => {
       const remoteProjects = (remote.board.projects ?? []).filter((p) => !deleted[p.id]);
@@ -1156,6 +1253,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         byId.set(rp.id, rp);
       }
       for (const lp of localProjects) {
+        if (deleted[lp.id]) continue;
         const rp = byId.get(lp.id);
         if (!rp) {
           // Proyecto solo local: conservar solo si no está marcado como borrado.
@@ -1216,13 +1314,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { ...remote.board, tasks: [...taskById.values()], projects };
     });
     // Si el remoto aún trae un proyecto que ya borramos, hay que re-empujar tombstones.
-    if (
-      Object.keys(deleted).some(
-        (id) =>
-          (remote.board.projects ?? []).some((p) => p.id === id) &&
-          !remote.deletedProjectIds?.[id],
-      )
-    ) {
+    if (remoteStillHasDeleted) {
       preservedLocal = true;
     }
     setAssignments((prev) => {
@@ -1320,7 +1412,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         schedulePush();
       }
     }, 80);
-  }, [schedulePush, deletedProjectIds]);
+  }, [schedulePush]);
 
   useEffect(() => {
     applyRemoteRef.current = applyRemote;
@@ -1961,7 +2053,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return d.toISOString().slice(0, 10);
     })();
     const newProject: CreativeProject = {
-      id: `proj-${Date.now()}`,
+      id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       requestDate: today,
       projectName: '',
       businessUnit: 'prepago',
@@ -2145,7 +2237,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteProject = useCallback((id: string) => {
     const now = new Date().toISOString();
-    setDeletedProjectIds((prev) => mergeDeletedProjectIds(prev, { [id]: now }));
+    const nextDeleted = mergeDeletedProjectIds(deletedProjectIdsRef.current, {
+      [id]: now,
+    });
+    deletedProjectIdsRef.current = nextDeleted;
+    setDeletedProjectIds(nextDeleted);
     setBoard((prev) => ({
       ...prev,
       projects: (prev.projects ?? []).filter((p) => p.id !== id),
@@ -2156,6 +2252,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         a.brief?.projectId === id && a.status === 'pending'
           ? { ...a, status: 'cancelled' as const, respondedAt: now }
           : a,
+      ),
+    );
+    // Si era un Extra aprobado, desvincularlo para que no “reviva” el board.
+    setExtraProjects((prev) =>
+      prev.map((e) =>
+        e.linkedProjectId === id
+          ? {
+              ...e,
+              linkedProjectId: undefined,
+              status: 'rejected',
+              rejectReason: 'Proyecto eliminado del tablero',
+              updatedAt: now,
+            }
+          : e,
       ),
     );
   }, []);
