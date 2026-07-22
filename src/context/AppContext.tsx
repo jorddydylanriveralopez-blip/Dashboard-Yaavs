@@ -413,8 +413,8 @@ function migrateMarketingBoard(
   const tasks = [...defaultMerged, ...customTasks];
 
   const companyName = normalizeCompanyName(saved.companyName);
-  const rawProjects = Array.isArray(saved.projects) ? saved.projects : [];
-  const projects = filterActiveProjects(rawProjects);
+  // Conservar también los «terminado»: filterActiveProjects es solo para la UI Activos.
+  const projects = Array.isArray(saved.projects) ? saved.projects : [];
 
   return { companyName, tasks, projects };
 }
@@ -510,6 +510,7 @@ function softDedupeProjectsByNameAndCollaborators<
     collaborators?: string[];
     collaborator?: string;
     updatedAt?: string;
+    status?: string;
   },
 >(projects: T[]): T[] {
   const byKey = new Map<string, T>();
@@ -528,6 +529,14 @@ function softDedupeProjectsByNameAndCollaborators<
       byKey.set(key, project);
       continue;
     }
+    const existingDone = existing.status === 'terminado';
+    const nextDone = project.status === 'terminado';
+    // No perder concluidos al colapsar duplicados blandos.
+    if (nextDone && !existingDone) {
+      byKey.set(key, project);
+      continue;
+    }
+    if (existingDone && !nextDone) continue;
     const existingExtra = existing.id.startsWith('extra-project-');
     const nextExtra = project.id.startsWith('extra-project-');
     const existingNewer =
@@ -815,6 +824,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [syncOnline, setSyncOnline] = useState(false);
   const lastRemoteAt = useRef('');
   const pushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Esperar el primer pull antes de empujar, para no pisar Concluidos del servidor. */
+  const syncHydrated = useRef(!isApiEnabled());
   /** Edición local en curso: no dejar que un pull viejo borre lo que se está escribiendo. */
   const localEditAt = useRef('');
   const pushInFlight = useRef(false);
@@ -1178,6 +1189,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const schedulePush = useCallback(() => {
     if (!isApiEnabled()) return;
+    if (!syncHydrated.current) return;
     if (applyingRemote.current) {
       // Tras un merge que conservó datos locales, empujar cuando termine applyRemote.
       needsRepushAfterRemote.current = true;
@@ -1301,6 +1313,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
           byId.set(lp.id, lp);
           preservedLocal = true;
           continue;
+        }
+        // Concluido remoto gana salvo que el local también esté terminado y sea más nuevo.
+        if (rp.status === 'terminado' && lp.status !== 'terminado') {
+          const remoteNewerOrEqual =
+            (rp.updatedAt || '') >= (lp.updatedAt || '') ||
+            (rp.completedAt || '') >= (lp.updatedAt || '');
+          if (remoteNewerOrEqual) {
+            continue;
+          }
+        }
+        if (lp.status === 'terminado' && rp.status !== 'terminado') {
+          const localNewerOrEqual =
+            (lp.updatedAt || '') >= (rp.updatedAt || '') ||
+            (lp.completedAt || '') >= (rp.updatedAt || '');
+          if (localNewerOrEqual) {
+            preservedLocal = true;
+            byId.set(lp.id, {
+              ...rp,
+              ...lp,
+              attachments: lp.attachments?.length ? lp.attachments : rp.attachments,
+              attachmentCount: lp.attachments?.length
+                ? lp.attachments.length
+                : (rp.attachmentCount ?? rp.attachments?.length),
+            });
+            continue;
+          }
         }
         const localNewer = (lp.updatedAt || '') > (rp.updatedAt || '');
         const localAccepted =
@@ -1504,23 +1542,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [applyRemote]);
 
   useEffect(() => {
-    if (!isApiEnabled()) return;
+    if (!isApiEnabled()) {
+      syncHydrated.current = true;
+      return;
+    }
     void (async () => {
-      const online = await checkApiHealth();
-      setSyncOnline((prev) => (prev === online ? prev : online));
-      if (!online) return;
-      const remote = await fetchSyncState();
-      const remoteHasBoard =
-        (remote?.board?.tasks?.length ?? 0) > 0 ||
-        (remote?.board?.projects?.length ?? 0) > 0;
-      const localHasBoard =
-        board.tasks.length > 0 || (board.projects?.length ?? 0) > 0;
-      if (remoteHasBoard) {
-        applyRemote(remote!);
-      } else if (localHasBoard) {
-        await pushSyncState(buildSyncState());
+      try {
+        const online = await checkApiHealth();
+        setSyncOnline((prev) => (prev === online ? prev : online));
+        if (!online) return;
+        const remote = await fetchSyncState();
+        const remoteHasBoard =
+          (remote?.board?.tasks?.length ?? 0) > 0 ||
+          (remote?.board?.projects?.length ?? 0) > 0;
+        const localHasBoard =
+          board.tasks.length > 0 || (board.projects?.length ?? 0) > 0;
+        if (remoteHasBoard) {
+          applyRemote(remote!);
+        } else if (localHasBoard) {
+          await pushSyncState(buildSyncState());
+        }
+      } finally {
+        syncHydrated.current = true;
+        // Empujar solo después de haber mezclado el remoto (evita borrar Concluidos).
+        schedulePush();
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap una sola vez
   }, []);
 
   useEffect(() => {
