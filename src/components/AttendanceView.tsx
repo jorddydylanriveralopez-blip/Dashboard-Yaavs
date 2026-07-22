@@ -325,11 +325,13 @@ export function AttendanceView() {
             <p>
               Formato detectado:{' '}
               <strong>
-                {importPreview.format === 'wide'
-                  ? 'tabla (colaborador × fechas)'
-                  : importPreview.format === 'long'
-                    ? 'lista (colaborador, fecha, estado)'
-                    : 'desconocido'}
+                {importPreview.format === 'punch'
+                  ? 'checador Excel (ENTRADA / SALIDA)'
+                  : importPreview.format === 'wide'
+                    ? 'tabla (colaborador × fechas)'
+                    : importPreview.format === 'long'
+                      ? 'lista (colaborador, fecha, estado)'
+                      : 'desconocido'}
               </strong>
             </p>
             <ul className="attendance-import-stats">
@@ -348,13 +350,18 @@ export function AttendanceView() {
             </ul>
             {importPreview.unmatchedNames.length > 0 && (
               <div className="attendance-import-warn">
-                <p>No se encontraron en el equipo:</p>
+                <p>Omitidos (no van en el tablero de equipo):</p>
                 <p>{importPreview.unmatchedNames.slice(0, 8).join(', ')}</p>
               </div>
             )}
             {importPreview.errors.length > 0 && (
               <div className="attendance-import-warn">
-                {importPreview.errors.map((err) => (
+                <p>
+                  {importPreview.errors.length} aviso
+                  {importPreview.errors.length === 1 ? '' : 's'} al leer fechas (el resto sí se
+                  importa):
+                </p>
+                {importPreview.errors.slice(0, 5).map((err) => (
                   <p key={err}>{err}</p>
                 ))}
               </div>

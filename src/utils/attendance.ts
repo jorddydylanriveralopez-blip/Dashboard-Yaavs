@@ -648,22 +648,30 @@ const CHECADOR_USER_IDS: Record<string, string> = {
 
 type PunchDateOrder = 'dmy' | 'mdy';
 
-/** El checador suele traer MM/DD/YYYY (ej. 04/13/2026 = 13 abr). */
+/** El checador MKT trae MM/DD/YYYY (ej. 04/13/2026 = 13 abr). */
 function detectPunchDateOrder(matrix: string[][], timeCol: number, headerIdx: number): PunchDateOrder {
+  const headerJoined = (matrix[headerIdx] ?? []).map((h) => normalizeHeader(h)).join('|');
+  // Firma del archivo Asistencias.xlsx / concentrado de horarios.
+  if (
+    headerJoined.includes('estadodetrabajo') ||
+    headerJoined.includes('codigodepago') ||
+    headerJoined.includes('iddeusuario')
+  ) {
+    return 'mdy';
+  }
   let sawDayFirstGt12 = false;
   let sawMonthSecondGt12 = false;
   for (const line of matrix.slice(headerIdx + 1, headerIdx + 400)) {
     const raw = (line[timeCol] ?? '').trim();
     const m = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
     if (!m) continue;
-    const a = Number(m[1]);
-    const b = Number(m[2]);
-    if (a > 12 && b <= 12) sawDayFirstGt12 = true;
-    if (b > 12 && a <= 12) sawMonthSecondGt12 = true;
+    const first = Number(m[1]);
+    const second = Number(m[2]);
+    if (first > 12 && second <= 12) sawDayFirstGt12 = true;
+    if (second > 12 && first <= 12) sawMonthSecondGt12 = true;
   }
   if (sawMonthSecondGt12 && !sawDayFirstGt12) return 'mdy';
   if (sawDayFirstGt12 && !sawMonthSecondGt12) return 'dmy';
-  // Por defecto el concentrado MKT de Hostinger/checador viene en MM/DD.
   return 'mdy';
 }
 
@@ -781,8 +789,15 @@ export function parsePunchClockAttendance(
       (checadorId && CHECADOR_USER_IDS[checadorId]
         ? tasks.find((t) => t.employeeId === CHECADOR_USER_IDS[checadorId])
         : undefined) || matchEmployee(name, tasks);
+    // Orlando / gerente no entra al tablero de asistencias del equipo.
+    if (
+      checadorId === '10671' ||
+      /orlando/i.test(name)
+    ) {
+      continue;
+    }
     if (!emp) {
-      if (CHECADOR_USER_IDS[checadorId] === undefined && name) unmatched.add(name);
+      if (name) unmatched.add(name);
       continue;
     }
     const parsed = parsePunchDateTime(timeRaw, dateOrder);
