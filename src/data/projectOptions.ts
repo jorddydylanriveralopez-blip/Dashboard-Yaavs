@@ -122,13 +122,13 @@ export const COLLABORATORS: { value: Collaborator; label: string }[] = [
 
 export const PROJECT_STATUSES: { value: ProjectStatus; label: string }[] = [
   { value: 'nuevo', label: 'Nuevo' },
-  { value: 'esperando_info', label: 'Esperando info' },
-  { value: 'en_proceso', label: 'En proceso' },
-  { value: 'revision_interna', label: 'Revisión interna' },
-  { value: 'revision_externa', label: 'Revisión externa' },
-  { value: 'aprobado', label: 'Aprobado' },
-  { value: 'en_produccion', label: 'En producción' },
-  { value: 'terminado', label: 'Terminado' },
+  { value: 'esperando_info', label: 'Falta información' },
+  { value: 'en_proceso', label: 'En desarrollo' },
+  { value: 'revision_interna', label: 'Revisando en equipo' },
+  { value: 'revision_externa', label: 'Esperando al cliente' },
+  { value: 'aprobado', label: 'Listo para entregar' },
+  { value: 'en_produccion', label: 'Publicando' },
+  { value: 'terminado', label: 'Concluido' },
 ];
 
 export const PROJECT_STATUS_COLORS: Record<ProjectStatus, string> = {
