@@ -631,33 +631,44 @@
 }
 
 .attendance-pie-section {
-  padding: 20px;
-  border-radius: var(--radius-lg);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  position: relative;
+  padding: 22px 20px 20px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, #0055ff 12%, var(--border));
+  background:
+    radial-gradient(1200px 280px at 10% -20%, color-mix(in srgb, #0055ff 14%, transparent), transparent 60%),
+    radial-gradient(900px 240px at 90% 0%, color-mix(in srgb, #22c55e 10%, transparent), transparent 55%),
+    linear-gradient(180deg, #fff, #f8fafc);
+  overflow: hidden;
 }
 
 .attendance-pie-head {
-  margin-bottom: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 18px;
 }
 
 .attendance-pie-head h2 {
-  margin: 0 0 4px;
-  font-size: 1rem;
+  margin: 0 0 6px;
+  font-size: 1.25rem;
+  letter-spacing: -0.02em;
+  color: var(--yaavs-ink, #0f172a);
 }
 
 .attendance-pie-head p {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--text-secondary);
-  max-width: 56ch;
-  line-height: 1.45;
+  max-width: 62ch;
+  line-height: 1.5;
 }
 
 .attendance-pie-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
 }
 
 @media (max-width: 640px) {

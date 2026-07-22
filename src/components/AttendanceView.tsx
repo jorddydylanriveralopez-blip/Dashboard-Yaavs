@@ -15,6 +15,7 @@ import {
   filterDaysByRange,
   getAttendanceForDay,
   nextAttendanceStatus,
+  attendancePerformancePercent,
   summarizeAttendance,
   todayDateKey,
   type AttendanceImportResult,
@@ -597,25 +598,40 @@ export function AttendanceView() {
           <div>
             <h2>Desempeño por integrante</h2>
             <p>
-              Gráfica de pastel del mes — cómo se reparten asistencias, faltas, retardos, enfermedad
-              y vacaciones de cada persona en {monthLabel}.
+              Panorama del mes: asistencia real vs retardos y faltas de cada persona en{' '}
+              {monthLabel}.
             </p>
           </div>
         </header>
         <div className="attendance-pie-grid">
-          {team.map((t) => {
-            const memberSummary = summary.find((s) => s.employeeId === t.employeeId);
-            if (!memberSummary) return null;
-            return (
+          {[...team]
+            .map((t) => {
+              const memberSummary = summary.find((s) => s.employeeId === t.employeeId);
+              if (!memberSummary) return null;
+              return { task: t, memberSummary };
+            })
+            .filter((row): row is { task: (typeof team)[number]; memberSummary: (typeof summary)[number] } =>
+              Boolean(row),
+            )
+            .sort((a, b) => {
+              const aDays = a.memberSummary.totalMarked;
+              const bDays = b.memberSummary.totalMarked;
+              if ((aDays === 0) !== (bDays === 0)) return aDays === 0 ? 1 : -1;
+              return (
+                attendancePerformancePercent(b.memberSummary) -
+                attendancePerformancePercent(a.memberSummary)
+              );
+            })
+            .map(({ task: t, memberSummary }, index) => (
               <AttendanceMemberPie
                 key={t.employeeId}
                 name={t.employeeName}
                 avatarColor={t.avatarColor}
                 summary={memberSummary}
                 monthLabel={monthLabel}
+                index={index}
               />
-            );
-          })}
+            ))}
         </div>
       </section>
     </div>
