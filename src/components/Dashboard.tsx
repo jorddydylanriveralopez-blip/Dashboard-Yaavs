@@ -6,6 +6,7 @@ import { WorkloadOverrideModal } from './WorkloadOverrideModal';
 import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
 import { SendKpiObjectiveModal, type KpiObjectiveFormData } from './SendKpiObjectiveModal';
 import { BrandLogo } from './BrandLogo';
+import { AbsenceReportControl } from './AbsenceReportControl';
 import { InstallPwaSidebarButton } from './InstallPwaSidebarButton';
 import { TechAmbience } from './TechAmbience';
 import { YaavsAssistant } from './YaavsAssistant';
@@ -621,7 +622,9 @@ export function Dashboard() {
 
       <aside className="sidebar sidebar-desktop">
         <div className="sidebar-brand">
-          <BrandLogo size="md" className="sidebar-brand-logo" />
+          <AbsenceReportControl variant="logo">
+            <BrandLogo size="md" className="sidebar-brand-logo" />
+          </AbsenceReportControl>
           <span className="visually-hidden">{displayName}</span>
         </div>
 
@@ -700,6 +703,7 @@ export function Dashboard() {
         )}
 
         <InstallPwaSidebarButton />
+        <AbsenceReportControl variant="button" />
 
         <div className="sidebar-user">
           <button
@@ -724,7 +728,9 @@ export function Dashboard() {
         <div className="app-tech-grid" aria-hidden="true" />
         <TechAmbience variant="app" />
         <header className="mobile-topbar">
-          <BrandLogo size="md" className="sidebar-brand-logo" />
+          <AbsenceReportControl variant="logo">
+            <BrandLogo size="md" className="sidebar-brand-logo" />
+          </AbsenceReportControl>
           <div className="mobile-topbar-title">
             <span className="visually-hidden">{displayName}</span>
             <strong>{user.name}</strong>
