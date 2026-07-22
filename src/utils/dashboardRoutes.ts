@@ -5,6 +5,7 @@ export type DashboardView =
   | 'team'
   | 'chat'
   | 'board'
+  | 'avances'
   | 'completed'
   | 'assignments'
   | 'history'
@@ -20,6 +21,7 @@ const PATH_TO_VIEW: Record<string, DashboardView> = {
   '/equipo': 'team',
   '/chat': 'chat',
   '/proyectos': 'board',
+  '/avances': 'avances',
   '/concluidos': 'completed',
   '/indicaciones': 'assignments',
   '/historial': 'history',
@@ -36,6 +38,7 @@ const VIEW_TO_PATH: Record<DashboardView, string> = {
   team: '/equipo',
   chat: '/chat',
   board: '/proyectos',
+  avances: '/avances',
   completed: '/concluidos',
   assignments: '/indicaciones',
   history: '/historial',

@@ -1,0 +1,227 @@
+.avances-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  animation: yaavs-fade-in-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.avances-hero {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.avances-title {
+  margin: 0 0 6px;
+  font-size: 1.5rem;
+  color: var(--yaavs-ink);
+}
+
+.avances-sub {
+  margin: 0;
+  max-width: 560px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.avances-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.avances-compose,
+.avances-feed {
+  padding: 16px 18px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+}
+
+.avances-compose h2,
+.avances-feed h2,
+.avances-project-history h3 {
+  margin: 0 0 12px;
+  font-size: 1rem;
+}
+
+.avances-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.avances-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.avances-field select,
+.avances-field textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text-primary);
+  background: var(--bg-input);
+}
+
+.avances-files {
+  padding: 12px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg-surface));
+}
+
+.avances-files-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.avances-files-hint {
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.avances-submit {
+  align-self: flex-start;
+  min-height: 42px;
+  padding: 0 18px;
+}
+
+.avances-empty {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.avances-project-history {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+
+.avances-feed {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 100px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.avances-feed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.avances-feed-list--compact {
+  max-height: 360px;
+}
+
+.avances-feed-item {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-muted, #f8fafc) 70%, white);
+}
+
+.avances-feed-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.avances-feed-head strong {
+  color: var(--yaavs-ink);
+}
+
+.avances-feed-project {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.avances-feed-text {
+  margin: 0 0 8px;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+}
+
+.avances-feed-delete {
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: #b4234a;
+}
+
+.avances-legacy-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.avances-legacy-thumbs a {
+  display: block;
+  width: 72px;
+  height: 72px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.avances-legacy-thumbs img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 980px) {
+  .avances-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .avances-feed {
+    position: static;
+    max-height: none;
+  }
+
+  .avances-feed-list {
+    max-height: 480px;
+  }
+}

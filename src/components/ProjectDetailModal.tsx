@@ -67,6 +67,7 @@ import {
 import { persistProjectAttachments } from '../utils/persistAttachments';
 import {
   ATTACHMENT_ACCEPT,
+  MAX_PROGRESS_FILES,
   cloneAttachments,
   readFileAsAttachment,
 } from '../utils/fileAttachments';
@@ -125,7 +126,6 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   const [progressText, setProgressText] = useState('');
   const [progressFiles, setProgressFiles] = useState<FileAttachment[]>([]);
   const [progressBusy, setProgressBusy] = useState(false);
-  const progressFileRef = useRef<HTMLInputElement>(null);
   const [declineBusy, setDeclineBusy] = useState(false);
 
   const p = useMemo(
@@ -306,42 +306,30 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
       setCompleteBusy(false);
     }
   };
-  const handleProgressFiles = async (e: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = '';
-    if (!files.length) return;
-    if (progressFiles.length + files.length > 3) {
-      toast.error('Máximo 3 archivos por avance.');
-      return;
-    }
-    setProgressBusy(true);
-    try {
-      for (const file of files) {
-        const attachment = await readFileAsAttachment(file);
-        setProgressFiles((prev) => [...prev, attachment]);
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo procesar el archivo');
-    } finally {
-      setProgressBusy(false);
-    }
-  };
-
   const handleSubmitProgress = () => {
     if (!progressText.trim() && progressFiles.length === 0) {
       toast.info('Escribe qué hiciste o sube una evidencia.');
       return;
     }
-    const ok = addProjectProgress(projectId, {
-      text: progressText,
-      files: progressFiles.length ? progressFiles : undefined,
-    });
-    if (ok) {
-      setProgressText('');
-      setProgressFiles([]);
-      toast.success('Avance registrado. Orlando podrá verlo.');
-    } else {
-      toast.error('No se pudo registrar el avance.');
+    if (progressFiles.length > MAX_PROGRESS_FILES) {
+      toast.error(`Máximo ${MAX_PROGRESS_FILES} archivos por avance.`);
+      return;
+    }
+    setProgressBusy(true);
+    try {
+      const ok = addProjectProgress(projectId, {
+        text: progressText,
+        files: progressFiles.length ? progressFiles : undefined,
+      });
+      if (ok) {
+        setProgressText('');
+        setProgressFiles([]);
+        toast.success('Avance registrado. Orlando recibirá la notificación.');
+      } else {
+        toast.error('No se pudo registrar el avance.');
+      }
+    } finally {
+      setProgressBusy(false);
     }
   };
 
@@ -834,39 +822,26 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 rows={3}
                 maxLength={1200}
               />
-              {progressFiles.length > 0 && (
-                <FileAttachmentsList
-                  attachments={progressFiles}
-                  compact
-                  onRemove={(id) =>
-                    setProgressFiles((prev) => prev.filter((file) => file.id !== id))
-                  }
-                />
-              )}
-              <input
-                ref={progressFileRef}
-                type="file"
-                accept={ATTACHMENT_ACCEPT}
-                multiple
-                className="project-proof-input"
-                onChange={(e) => void handleProgressFiles(e)}
+              <FileAttachmentsEditor
+                attachments={progressFiles}
+                onChange={(next) => setProgressFiles(next.slice(0, MAX_PROGRESS_FILES))}
+                disabled={progressBusy}
+                onError={(msg) => toast.error(msg)}
+                onSuccess={(msg) => toast.success(msg)}
+                enableLibrary
               />
+              <p className="project-attachments-sub">
+                Puedes subir varios archivos: video, GIF, PDF, imágenes u otros (máx.{' '}
+                {MAX_PROGRESS_FILES}).
+              </p>
               <div className="project-progress-actions">
-                <button
-                  type="button"
-                  className="btn-ghost"
-                  disabled={progressBusy || progressFiles.length >= 3}
-                  onClick={() => progressFileRef.current?.click()}
-                >
-                  {progressBusy ? 'Procesando…' : '📎 Subir evidencia'}
-                </button>
                 <button
                   type="button"
                   className="btn-primary"
                   disabled={progressBusy}
                   onClick={handleSubmitProgress}
                 >
-                  Registrar avance
+                  {progressBusy ? 'Registrando…' : 'Registrar avance'}
                 </button>
               </div>
             </div>

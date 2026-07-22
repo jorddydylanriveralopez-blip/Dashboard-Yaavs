@@ -67,6 +67,9 @@ const ProjectsHub = lazy(() =>
 const AttendanceView = lazy(() =>
   import('./AttendanceView').then((m) => ({ default: m.AttendanceView })),
 );
+const AvancesView = lazy(() =>
+  import('./AvancesView').then((m) => ({ default: m.AvancesView })),
+);
 const AssignmentsView = lazy(() =>
   import('./AssignmentsView').then((m) => ({ default: m.AssignmentsView })),
 );
@@ -109,6 +112,7 @@ const NAV: {
   { id: 'team', label: 'Equipo', icon: 'team' },
   { id: 'chat', label: 'Chat', icon: 'chat' },
   { id: 'board', label: 'Proyectos', icon: 'board' },
+  { id: 'avances', label: 'Avances', icon: 'avances' },
   { id: 'attendance', label: 'Asistencia', icon: 'attendance', allowEmployeeIds: ATTENDANCE_ALLOWED_EMPLOYEE_IDS },
   { id: 'assignments', label: 'Indicaciones', icon: 'assignments' },
   { id: 'pulse', label: 'Panorama', icon: 'pulse', managerOnly: true },
@@ -117,7 +121,7 @@ const NAV: {
   { id: 'calendar', label: 'Agenda', icon: 'calendar' },
 ];
 
-const MOBILE_PRIMARY: DashboardView[] = ['home', 'board', 'assignments', 'team'];
+const MOBILE_PRIMARY: DashboardView[] = ['home', 'board', 'avances', 'assignments'];
 
 export function Dashboard() {
   const {
@@ -541,6 +545,12 @@ export function Dashboard() {
       title: 'Asistencia del área',
       sub: 'Asistencias, faltas y enfermedades del equipo',
     },
+    avances: {
+      title: 'Avances y evidencias',
+      sub: canEditAll
+        ? 'Bitácora del equipo con videos, GIFs, PDFs e imágenes'
+        : 'Sube qué hiciste y tus evidencias — Orlando recibe aviso',
+    },
     library: {
       title: 'Biblioteca de imágenes',
       sub: canEditAll
@@ -924,6 +934,7 @@ export function Dashboard() {
             />
           )}
           {view === 'attendance' && canSeeAttendance && <AttendanceView />}
+          {view === 'avances' && <AvancesView />}
           {view === 'assignments' && <AssignmentsView />}
           {view === 'calendar' && <CalendarView />}
           {view === 'pulse' && <MarketingPulseView />}

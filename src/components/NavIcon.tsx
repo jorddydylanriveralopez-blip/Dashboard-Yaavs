@@ -5,6 +5,7 @@ export type NavIconId =
   | 'team'
   | 'chat'
   | 'board'
+  | 'avances'
   | 'attendance'
   | 'assignments'
   | 'pulse'
@@ -82,6 +83,14 @@ export function NavIcon({ id, size = 20, className, strokeWidth }: Props) {
           <rect x="13" y="4" width="7" height="7" rx="1.5" />
           <rect x="4" y="13" width="7" height="7" rx="1.5" />
           <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </Svg>
+      );
+    case 'avances':
+      return (
+        <Svg size={size} className={className} strokeWidth={strokeWidth}>
+          <path d="M12 16V5" />
+          <path d="m8 9 4-4 4 4" />
+          <path d="M5 19h14" />
         </Svg>
       );
     case 'attendance':

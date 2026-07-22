@@ -13,6 +13,9 @@ export const LIST_LAYOUT_MIN_COUNT = 6;
 /** Se permite seleccionar cualquier tipo de archivo como evidencia. */
 export const ATTACHMENT_ACCEPT = '*/*';
 
+/** Máximo de archivos por registro de avance de proyecto. */
+export const MAX_PROGRESS_FILES = 12;
+
 export function formatAttachmentSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

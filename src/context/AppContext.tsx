@@ -115,6 +115,7 @@ import {
   upsertAttendance,
   mergeAttendanceImport,
 } from '../utils/attendance';
+import { MAX_PROGRESS_FILES } from '../utils/fileAttachments';
 import {
   loadManagerObservations,
   upsertManagerObservation,
@@ -3068,13 +3069,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const clean = input.text.trim();
       if (!clean && !input.images?.length && !input.files?.length) return false;
 
+      const files = input.files?.length
+        ? input.files.slice(0, MAX_PROGRESS_FILES)
+        : undefined;
+      const images = input.images?.length
+        ? input.images.slice(0, MAX_PROGRESS_FILES)
+        : undefined;
       const update: ProjectProgressUpdate = {
         id: `pup-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         authorId: user.id,
         authorName: user.name,
         text: clean.slice(0, 1200),
-        images: input.images?.length ? input.images.slice(0, 3) : undefined,
-        files: input.files?.length ? input.files.slice(0, 3) : undefined,
+        images,
+        files,
         createdAt: new Date().toISOString(),
       };
       const progressUpdates = [...(current.progressUpdates ?? []), update].slice(-30);
@@ -3087,19 +3094,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : p,
         ),
       }));
+      const fileCount = files?.length ?? images?.length ?? 0;
+      const evidenceLabel =
+        fileCount > 0
+          ? ` · ${fileCount} evidencia${fileCount === 1 ? '' : 's'}`
+          : '';
       logActivity(
         'project_progress',
-        `Avance en «${current.projectName || 'proyecto'}»: ${clean.slice(0, 80) || 'evidencia subida'}`,
+        `Avance en «${current.projectName || 'proyecto'}»: ${clean.slice(0, 80) || 'evidencia subida'}${evidenceLabel}`,
         user.name,
       );
-      // Avisa a los gerentes (Orlando y Carlos) del avance registrado.
+      // Avisa a Orlando (y Carlos) del avance + evidencias.
       notifyPush({
         audience: 'employees',
         employeeIds: ['emp-orlando', 'emp-juancarlos'],
         excludeUserId: user.id,
-        title: `Avance de ${user.name}`,
-        body: `${current.projectName || 'Proyecto'}: ${clean.slice(0, 120) || 'subió evidencia'}`,
-        url: '/proyectos',
+        title: `${user.name} subió un avance`,
+        body: `${current.projectName || 'Proyecto'}: ${clean.slice(0, 100) || 'evidencia'}${evidenceLabel}`,
+        url: '/avances',
         tag: `progress-${projectId}`,
       });
       return true;
