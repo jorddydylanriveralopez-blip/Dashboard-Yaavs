@@ -28,8 +28,29 @@ function databaseUrl() {
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
     process.env.NEON_DATABASE_URL ||
+    process.env.SUPABASE_DATABASE_URL ||
+    process.env.SUPABASE_DB_URL ||
     null
   );
+}
+
+function supabaseUrl() {
+  return process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || null;
+}
+
+function supabaseKey() {
+  return (
+    process.env.SUPABASE_API_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    null
+  );
+}
+
+function hasSupabaseApi() {
+  return Boolean(supabaseUrl() && supabaseKey());
 }
 
 function blobToken() {
@@ -129,6 +150,48 @@ async function saveStateToPostgres(state) {
   `;
 }
 
+/** Hostinger inyecta SUPABASE_URL + SUPABASE_API_KEY (REST), no siempre DATABASE_URL. */
+async function getSupabaseClient() {
+  const url = supabaseUrl();
+  const key = supabaseKey();
+  if (!url || !key) return null;
+  const { createClient } = await import('@supabase/supabase-js');
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+async function loadStateFromSupabaseApi() {
+  try {
+    const client = await getSupabaseClient();
+    if (!client) return null;
+    const { data, error } = await client
+      .from('app_state')
+      .select('state')
+      .eq('key', STATE_KEY)
+      .maybeSingle();
+    if (error) throw error;
+    return data?.state ?? null;
+  } catch (error) {
+    console.error('loadStateFromSupabaseApi failed:', error?.message ?? error);
+    return null;
+  }
+}
+
+async function saveStateToSupabaseApi(state) {
+  const client = await getSupabaseClient();
+  if (!client) throw new Error('Supabase API no configurada');
+  const { error } = await client.from('app_state').upsert(
+    {
+      key: STATE_KEY,
+      state,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'key' },
+  );
+  if (error) throw error;
+}
+
 async function loadStateFromBlob() {
   try {
     const { head } = await import('@vercel/blob');
@@ -159,19 +222,40 @@ async function saveStateToBlob(state) {
   );
 }
 
-/** Estado compartido del panel: Neon Postgres primero, Blob como respaldo, archivo local en dev. */
+async function loadExistingState() {
+  if (databaseUrl()) {
+    const fromPg = await loadStateFromPostgres();
+    if (fromPg) return fromPg;
+  }
+  if (hasSupabaseApi()) {
+    const fromApi = await loadStateFromSupabaseApi();
+    if (fromApi) return fromApi;
+  }
+  if (blobToken() || isServerless()) {
+    const fromBlob = await loadStateFromBlob();
+    if (fromBlob) return fromBlob;
+  }
+  if (!isServerless()) return readLocalState();
+  return null;
+}
+
+/** Estado compartido: Postgres (Neon/Supabase) → API Supabase (Hostinger) → Blob → local. */
 export async function loadAppState() {
   let fromDb = null;
+  let fromApi = null;
   let fromBlob = null;
 
   if (databaseUrl()) {
     fromDb = await loadStateFromPostgres();
   }
+  if ((!fromDb || !isMeaningfulState(fromDb)) && hasSupabaseApi()) {
+    fromApi = await loadStateFromSupabaseApi();
+  }
   if (blobToken() || isServerless()) {
     fromBlob = await loadStateFromBlob();
   }
 
-  const preferred = preferRicherState(fromDb, fromBlob);
+  const preferred = preferRicherState(preferRicherState(fromDb, fromApi), fromBlob);
   if (preferred && isMeaningfulState(preferred)) return preferred;
   if (preferred) return preferred;
 
@@ -184,17 +268,14 @@ export async function loadAppState() {
 
 /**
  * Guarda el estado completo.
- * Si Neon falla (cuota, red, etc.), cae a Blob para no perder sync ni Concluidos.
+ * Si Neon/Supabase Postgres falla, cae a API REST de Supabase y luego Blob.
  * Rechaza un tablero vacío que pisaría datos existentes (salvo allowEmpty).
  */
 export async function saveAppState(body, { allowEmpty = false } = {}) {
   const state = { ...body, updatedAt: new Date().toISOString() };
 
   if (!allowEmpty && !isMeaningfulState(state)) {
-    let existing = null;
-    if (databaseUrl()) existing = await loadStateFromPostgres();
-    if (!existing && (blobToken() || isServerless())) existing = await loadStateFromBlob();
-    if (!existing && !isServerless()) existing = readLocalState();
+    const existing = await loadExistingState();
     if (isMeaningfulState(existing)) {
       throw new Error(
         'Se rechazó guardar un tablero vacío sobre datos existentes. Usa allowEmpty si es intencional.',
@@ -205,10 +286,7 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
   // Protección extra: no pisar un tablero con muchos proyectos con uno casi vacío
   // (aunque todavía tenga tareas y pase isMeaningfulState).
   if (!allowEmpty) {
-    let existing = null;
-    if (databaseUrl()) existing = await loadStateFromPostgres();
-    if (!existing && (blobToken() || isServerless())) existing = await loadStateFromBlob();
-    if (!existing && !isServerless()) existing = readLocalState();
+    const existing = await loadExistingState();
     if (wouldWipeProjects(state, existing)) {
       throw new Error(
         'Se rechazó guardar: el estado nuevo borraría proyectos existentes. Usa allowEmpty si es intencional.',
@@ -221,7 +299,6 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
   if (databaseUrl()) {
     try {
       await saveStateToPostgres(state);
-      // Intentar también Blob como espejo (no bloquea si falla).
       if (blobToken()) {
         try {
           await saveStateToBlob(state);
@@ -231,7 +308,17 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
       }
       return state;
     } catch (error) {
-      console.error('saveStateToPostgres failed, trying Blob:', error?.message ?? error);
+      console.error('saveStateToPostgres failed, trying Supabase API:', error?.message ?? error);
+      errors.push(error);
+    }
+  }
+
+  if (hasSupabaseApi()) {
+    try {
+      await saveStateToSupabaseApi(state);
+      return state;
+    } catch (error) {
+      console.error('saveStateToSupabaseApi failed:', error?.message ?? error);
       errors.push(error);
     }
   }

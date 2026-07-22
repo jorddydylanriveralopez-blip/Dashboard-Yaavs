@@ -16,6 +16,7 @@
   "dependencies": {
     "@google-analytics/data": "^6.1.0",
     "@neondatabase/serverless": "^1.1.0",
+    "@supabase/supabase-js": "^2.110.8",
     "@vercel/blob": "^2.6.1",
     "cors": "^2.8.5",
     "dictionary-es": "^4.0.0",
