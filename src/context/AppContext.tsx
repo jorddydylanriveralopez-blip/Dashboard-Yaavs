@@ -596,6 +596,43 @@ function mergeCompletedIntoSyncState(
   };
 }
 
+
+/** Incorpora proyectos (sobre todo concluidos) del remoto sin pisar ediciones locales. */
+function absorbRemoteProjects(
+  localProjects: CreativeProject[],
+  remoteProjects: CreativeProject[] | undefined,
+  deleted: Record<string, string>,
+): { projects: CreativeProject[]; changed: boolean } {
+  const byId = new Map<string, CreativeProject>();
+  for (const p of localProjects) {
+    if (p?.id && !deleted[p.id]) byId.set(p.id, p);
+  }
+  let changed = false;
+  for (const rp of remoteProjects ?? []) {
+    if (!rp?.id || deleted[rp.id]) continue;
+    const lp = byId.get(rp.id);
+    if (!lp) {
+      byId.set(rp.id, rp);
+      changed = true;
+      continue;
+    }
+    if (rp.status === 'terminado' && lp.status !== 'terminado') {
+      byId.set(rp.id, { ...lp, ...rp });
+      changed = true;
+      continue;
+    }
+    if (
+      rp.status === 'terminado' &&
+      lp.status === 'terminado' &&
+      (rp.updatedAt || '') > (lp.updatedAt || '')
+    ) {
+      byId.set(rp.id, { ...lp, ...rp });
+      changed = true;
+    }
+  }
+  return { projects: [...byId.values()], changed };
+}
+
 function loadDeletedProjectIds(): Record<string, string> {
   try {
     const raw = localStorage.getItem(DELETED_PROJECTS_KEY);
@@ -1190,10 +1227,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const buildSyncState = useCallback((): AppSyncState => {
     const deleted = deletedProjectIdsRef.current;
+    // boardRef evita empujar un snapshot viejo justo después de marcar terminado.
+    const liveBoard = boardRef.current ?? board;
     const leanBoard: BoardState = {
-      ...board,
+      ...liveBoard,
       projects: softDedupeProjectsByNameAndCollaborators(
-        (board.projects ?? []).filter((p) => !deleted[p.id]),
+        (liveBoard.projects ?? []).filter((p) => !deleted[p.id]),
       ).map((p) => {
           const { attachments, ...base } = { ...p, ...sanitizeProjectCollaborators(p) };
           if (!attachments?.length) return base;
@@ -1232,7 +1271,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     officeOvertime,
   ]);
 
-  const schedulePush = useCallback(() => {
+  const schedulePush = useCallback((opts?: { immediate?: boolean }) => {
     if (!isApiEnabled()) return;
     if (!syncHydrated.current) return;
     if (applyingRemote.current) {
@@ -1242,6 +1281,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     localEditAt.current = new Date().toISOString();
     if (pushTimer.current) clearTimeout(pushTimer.current);
+    const delay = opts?.immediate ? 40 : 700;
     pushTimer.current = setTimeout(() => {
       void (async () => {
         if (pushInFlight.current) {
@@ -1294,7 +1334,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
       })();
-    }, 700);
+    }, delay);
   }, [buildSyncState]);
 
   // Referencia estable para llamar applyRemote desde schedulePush sin ciclos.
@@ -1339,7 +1379,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ).length;
     const forceTakeRemote = liveRemoteCount > 0 && localProjectCount === 0;
 
+    const absorbRemoteIntoLocalBoard = () => {
+      setBoard((prev) => {
+        const { projects, changed } = absorbRemoteProjects(
+          prev.projects ?? [],
+          remote.board?.projects,
+          deleted,
+        );
+        if (!changed) return prev;
+        return { ...prev, projects };
+      });
+    };
+
     if (!forceTakeRemote && localEditAt.current && remote.updatedAt < localEditAt.current) {
+      // Aunque no reemplacemos todo el board, sí traer concluidos / faltantes del remoto.
+      absorbRemoteIntoLocalBoard();
       if (needsRepushAfterRemote.current) {
         window.setTimeout(() => {
           needsRepushAfterRemote.current = false;
@@ -1349,6 +1403,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!forceTakeRemote && remote.updatedAt <= lastRemoteAt.current) {
+      absorbRemoteIntoLocalBoard();
       if (needsRepushAfterRemote.current) {
         window.setTimeout(() => {
           needsRepushAfterRemote.current = false;
@@ -1667,7 +1722,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (intervalId != null) return;
       intervalId = window.setInterval(() => {
         void pull();
-      }, 10_000);
+      }, 5_000);
     };
 
     const stop = () => {
@@ -2283,18 +2338,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const commitProject = useCallback((project: CreativeProject) => {
     const now = new Date().toISOString();
-    const next = { ...project, updatedAt: now };
+    const next = {
+      ...project,
+      updatedAt: now,
+      ...(project.status === 'terminado'
+        ? {
+            completedAt: project.completedAt || now,
+            finishedDate:
+              project.finishedDate || now.slice(0, 10),
+          }
+        : {}),
+    };
     setBoard((prev) => {
       const list = prev.projects ?? [];
       const idx = list.findIndex((p) => p.id === next.id);
+      let boardNext: BoardState;
       if (idx >= 0) {
         const projects = [...list];
         projects[idx] = { ...projects[idx], ...next };
-        return { ...prev, projects };
+        boardNext = { ...prev, projects };
+      } else {
+        boardNext = { ...prev, projects: [next, ...list] };
       }
-      return { ...prev, projects: [next, ...list] };
+      boardRef.current = boardNext;
+      return boardNext;
     });
-  }, []);
+    if (next.status === 'terminado') {
+      schedulePush({ immediate: true });
+    }
+  }, [schedulePush]);
 
   const syncAssignmentsFromProject = useCallback((project: CreativeProject) => {
     if (!project.id) return;
@@ -2393,22 +2465,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const today = new Date().toISOString().slice(0, 10);
         const name = current.projectName?.trim() || 'Proyecto';
         const who = nextPatch.completedByName ?? user?.name ?? 'Colaborador';
-        setBoard((prev) => ({
-          ...prev,
-          projects: (prev.projects ?? []).map((p) =>
-            p.id !== id
-              ? p
-              : {
-                  ...p,
-                  ...nextPatch,
-                  status: 'terminado',
-                  finishedDate: nextPatch.finishedDate ?? p.finishedDate ?? today,
-                  updatedAt: new Date().toISOString(),
-                },
-          ),
-        }));
+        const completedAt = nextPatch.completedAt ?? new Date().toISOString();
+        setBoard((prev) => {
+          const next: BoardState = {
+            ...prev,
+            projects: (prev.projects ?? []).map((p) =>
+              p.id !== id
+                ? p
+                : {
+                    ...p,
+                    ...nextPatch,
+                    status: 'terminado',
+                    finishedDate: nextPatch.finishedDate ?? p.finishedDate ?? today,
+                    completedAt,
+                    completedByName: nextPatch.completedByName ?? p.completedByName ?? who,
+                    updatedAt: completedAt,
+                  },
+            ),
+          };
+          boardRef.current = next;
+          return next;
+        });
         logActivity('project_completed', `${who} entregó «${name}»`, who);
-        const merged = { ...current, ...nextPatch, status: 'terminado' as const };
+        const merged = {
+          ...current,
+          ...nextPatch,
+          status: 'terminado' as const,
+          completedAt,
+        };
         if (isHoursExceeded(merged)) {
           logActivity(
             'project_hours_exceeded',
@@ -2422,6 +2506,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             who,
           );
         }
+        // Empujar ya a todos los dispositivos (celular ↔ web).
+        schedulePush({ immediate: true });
         return { ok: true };
       }
 
@@ -2517,6 +2603,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       logActivity,
       getWorkloadCheck,
       verifyManagerPassword,
+      schedulePush,
     ],
   );
 

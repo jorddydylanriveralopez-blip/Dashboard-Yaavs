@@ -134,40 +134,33 @@ function mergeDeletedProjectIds(...maps) {
 }
 
 
-/** Conserva proyectos «terminado» del servidor si el cliente los omitió sin tombstone. */
-function preserveCompletedProjects(incoming, existing, deletedProjectIds) {
-  const existingProjects = Array.isArray(existing?.board?.projects)
-    ? existing.board.projects
-    : [];
-  if (!existingProjects.length) return incoming;
-
+/**
+ * Une proyectos del servidor con el push del cliente.
+ * Nunca se pierden proyectos existentes sin tombstone; «terminado» gana a activo.
+ */
+function mergeKeepExistingProjects(incoming, existing, deletedProjectIds) {
   const byId = new Map();
-  for (const p of Array.isArray(incoming?.board?.projects) ? incoming.board.projects : []) {
-    if (p?.id) byId.set(p.id, p);
+  for (const p of Array.isArray(existing?.board?.projects) ? existing.board.projects : []) {
+    if (p?.id && !deletedProjectIds?.[p.id]) byId.set(p.id, p);
   }
-
-  let changed = false;
-  for (const p of existingProjects) {
+  for (const p of Array.isArray(incoming?.board?.projects) ? incoming.board.projects : []) {
     if (!p?.id || deletedProjectIds?.[p.id]) continue;
-    if (p.status !== 'terminado') continue;
     const cur = byId.get(p.id);
     if (!cur) {
       byId.set(p.id, p);
-      changed = true;
       continue;
     }
-    if (cur.status !== 'terminado') {
-      const existingNewer =
-        String(p.updatedAt || '') >= String(cur.updatedAt || '') ||
-        String(p.completedAt || '') >= String(cur.updatedAt || '');
-      if (existingNewer) {
-        byId.set(p.id, p);
-        changed = true;
-      }
+    if (p.status === 'terminado' && cur.status !== 'terminado') {
+      byId.set(p.id, { ...cur, ...p });
+      continue;
+    }
+    if (cur.status === 'terminado' && p.status !== 'terminado') {
+      continue;
+    }
+    if (String(p.updatedAt || '') >= String(cur.updatedAt || '')) {
+      byId.set(p.id, { ...cur, ...p });
     }
   }
-
-  if (!changed) return incoming;
   return {
     ...incoming,
     board: {
@@ -376,7 +369,7 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
   );
 
   // No dejar que un cliente sin Concluidos borre los del servidor.
-  state = preserveCompletedProjects(state, existing, deletedProjectIds);
+  state = mergeKeepExistingProjects(state, existing, deletedProjectIds);
 
   if (!allowEmpty && !isMeaningfulState(state)) {
     if (isMeaningfulState(existing)) {

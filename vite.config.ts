@@ -64,6 +64,12 @@ export default defineConfig({
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
           {
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            handler: 'NetworkOnly',
+            options: { cacheName: 'api-network-only' },
+          },
+
+          {
             urlPattern: /^https:\/\/assets\.zyrosite\.com\/.*/i,
             handler: 'CacheFirst',
             options: {

@@ -882,9 +882,8 @@ export function ProjectDetailModal({
                         completedByName: user?.name ?? user?.username,
                       });
                       if (!isDraft) {
-                        toast.success(
-                          'Proyecto marcado como concluido. Guarda o cierra; ya aparece en Concluidos.',
-                        );
+                        toast.success('Proyecto en Concluidos — ya se sincroniza con el equipo.');
+                        goToCompletedProjects();
                       }
                       return;
                     }
