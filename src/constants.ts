@@ -76,6 +76,9 @@ export const TEAM_CHAT_STORAGE_KEY = 'empresa-board-team-chat-v1';
 export const IMAGE_LIBRARY_CACHE_KEY = 'empresa-board-image-library-cache-v1';
 export const SOCIAL_ACCOUNTS_KEY = 'empresa-board-social-accounts-v1';
 export const EXTRA_PROJECTS_KEY = 'empresa-board-extra-projects-v1';
+export const OFFICE_OVERTIME_KEY = 'empresa-board-office-overtime-v1';
+/** Orlando no usa cronómetro de tiempo extra en oficina. */
+export const OFFICE_OVERTIME_EXCLUDED_EMPLOYEE_ID = 'emp-orlando';
 /** Página pública del almacén de imágenes (CDN). */
 export const MEDIA_CDN_PATH = '/almacen';
 

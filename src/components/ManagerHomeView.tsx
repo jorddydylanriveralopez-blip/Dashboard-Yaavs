@@ -13,6 +13,7 @@ import { getProjectTimelineInfo } from '../utils/projectTimeline';
 import { buildTeamCapacity } from '../utils/teamWorkload';
 import { ActivityFeedPanel } from './ActivityFeedPanel';
 import { HomeObservationsPanel } from './HomeObservationsPanel';
+import { OfficeOvertimePanel } from './OfficeOvertimePanel';
 import { buildTeamObservations } from '../utils/personalObservations';
 import type { CreativeProject } from '../types';
 import './ManagerHomeView.css';
@@ -339,6 +340,10 @@ export function ManagerHomeView({
           </ul>
         </section>
       )}
+
+      <div className="manager-home-ot-wrap">
+        <OfficeOvertimePanel mode="team" compact />
+      </div>
 
       <section className="manager-home-block">
         <div className="manager-home-block-head">

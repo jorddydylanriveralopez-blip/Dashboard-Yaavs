@@ -48,6 +48,7 @@ import {
   SOCIAL_METRICS_KEY,
   SOCIAL_ACCOUNTS_KEY,
   EXTRA_PROJECTS_KEY,
+  OFFICE_OVERTIME_KEY,
   USER_PROFILES_KEY,
   WORKLOAD_LIMITS_KEY,
   DAILY_KPI_SNAPSHOTS_KEY,
@@ -147,6 +148,8 @@ import type {
   SocialMetricsStore,
   SocialAccountsStore,
   ExtraProjectEntry,
+  OfficeOvertimeEntry,
+  OfficeOvertimeStore,
   KpiObjectiveAssignment,
   TaskAssignment,
   TeamChatMessage,
@@ -331,6 +334,9 @@ interface AppContextValue {
     },
   ) => boolean;
   deleteProjectProgress: (projectId: string, updateId: string) => void;
+  officeOvertime: OfficeOvertimeStore;
+  startOfficeOvertime: () => boolean;
+  stopOfficeOvertime: () => boolean;
   attendanceStore: AttendanceStore;
   managerObservations: ManagerObservationsStore;
   getManagerObservation: (
@@ -649,6 +655,19 @@ function loadKpiObjectives(): KpiObjectiveAssignment[] {
   return [];
 }
 
+function loadOfficeOvertime(): OfficeOvertimeStore {
+  try {
+    const raw = localStorage.getItem(OFFICE_OVERTIME_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as OfficeOvertimeStore;
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
 function loadWorkloadLimits(): WorkloadLimitsStore {
   try {
     const raw =
@@ -765,6 +784,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [socialMetrics, setSocialMetrics] = useState<SocialMetricsStore>(loadSocialMetrics);
   const [socialAccounts, setSocialAccounts] = useState<SocialAccountsStore>(loadSocialAccounts);
   const [extraProjects, setExtraProjects] = useState<ExtraProjectEntry[]>(loadExtraProjects);
+  const [officeOvertime, setOfficeOvertime] = useState<OfficeOvertimeStore>(loadOfficeOvertime);
   const [workloadLimits, setWorkloadLimits] = useState<WorkloadLimitsStore>(loadWorkloadLimits);
   const [userProfiles, setUserProfiles] = useState<UserProfilesStore>(() =>
     loadUserProfiles(localStorage.getItem(USER_PROFILES_KEY)),
@@ -925,6 +945,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(EXTRA_PROJECTS_KEY, JSON.stringify(extraProjects));
   }, [extraProjects]);
+
+  useEffect(() => {
+    localStorage.setItem(OFFICE_OVERTIME_KEY, JSON.stringify(officeOvertime));
+  }, [officeOvertime]);
 
   useEffect(() => {
     if (!activeUsers.length) return;
@@ -1120,6 +1144,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       socialAccounts,
       deletedProjectIds: deleted,
       extraProjects,
+      officeOvertime,
       updatedAt: new Date().toISOString(),
     };
   }, [
@@ -1132,6 +1157,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     teamRoster,
     socialAccounts,
     extraProjects,
+    officeOvertime,
   ]);
 
   const schedulePush = useCallback(() => {
@@ -1415,6 +1441,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
+    if (remote.officeOvertime) {
+      setOfficeOvertime((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const [employeeId, remoteEntry] of Object.entries(remote.officeOvertime!)) {
+          const local = next[employeeId];
+          if (!local) {
+            next[employeeId] = remoteEntry;
+            changed = true;
+            continue;
+          }
+          if ((local.updatedAt || '') > (remoteEntry.updatedAt || '')) {
+            preservedLocal = true;
+            continue;
+          }
+          if ((remoteEntry.updatedAt || '') > (local.updatedAt || '')) {
+            next[employeeId] = remoteEntry;
+            changed = true;
+          }
+        }
+        // Conservar entradas locales más nuevas que no están en remoto.
+        for (const [employeeId, local] of Object.entries(prev)) {
+          if (!remote.officeOvertime![employeeId]) {
+            if ((local.updatedAt || '') > (remote.updatedAt || '')) {
+              preservedLocal = true;
+            }
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+
     if (preservedLocal) needsRepushAfterRemote.current = true;
 
     window.setTimeout(() => {
@@ -1516,6 +1574,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     socialAccounts,
     deletedProjectIds,
     extraProjects,
+    officeOvertime,
     schedulePush,
   ]);
 
@@ -3550,6 +3609,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [user, canEditAll],
   );
 
+  const startOfficeOvertime = useCallback((): boolean => {
+    if (!user?.employeeId) return false;
+    if (user.employeeId === 'emp-orlando') return false;
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    setOfficeOvertime((prev) => {
+      const current = prev[user.employeeId!];
+      if (current?.runningStartedAt) return prev;
+      const bankedSeconds =
+        current?.todayDate === today ? current.todaySeconds || 0 : 0;
+      const next: OfficeOvertimeEntry = {
+        employeeId: user.employeeId!,
+        employeeName: user.name,
+        runningStartedAt: now,
+        runningDate: today,
+        todaySeconds: bankedSeconds,
+        todayDate: today,
+        updatedAt: now,
+      };
+      return { ...prev, [user.employeeId!]: next };
+    });
+    return true;
+  }, [user]);
+
+  const stopOfficeOvertime = useCallback((): boolean => {
+    if (!user?.employeeId) return false;
+    if (user.employeeId === 'emp-orlando') return false;
+    let stopped = false;
+    setOfficeOvertime((prev) => {
+      const current = prev[user.employeeId!];
+      if (!current?.runningStartedAt) return prev;
+      stopped = true;
+      const nowMs = Date.now();
+      const now = new Date(nowMs).toISOString();
+      const today = now.slice(0, 10);
+      const started = Date.parse(current.runningStartedAt);
+      const elapsedSec = Number.isFinite(started)
+        ? Math.max(0, Math.floor((nowMs - started) / 1000))
+        : 0;
+      const base =
+        current.todayDate === today ? current.todaySeconds || 0 : 0;
+      const runDate = current.runningDate || current.runningStartedAt.slice(0, 10);
+      const next: OfficeOvertimeEntry = {
+        employeeId: user.employeeId!,
+        employeeName: user.name,
+        runningStartedAt: null,
+        runningDate: null,
+        todaySeconds: runDate === today ? base + elapsedSec : elapsedSec,
+        todayDate: today,
+        updatedAt: now,
+      };
+      return { ...prev, [user.employeeId!]: next };
+    });
+    return stopped;
+  }, [user]);
+
   const sendChatMessage = useCallback(
     (text: string) => {
       const clean = text.trim();
@@ -3691,6 +3806,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       trackProjectMinutes,
       addProjectProgress,
       deleteProjectProgress,
+      officeOvertime,
+      startOfficeOvertime,
+      stopOfficeOvertime,
       allProjects,
     }),
     [
@@ -3791,6 +3909,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       trackProjectMinutes,
       addProjectProgress,
       deleteProjectProgress,
+      officeOvertime,
+      startOfficeOvertime,
+      stopOfficeOvertime,
       allProjects,
     ],
   );

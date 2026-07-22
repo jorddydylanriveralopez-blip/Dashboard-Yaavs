@@ -591,6 +591,23 @@ export interface ExtraProjectEntry {
 
 export type ExtraProjectStatus = 'pending' | 'approved' | 'rejected';
 
+/** Cronómetro de tiempo extra en oficina (por colaborador, día actual). */
+export interface OfficeOvertimeEntry {
+  employeeId: string;
+  employeeName: string;
+  /** ISO si el cronómetro está corriendo. */
+  runningStartedAt: string | null;
+  /** YYYY-MM-DD del arranque actual. */
+  runningDate: string | null;
+  /** Segundos ya acumulados hoy (tras pausas). */
+  todaySeconds: number;
+  /** Día al que aplica todaySeconds. */
+  todayDate: string;
+  updatedAt: string;
+}
+
+export type OfficeOvertimeStore = Record<string, OfficeOvertimeEntry>;
+
 export interface AppSyncState {
   board: BoardState;
   assignments: TaskAssignment[];
@@ -604,5 +621,7 @@ export interface AppSyncState {
   deletedProjectIds?: Record<string, string>;
   /** Bitácora de proyectos extra por colaborador. */
   extraProjects?: ExtraProjectEntry[];
+  /** Tiempo extra en oficina por empleado. */
+  officeOvertime?: OfficeOvertimeStore;
   updatedAt: string;
 }

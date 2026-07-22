@@ -28,6 +28,12 @@ interface FeedItem {
   update: ProjectProgressUpdate;
 }
 
+interface CollaboratorGroup {
+  authorId: string;
+  authorName: string;
+  items: FeedItem[];
+}
+
 export function AvancesView() {
   const {
     user,
@@ -61,8 +67,9 @@ export function AvancesView() {
   const [text, setText] = useState('');
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [busy, setBusy] = useState(false);
+  const [collabFilter, setCollabFilter] = useState<string>('all');
 
-  const recentFeed = useMemo(() => {
+  const allFeedItems = useMemo(() => {
     const source = canEditAll ? visibleProjects : myProjects;
     const items: FeedItem[] = [];
     for (const p of source) {
@@ -75,13 +82,45 @@ export function AvancesView() {
         });
       }
     }
-    return items
-      .sort(
-        (a, b) =>
-          new Date(b.update.createdAt).getTime() - new Date(a.update.createdAt).getTime(),
-      )
-      .slice(0, 40);
+    return items.sort(
+      (a, b) =>
+        new Date(b.update.createdAt).getTime() - new Date(a.update.createdAt).getTime(),
+    );
   }, [canEditAll, visibleProjects, myProjects, user?.id]);
+
+  const collaboratorGroups = useMemo((): CollaboratorGroup[] => {
+    const map = new Map<string, CollaboratorGroup>();
+    for (const item of allFeedItems) {
+      const key = item.update.authorId || item.update.authorName || 'unknown';
+      const existing = map.get(key);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        map.set(key, {
+          authorId: key,
+          authorName: item.update.authorName || 'Sin nombre',
+          items: [item],
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) =>
+      a.authorName.localeCompare(b.authorName, 'es'),
+    );
+  }, [allFeedItems]);
+
+  const recentFeed = useMemo(() => {
+    if (!canEditAll) return allFeedItems.slice(0, 40);
+    if (collabFilter === 'all') return allFeedItems.slice(0, 60);
+    return allFeedItems
+      .filter((item) => item.update.authorId === collabFilter)
+      .slice(0, 60);
+  }, [canEditAll, allFeedItems, collabFilter]);
+
+  const visibleGroups = useMemo(() => {
+    if (!canEditAll) return [];
+    if (collabFilter === 'all') return collaboratorGroups;
+    return collaboratorGroups.filter((g) => g.authorId === collabFilter);
+  }, [canEditAll, collaboratorGroups, collabFilter]);
 
   const handleSubmit = () => {
     if (!selected) {
@@ -127,7 +166,7 @@ export function AvancesView() {
           <h1 className="avances-title">Avances y evidencias</h1>
           <p className="avances-sub">
             {canEditAll
-              ? 'Revisa lo que el equipo sube: textos, videos, GIFs, PDFs e imágenes.'
+              ? 'Revisa los avances y evidencias de cada colaborador: textos, videos, GIFs, PDFs e imágenes.'
               : 'Elige tu proyecto, cuenta qué hiciste y sube varias evidencias. Orlando recibe aviso al instante.'}
           </p>
         </div>
@@ -210,54 +249,127 @@ export function AvancesView() {
         </section>
 
         <section className="avances-feed" aria-label="Actividad reciente">
-          <h2>{canEditAll ? 'Últimos del equipo' : 'Tus últimos avances'}</h2>
-          {recentFeed.length === 0 ? (
-            <p className="avances-empty">Todavía no hay avances registrados.</p>
-          ) : (
-            <ul className="avances-feed-list">
-              {recentFeed.map((item) => (
-                <li key={`${item.projectId}-${item.update.id}`} className="avances-feed-item">
-                  <div className="avances-feed-head">
-                    <strong>{item.update.authorName}</strong>
-                    <span>{formatProgressDate(item.update.createdAt)}</span>
-                  </div>
-                  <p className="avances-feed-project">{item.projectName}</p>
-                  {item.update.text && (
-                    <p className="avances-feed-text">{item.update.text}</p>
-                  )}
-                  {(item.update.files?.length ?? 0) > 0 && (
-                    <FileAttachmentsList attachments={item.update.files!} compact />
-                  )}
-                  {(item.update.images?.length ?? 0) > 0 && (
-                    <div className="avances-legacy-thumbs">
-                      {item.update.images!.map((img, i) => (
-                        <a
-                          key={`${item.update.id}-img-${i}`}
-                          href={img.dataUrl}
-                          download={img.name || `evidencia-${i + 1}.jpg`}
-                          title={img.name}
-                        >
-                          <img src={img.dataUrl} alt={img.name} />
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {(canEditAll || item.update.authorId === user?.id) && (
+          {canEditAll ? (
+            <>
+              <h2>Por colaborador</h2>
+              {collaboratorGroups.length === 0 ? (
+                <p className="avances-empty">Todavía no hay avances registrados.</p>
+              ) : (
+                <>
+                  <div className="avances-collab-tabs" role="tablist" aria-label="Filtrar por colaborador">
                     <button
                       type="button"
-                      className="btn-ghost avances-feed-delete"
-                      onClick={() => handleDelete(item.projectId, item.update.id)}
+                      role="tab"
+                      aria-selected={collabFilter === 'all'}
+                      className={`avances-collab-tab${collabFilter === 'all' ? ' is-active' : ''}`}
+                      onClick={() => setCollabFilter('all')}
                     >
-                      Eliminar
+                      Todos ({allFeedItems.length})
                     </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                    {collaboratorGroups.map((g) => (
+                      <button
+                        key={g.authorId}
+                        type="button"
+                        role="tab"
+                        aria-selected={collabFilter === g.authorId}
+                        className={`avances-collab-tab${collabFilter === g.authorId ? ' is-active' : ''}`}
+                        onClick={() => setCollabFilter(g.authorId)}
+                      >
+                        {g.authorName} ({g.items.length})
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="avances-collab-groups">
+                    {visibleGroups.map((group) => (
+                      <div key={group.authorId} className="avances-collab-group">
+                        <h3 className="avances-collab-name">
+                          {group.authorName}
+                          <span>{group.items.length} avance{group.items.length === 1 ? '' : 's'}</span>
+                        </h3>
+                        <ul className="avances-feed-list">
+                          {(collabFilter === 'all' ? group.items.slice(0, 12) : group.items.slice(0, 40)).map(
+                            (item) => (
+                              <FeedCard
+                                key={`${item.projectId}-${item.update.id}`}
+                                item={item}
+                                canDelete={canEditAll || item.update.authorId === user?.id}
+                                onDelete={() => handleDelete(item.projectId, item.update.id)}
+                              />
+                            ),
+                          )}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          ) : (
+            <>
+              <h2>Tus últimos avances</h2>
+              {recentFeed.length === 0 ? (
+                <p className="avances-empty">Todavía no hay avances registrados.</p>
+              ) : (
+                <ul className="avances-feed-list">
+                  {recentFeed.map((item) => (
+                    <FeedCard
+                      key={`${item.projectId}-${item.update.id}`}
+                      item={item}
+                      canDelete={item.update.authorId === user?.id}
+                      onDelete={() => handleDelete(item.projectId, item.update.id)}
+                    />
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </section>
       </div>
     </div>
+  );
+}
+
+function FeedCard({
+  item,
+  canDelete,
+  onDelete,
+}: {
+  item: FeedItem;
+  canDelete: boolean;
+  onDelete: () => void;
+}) {
+  return (
+    <li className="avances-feed-item">
+      <div className="avances-feed-head">
+        <strong>{item.update.authorName}</strong>
+        <span>{formatProgressDate(item.update.createdAt)}</span>
+      </div>
+      <p className="avances-feed-project">{item.projectName}</p>
+      {item.update.text && <p className="avances-feed-text">{item.update.text}</p>}
+      {(item.update.files?.length ?? 0) > 0 && (
+        <FileAttachmentsList attachments={item.update.files!} compact />
+      )}
+      {(item.update.images?.length ?? 0) > 0 && (
+        <div className="avances-legacy-thumbs">
+          {item.update.images!.map((img, i) => (
+            <a
+              key={`${item.update.id}-img-${i}`}
+              href={img.dataUrl}
+              download={img.name || `evidencia-${i + 1}.jpg`}
+              title={img.name}
+            >
+              <img src={img.dataUrl} alt={img.name} />
+            </a>
+          ))}
+        </div>
+      )}
+      {canDelete && (
+        <button type="button" className="btn-ghost avances-feed-delete" onClick={onDelete}>
+          Eliminar
+        </button>
+      )}
+    </li>
   );
 }
 

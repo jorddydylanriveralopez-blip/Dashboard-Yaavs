@@ -16,6 +16,7 @@ import {
   sortProjectsByUrgency,
   taskDuplicatesProject,
 } from '../utils/projectLink';
+import { OfficeOvertimePanel } from './OfficeOvertimePanel';
 import { ActivityFeedPanel } from './ActivityFeedPanel';
 import { HomeObservationsPanel } from './HomeObservationsPanel';
 import { KpiObjectiveInbox } from './KpiObjectiveInbox';
@@ -248,6 +249,8 @@ export function MyDayView({
       </div>
 
       <KpiObjectiveInbox compact onGoKpis={onGoKpis} />
+
+      <OfficeOvertimePanel mode="self" compact />
 
       {showUrgentBlock && (
         <section className="my-day-block my-day-urgent my-day-block--tight">

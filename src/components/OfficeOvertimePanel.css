@@ -1,0 +1,123 @@
+.office-ot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--yaavs-electric) 28%, var(--border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--yaavs-electric) 8%, var(--bg-surface)),
+    rgba(255, 255, 255, 0.94)
+  );
+}
+
+.office-ot--running {
+  border-color: color-mix(in srgb, #16a34a 40%, var(--border));
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #16a34a 10%, var(--bg-surface)),
+    rgba(255, 255, 255, 0.96)
+  );
+}
+
+.office-ot--team {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.office-ot--compact {
+  padding: 12px 14px;
+}
+
+.office-ot-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.office-ot-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--yaavs-blue-mid);
+}
+
+.office-ot-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.5rem;
+  line-height: 1.15;
+  color: var(--yaavs-ink);
+  letter-spacing: 0.02em;
+}
+
+.office-ot-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.35;
+}
+
+.office-ot-empty {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.office-ot-actions {
+  flex-shrink: 0;
+}
+
+.office-ot-btn {
+  min-width: 96px;
+}
+
+.office-ot-team-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.office-ot-team-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--border);
+}
+
+.office-ot-team-row--live {
+  border-color: color-mix(in srgb, #16a34a 35%, var(--border));
+}
+
+.office-ot-team-list strong {
+  font-size: 0.875rem;
+  color: var(--yaavs-ink);
+}
+
+.office-ot-team-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .office-ot:not(.office-ot--team) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .office-ot-btn {
+    width: 100%;
+  }
+}

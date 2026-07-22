@@ -211,6 +211,57 @@
   object-fit: cover;
 }
 
+.avances-collab-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 14px;
+}
+
+.avances-collab-tab {
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.avances-collab-tab.is-active {
+  border-color: color-mix(in srgb, var(--yaavs-electric) 45%, var(--border));
+  background: color-mix(in srgb, var(--yaavs-electric) 12%, #fff);
+  color: var(--yaavs-ink);
+}
+
+.avances-collab-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.avances-collab-group {
+  padding-top: 4px;
+}
+
+.avances-collab-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 0.9375rem;
+  color: var(--yaavs-ink);
+}
+
+.avances-collab-name span {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
 @media (max-width: 980px) {
   .avances-layout {
     grid-template-columns: 1fr;
