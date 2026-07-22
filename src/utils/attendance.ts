@@ -636,7 +636,41 @@ function detectFallbackMonth(matrix: string[][]): string {
 
 const LATE_AFTER_MINUTES = 9 * 60 + 15; // 09:15
 
-function parsePunchDateTime(raw: string): { dateKey: string; minutes: number } | null {
+/** IDs del checador → empleado Yaavs (Asistencias.xlsx). */
+const CHECADOR_USER_IDS: Record<string, string> = {
+  '10482': 'emp-andrea',
+  '10492': 'emp-roberto',
+  '10610': 'emp-andres',
+  '10609': 'emp-jesus',
+  '10421': 'emp-juancarlos',
+  // '10671': emp-orlando — se omite del tablero de equipo
+};
+
+type PunchDateOrder = 'dmy' | 'mdy';
+
+/** El checador suele traer MM/DD/YYYY (ej. 04/13/2026 = 13 abr). */
+function detectPunchDateOrder(matrix: string[][], timeCol: number, headerIdx: number): PunchDateOrder {
+  let sawDayFirstGt12 = false;
+  let sawMonthSecondGt12 = false;
+  for (const line of matrix.slice(headerIdx + 1, headerIdx + 400)) {
+    const raw = (line[timeCol] ?? '').trim();
+    const m = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    if (!m) continue;
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a > 12 && b <= 12) sawDayFirstGt12 = true;
+    if (b > 12 && a <= 12) sawMonthSecondGt12 = true;
+  }
+  if (sawMonthSecondGt12 && !sawDayFirstGt12) return 'mdy';
+  if (sawDayFirstGt12 && !sawMonthSecondGt12) return 'dmy';
+  // Por defecto el concentrado MKT de Hostinger/checador viene en MM/DD.
+  return 'mdy';
+}
+
+function parsePunchDateTime(
+  raw: string,
+  order: PunchDateOrder = 'mdy',
+): { dateKey: string; minutes: number } | null {
   const value = raw.trim();
   if (!value) return null;
   const m = value.match(
@@ -645,7 +679,15 @@ function parsePunchDateTime(raw: string): { dateKey: string; minutes: number } |
   if (m) {
     let y = Number(m[3]);
     if (y < 100) y += 2000;
-    const dateKey = toDateKey(y, Number(m[2]), Number(m[1]));
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    const month = order === 'mdy' ? a : b;
+    const day = order === 'mdy' ? b : a;
+    // Si el orden elegido es inválido, prueba el otro.
+    let dateKey = toDateKey(y, month, day);
+    if (!dateKey) {
+      dateKey = toDateKey(y, day, month);
+    }
     if (!dateKey) return null;
     const minutes = Number(m[4]) * 60 + Number(m[5]);
     return { dateKey, minutes };
@@ -713,9 +755,17 @@ export function parsePunchClockAttendance(
       format: 'unknown',
       dateFrom: null,
       dateTo: null,
-      errors: [],
+      errors: [
+        'No se detectó el concentrado del checador (columnas Nombre + Tiempo + Estado de Trabajo).',
+      ],
     };
   }
+
+  const dateOrder = detectPunchDateOrder(matrix, timeCol, headerIdx);
+  const idCol = matrix[headerIdx].findIndex((h) => {
+    const n = normalizeHeader(h ?? '');
+    return n === 'iddeusuario' || n === 'id' || n === 'usuario' || n.includes('idusuario');
+  });
 
   type Agg = { employeeId: string; employeeName: string; entradas: number[]; salidas: number[] };
   const byDay = new Map<string, Agg>();
@@ -726,12 +776,16 @@ export function parsePunchClockAttendance(
     const timeRaw = (line[timeCol] ?? '').trim();
     if (!name || !timeRaw) continue;
     const stateRaw = stateCol >= 0 ? (line[stateCol] ?? '').trim().toUpperCase() : 'ENTRADA';
-    const emp = matchEmployee(name, tasks);
+    const checadorId = idCol >= 0 ? (line[idCol] ?? '').trim() : '';
+    let emp =
+      (checadorId && CHECADOR_USER_IDS[checadorId]
+        ? tasks.find((t) => t.employeeId === CHECADOR_USER_IDS[checadorId])
+        : undefined) || matchEmployee(name, tasks);
     if (!emp) {
-      unmatched.add(name);
+      if (CHECADOR_USER_IDS[checadorId] === undefined && name) unmatched.add(name);
       continue;
     }
-    const parsed = parsePunchDateTime(timeRaw);
+    const parsed = parsePunchDateTime(timeRaw, dateOrder);
     if (!parsed) {
       errors.push(`Fecha/hora no reconocida: "${timeRaw}"`);
       continue;

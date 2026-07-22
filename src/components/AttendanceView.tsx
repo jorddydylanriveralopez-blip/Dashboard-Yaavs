@@ -227,7 +227,12 @@ export function AttendanceView() {
         return;
       }
       if (result.rows.length === 0) {
-        toast.info('No se encontraron asistencias para importar en ese archivo.');
+        const unmatched = result.unmatchedNames.slice(0, 3).join(', ');
+        toast.info(
+          unmatched
+            ? `No se vincularon filas. Nombres sin match: ${unmatched}`
+            : 'No se encontraron asistencias para importar en ese archivo.',
+        );
         return;
       }
       setImportPreview(result);
@@ -303,8 +308,9 @@ export function AttendanceView() {
 
       {canEditAll && (
         <p className="attendance-import-hint">
-          Sube el Excel del checador (ENTRADA/SALIDA) o un CSV de Yaavs. Puedes ir cargando
-          actualizaciones: se mezclan con lo ya registrado. Entrada después de 09:15 = retardo.
+          Sube <strong>Asistencias.xlsx</strong> del checador tal cual (columnas Nombre, Tiempo,
+          Estado de Trabajo). También CSV. Las cargas nuevas se mezclan con lo ya guardado.
+          Entrada después de 09:15 = retardo.
         </p>
       )}
 
