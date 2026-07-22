@@ -91,12 +91,20 @@ function isMeaningfulState(state) {
 }
 
 /** Guard: no permitir borrar proyectos existentes con un estado que tenga muchos menos. */
+function completedProjectCount(state) {
+  const projects = Array.isArray(state?.board?.projects) ? state.board.projects : [];
+  return projects.filter((p) => p?.status === 'terminado').length;
+}
+
 function wouldWipeProjects(incoming, existing) {
   const existingCount = stateProjectCount(existing);
   const incomingCount = stateProjectCount(incoming);
   // Si había proyectos y el nuevo estado trae 0 (o pierde más de la mitad), rechazar.
   if (existingCount >= 3 && incomingCount === 0) return true;
   if (existingCount >= 5 && incomingCount < Math.floor(existingCount / 2)) return true;
+  const existingDone = completedProjectCount(existing);
+  const incomingDone = completedProjectCount(incoming);
+  if (existingDone >= 1 && incomingDone < existingDone) return true;
   return false;
 }
 
@@ -123,6 +131,50 @@ function mergeDeletedProjectIds(...maps) {
     }
   }
   return pruneDeletedProjectIds(merged);
+}
+
+
+/** Conserva proyectos «terminado» del servidor si el cliente los omitió sin tombstone. */
+function preserveCompletedProjects(incoming, existing, deletedProjectIds) {
+  const existingProjects = Array.isArray(existing?.board?.projects)
+    ? existing.board.projects
+    : [];
+  if (!existingProjects.length) return incoming;
+
+  const byId = new Map();
+  for (const p of Array.isArray(incoming?.board?.projects) ? incoming.board.projects : []) {
+    if (p?.id) byId.set(p.id, p);
+  }
+
+  let changed = false;
+  for (const p of existingProjects) {
+    if (!p?.id || deletedProjectIds?.[p.id]) continue;
+    if (p.status !== 'terminado') continue;
+    const cur = byId.get(p.id);
+    if (!cur) {
+      byId.set(p.id, p);
+      changed = true;
+      continue;
+    }
+    if (cur.status !== 'terminado') {
+      const existingNewer =
+        String(p.updatedAt || '') >= String(cur.updatedAt || '') ||
+        String(p.completedAt || '') >= String(cur.updatedAt || '');
+      if (existingNewer) {
+        byId.set(p.id, p);
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed) return incoming;
+  return {
+    ...incoming,
+    board: {
+      ...(incoming?.board ?? {}),
+      projects: [...byId.values()],
+    },
+  };
 }
 
 function stripDeletedProjects(state, deletedProjectIds) {
@@ -322,6 +374,9 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
     { ...body, updatedAt: new Date().toISOString() },
     deletedProjectIds,
   );
+
+  // No dejar que un cliente sin Concluidos borre los del servidor.
+  state = preserveCompletedProjects(state, existing, deletedProjectIds);
 
   if (!allowEmpty && !isMeaningfulState(state)) {
     if (isMeaningfulState(existing)) {

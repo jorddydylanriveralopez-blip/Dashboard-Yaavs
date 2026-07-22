@@ -551,6 +551,51 @@ function softDedupeProjectsByNameAndCollaborators<
   return [...byKey.values()];
 }
 
+
+/** Une concluidos del remoto al payload local para no borrarlos en el PUT. */
+function mergeCompletedIntoSyncState(
+  local: AppSyncState,
+  remote: AppSyncState | null,
+): AppSyncState {
+  if (!remote?.board?.projects?.length) return local;
+  const deleted = {
+    ...(remote.deletedProjectIds ?? {}),
+    ...(local.deletedProjectIds ?? {}),
+  };
+  const byId = new Map<string, CreativeProject>();
+  for (const p of local.board?.projects ?? []) {
+    if (p?.id && !deleted[p.id]) byId.set(p.id, p);
+  }
+  let changed = false;
+  for (const p of remote.board.projects) {
+    if (!p?.id || deleted[p.id]) continue;
+    if (p.status !== 'terminado') continue;
+    const cur = byId.get(p.id);
+    if (!cur) {
+      byId.set(p.id, p);
+      changed = true;
+      continue;
+    }
+    if (cur.status !== 'terminado') {
+      const remoteNewer =
+        (p.updatedAt || '') >= (cur.updatedAt || '') ||
+        (p.completedAt || '') >= (cur.updatedAt || '');
+      if (remoteNewer) {
+        byId.set(p.id, p);
+        changed = true;
+      }
+    }
+  }
+  if (!changed) return local;
+  return {
+    ...local,
+    board: {
+      ...local.board,
+      projects: softDedupeProjectsByNameAndCollaborators([...byId.values()]),
+    },
+  };
+}
+
 function loadDeletedProjectIds(): Record<string, string> {
   try {
     const raw = localStorage.getItem(DELETED_PROJECTS_KEY);
@@ -1205,7 +1250,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         pushInFlight.current = true;
         try {
-          const state = buildSyncState();
+          const localState = buildSyncState();
+          const remote = await fetchSyncState();
+          const state = mergeCompletedIntoSyncState(localState, remote);
+          // Si recuperamos concluidos del remoto, reflejarlos también en el board local.
+          if (state !== localState) {
+            const recovered = (state.board.projects ?? []).filter(
+              (p) => p.status === 'terminado',
+            );
+            if (recovered.length) {
+              setBoard((prev) => {
+                const byId = new Map((prev.projects ?? []).map((p) => [p.id, p]));
+                let changed = false;
+                for (const p of recovered) {
+                  const cur = byId.get(p.id);
+                  if (!cur || cur.status !== 'terminado') {
+                    byId.set(p.id, p);
+                    changed = true;
+                  }
+                }
+                if (!changed) return prev;
+                return { ...prev, projects: [...byId.values()] };
+              });
+            }
+          }
           const result = await pushSyncState(state);
           if (result.ok && result.updatedAt) {
             lastRemoteAt.current = result.updatedAt;
@@ -1547,6 +1615,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     void (async () => {
+      let appliedRemote = false;
       try {
         const online = await checkApiHealth();
         setSyncOnline((prev) => (prev === online ? prev : online));
@@ -1559,13 +1628,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           board.tasks.length > 0 || (board.projects?.length ?? 0) > 0;
         if (remoteHasBoard) {
           applyRemote(remote!);
+          appliedRemote = true;
         } else if (localHasBoard) {
           await pushSyncState(buildSyncState());
         }
       } finally {
         syncHydrated.current = true;
-        // Empujar solo después de haber mezclado el remoto (evita borrar Concluidos).
-        schedulePush();
+        // Tras applyRemote el board de React aún no actualizó: NO empujar aquí
+        // (pisaría Concluidos). applyRemote / el effect del board empujan después.
+        if (!appliedRemote) schedulePush();
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bootstrap una sola vez
