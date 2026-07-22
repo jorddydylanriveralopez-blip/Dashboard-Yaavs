@@ -1114,12 +1114,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const remoteProjectCount = remote.board?.projects?.length ?? 0;
     const remoteTaskCount = remote.board?.tasks?.length ?? 0;
     const remoteHasData = remoteProjectCount > 0 || remoteTaskCount > 0;
-    // Si el remoto trae proyectos y el local está vacío, siempre aplicar:
-    // un localEditAt reciente de un tablero vacío no debe bloquear la sync.
-    const localBoardEmpty =
-      (boardRef.current?.projects?.length ?? 0) === 0 &&
-      (boardRef.current?.tasks?.length ?? 0) === 0;
-    const forceTakeRemote = remoteHasData && localBoardEmpty;
+    const localProjectCount = boardRef.current?.projects?.length ?? 0;
+    // Si el remoto trae proyectos y el local no tiene ninguno, siempre aplicar.
+    // (Antes también exigía 0 tareas locales; el seed local bloqueaba la sync.)
+    const forceTakeRemote = remoteProjectCount > 0 && localProjectCount === 0;
     if (!forceTakeRemote && localEditAt.current && remote.updatedAt < localEditAt.current) {
       return;
     }
