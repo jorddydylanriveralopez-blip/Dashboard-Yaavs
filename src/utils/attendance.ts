@@ -1,5 +1,6 @@
 import { ATTENDANCE_STORAGE_KEY } from '../constants';
 import { getMonthKey } from './performanceHistory';
+import { fuzzyIncludes, normalizeForSearch } from './fuzzyMatch';
 import type {
   AttendanceRecord,
   AttendanceStatus,
@@ -299,4 +300,489 @@ export function buildDemoAttendance(
   }
 
   return { records };
+}
+
+/* ─── Importación flexible (semana o mes, matriz o lista) ─── */
+
+export interface AttendanceImportRow {
+  employeeId: string;
+  employeeName: string;
+  dateKey: string;
+  monthKey: string;
+  status: AttendanceStatus;
+}
+
+export interface AttendanceImportResult {
+  rows: AttendanceImportRow[];
+  unmatchedNames: string[];
+  skippedEmpty: number;
+  format: 'wide' | 'long' | 'unknown';
+  dateFrom: string | null;
+  dateTo: string | null;
+  errors: string[];
+}
+
+const STATUS_ALIASES: Record<string, AttendanceStatus> = {
+  asistio: 'present',
+  asistió: 'present',
+  presente: 'present',
+  present: 'present',
+  asistencia: 'present',
+  ok: 'present',
+  si: 'present',
+  sí: 'present',
+  yes: 'present',
+  p: 'present',
+  a: 'present',
+  '1': 'present',
+  '✓': 'present',
+  check: 'present',
+  falta: 'absent',
+  faltas: 'absent',
+  ausente: 'absent',
+  absent: 'absent',
+  ausencia: 'absent',
+  f: 'absent',
+  '0': 'absent',
+  no: 'absent',
+  '✗': 'absent',
+  x: 'absent',
+  enfermedad: 'sick',
+  enfermo: 'sick',
+  enferma: 'sick',
+  sick: 'sick',
+  baja: 'sick',
+  e: 'sick',
+  retardo: 'late',
+  retardos: 'late',
+  tarde: 'late',
+  late: 'late',
+  delay: 'late',
+  r: 'late',
+  t: 'late',
+  vacaciones: 'vacation',
+  vacacion: 'vacation',
+  vacation: 'vacation',
+  vac: 'vacation',
+  v: 'vacation',
+};
+
+const NAME_HEADERS = new Set([
+  'colaborador',
+  'colaboradores',
+  'empleado',
+  'empleados',
+  'nombre',
+  'nombres',
+  'name',
+  'persona',
+  'trabajador',
+  'miembro',
+]);
+
+const DATE_HEADERS = new Set([
+  'fecha',
+  'fechas',
+  'date',
+  'dia',
+  'día',
+  'day',
+]);
+
+const STATUS_HEADERS = new Set([
+  'estado',
+  'estatus',
+  'status',
+  'asistencia',
+  'tipo',
+  'resultado',
+]);
+
+const TOTAL_HEADERS = new Set([
+  'asistio',
+  'asistió',
+  'faltas',
+  'falta',
+  'enfermedad',
+  'retardos',
+  'retardo',
+  'vacaciones',
+  'total',
+  'totales',
+]);
+
+function normalizeHeader(value: string): string {
+  return normalizeForSearch(value).replace(/[^a-z0-9áéíóúüñ]+/gi, '');
+}
+
+function parseCsvMatrix(text: string): string[][] {
+  const cleaned = text.replace(/^\ufeff/, '').trim();
+  if (!cleaned) return [];
+
+  const firstLine = cleaned.split(/\r?\n/, 1)[0] ?? '';
+  const comma = (firstLine.match(/,/g) ?? []).length;
+  const semi = (firstLine.match(/;/g) ?? []).length;
+  const tab = (firstLine.match(/\t/g) ?? []).length;
+  const delimiter = tab >= comma && tab >= semi ? '\t' : semi > comma ? ';' : ',';
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+
+  const pushCell = () => {
+    row.push(cell.trim());
+    cell = '';
+  };
+  const pushRow = () => {
+    if (row.some((c) => c.length > 0)) rows.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    const next = cleaned[i + 1];
+    if (inQuotes) {
+      if (ch === '"' && next === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') {
+        inQuotes = false;
+      } else {
+        cell += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === delimiter) {
+      pushCell();
+      continue;
+    }
+    if (ch === '\n') {
+      pushCell();
+      pushRow();
+      continue;
+    }
+    if (ch === '\r') continue;
+    cell += ch;
+  }
+  pushCell();
+  pushRow();
+  return rows;
+}
+
+export function parseAttendanceStatus(raw: string): AttendanceStatus | null {
+  const value = raw.trim();
+  if (!value || value === '-' || value === '—' || value === '.') return null;
+  const key = normalizeForSearch(value);
+  if (STATUS_ALIASES[key]) return STATUS_ALIASES[key];
+  const compact = key.replace(/[^a-z0-9]/g, '');
+  if (STATUS_ALIASES[compact]) return STATUS_ALIASES[compact];
+  for (const [alias, status] of Object.entries(STATUS_ALIASES)) {
+    if (alias.length >= 3 && (key.includes(alias) || compact.includes(alias))) {
+      return status;
+    }
+  }
+  return null;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function toDateKey(y: number, m: number, d: number): string | null {
+  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+
+/** Interpreta fechas comunes en MX (DD/MM/YYYY) y headers de día. */
+export function parseAttendanceDateKey(
+  raw: string,
+  fallbackMonthKey?: string,
+): string | null {
+  const value = raw.trim();
+  if (!value) return null;
+
+  const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (iso) return toDateKey(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+
+  const dmy = value.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+  if (dmy) {
+    let y = Number(dmy[3]);
+    if (y < 100) y += 2000;
+    const d = Number(dmy[1]);
+    const m = Number(dmy[2]);
+    // Prefer DD/MM for Mexico; if day>12 swap is already correct as d/m
+    return toDateKey(y, m, d);
+  }
+
+  const monthNames: Record<string, number> = {
+    ene: 1,
+    enero: 1,
+    feb: 2,
+    febrero: 2,
+    mar: 3,
+    marzo: 3,
+    abr: 4,
+    abril: 4,
+    may: 5,
+    mayo: 5,
+    jun: 6,
+    junio: 6,
+    jul: 7,
+    julio: 7,
+    ago: 8,
+    agosto: 8,
+    sep: 9,
+    sept: 9,
+    septiembre: 9,
+    oct: 10,
+    octubre: 10,
+    nov: 11,
+    noviembre: 11,
+    dic: 12,
+    diciembre: 12,
+  };
+  const named = normalizeForSearch(value).match(
+    /^(\d{1,2})\s*(?:de\s+)?([a-z]+)(?:\s+(\d{2,4}))?$/,
+  );
+  if (named) {
+    const month = monthNames[named[2]];
+    if (month) {
+      let y = named[3] ? Number(named[3]) : Number((fallbackMonthKey ?? getMonthKey()).slice(0, 4));
+      if (y < 100) y += 2000;
+      return toDateKey(y, month, Number(named[1]));
+    }
+  }
+
+  // Header solo con día ("3", "03") → usa mes de contexto
+  if (/^\d{1,2}$/.test(value) && fallbackMonthKey) {
+    const [y, m] = fallbackMonthKey.split('-').map(Number);
+    return toDateKey(y, m, Number(value));
+  }
+
+  // "Lun 3", "Mar 12"
+  const dowDay = normalizeForSearch(value).match(
+    /^(lun|mar|mie|mié|jue|vie|sab|sáb|dom)\s*(\d{1,2})$/,
+  );
+  if (dowDay && fallbackMonthKey) {
+    const [y, m] = fallbackMonthKey.split('-').map(Number);
+    return toDateKey(y, m, Number(dowDay[2]));
+  }
+
+  return null;
+}
+
+function matchEmployee(
+  name: string,
+  tasks: EmployeeTask[],
+): EmployeeTask | undefined {
+  const team = tasks.filter((t) => t.employeeId !== 'emp-orlando');
+  const q = normalizeForSearch(name);
+  if (!q) return undefined;
+
+  const exact = team.find((t) => normalizeForSearch(t.employeeName) === q);
+  if (exact) return exact;
+
+  const includes = team.filter(
+    (t) =>
+      fuzzyIncludes(t.employeeName, name) || fuzzyIncludes(name, t.employeeName),
+  );
+  if (includes.length === 1) return includes[0];
+
+  const first = q.split(/\s+/)[0];
+  if (first && first.length >= 3) {
+    const byFirst = team.filter((t) =>
+      normalizeForSearch(t.employeeName).split(/\s+/).includes(first),
+    );
+    if (byFirst.length === 1) return byFirst[0];
+  }
+  return undefined;
+}
+
+function detectFallbackMonth(matrix: string[][]): string {
+  for (const row of matrix.slice(0, 3)) {
+    for (const cell of row.slice(0, 12)) {
+      const key = parseAttendanceDateKey(cell);
+      if (key) return key.slice(0, 7);
+    }
+  }
+  return getMonthKey();
+}
+
+/**
+ * Importa CSV/TSV flexible:
+ * - Matriz (como el reporte): Colaborador | fechas… | totales opcionales
+ * - Lista: Colaborador | Fecha | Estado
+ * Sirve para semana o mes completo; solo actualiza celdas con valor.
+ */
+export function parseAttendanceImport(
+  text: string,
+  tasks: EmployeeTask[],
+): AttendanceImportResult {
+  const matrix = parseCsvMatrix(text);
+  const errors: string[] = [];
+  if (matrix.length < 2) {
+    return {
+      rows: [],
+      unmatchedNames: [],
+      skippedEmpty: 0,
+      format: 'unknown',
+      dateFrom: null,
+      dateTo: null,
+      errors: ['El archivo está vacío o no se pudo leer. Usa CSV (Excel → Guardar como CSV).'],
+    };
+  }
+
+  const header = matrix[0].map((h) => h.trim());
+  const headerNorm = header.map(normalizeHeader);
+  const fallbackMonth = detectFallbackMonth(matrix);
+
+  const nameIdx = headerNorm.findIndex((h) => NAME_HEADERS.has(h));
+  const dateIdx = headerNorm.findIndex((h) => DATE_HEADERS.has(h));
+  const statusIdx = headerNorm.findIndex((h) => STATUS_HEADERS.has(h));
+
+  const rows: AttendanceImportRow[] = [];
+  const unmatched = new Set<string>();
+  let skippedEmpty = 0;
+
+  const pushRow = (
+    emp: EmployeeTask,
+    dateKey: string,
+    status: AttendanceStatus,
+  ) => {
+    rows.push({
+      employeeId: emp.employeeId,
+      employeeName: emp.employeeName,
+      dateKey,
+      monthKey: dateKey.slice(0, 7),
+      status,
+    });
+  };
+
+  // Formato largo: nombre + fecha + estado
+  if (nameIdx >= 0 && dateIdx >= 0 && statusIdx >= 0 && nameIdx !== dateIdx) {
+    for (const line of matrix.slice(1)) {
+      const name = (line[nameIdx] ?? '').trim();
+      const dateRaw = (line[dateIdx] ?? '').trim();
+      const statusRaw = (line[statusIdx] ?? '').trim();
+      if (!name && !dateRaw && !statusRaw) continue;
+      const emp = matchEmployee(name, tasks);
+      if (!emp) {
+        if (name) unmatched.add(name);
+        continue;
+      }
+      const dateKey = parseAttendanceDateKey(dateRaw, fallbackMonth);
+      if (!dateKey) {
+        errors.push(`Fecha no reconocida: "${dateRaw}"`);
+        continue;
+      }
+      const status = parseAttendanceStatus(statusRaw);
+      if (!status) {
+        if (!statusRaw) {
+          skippedEmpty += 1;
+          continue;
+        }
+        errors.push(`Estado no reconocido para ${emp.employeeName}: "${statusRaw}"`);
+        continue;
+      }
+      pushRow(emp, dateKey, status);
+    }
+
+    const dates = rows.map((r) => r.dateKey).sort();
+    return {
+      rows,
+      unmatchedNames: [...unmatched],
+      skippedEmpty,
+      format: 'long',
+      dateFrom: dates[0] ?? null,
+      dateTo: dates[dates.length - 1] ?? null,
+      errors: [...new Set(errors)].slice(0, 8),
+    };
+  }
+
+  // Formato ancho (matriz): primera col = nombre, resto = fechas
+  const col0 = nameIdx >= 0 ? nameIdx : 0;
+  const dateCols: { index: number; dateKey: string }[] = [];
+  for (let i = 0; i < header.length; i++) {
+    if (i === col0) continue;
+    const hn = headerNorm[i];
+    if (TOTAL_HEADERS.has(hn) || STATUS_HEADERS.has(hn) || DATE_HEADERS.has(hn)) continue;
+    const dateKey = parseAttendanceDateKey(header[i], fallbackMonth);
+    if (dateKey) dateCols.push({ index: i, dateKey });
+  }
+
+  if (dateCols.length === 0) {
+    return {
+      rows: [],
+      unmatchedNames: [],
+      skippedEmpty: 0,
+      format: 'unknown',
+      dateFrom: null,
+      dateTo: null,
+      errors: [
+        'No se detectaron columnas de fecha. Usa el reporte de Yaavs o un CSV con Colaborador + fechas (semana o mes).',
+      ],
+    };
+  }
+
+  for (const line of matrix.slice(1)) {
+    const name = (line[col0] ?? '').trim();
+    if (!name) continue;
+    const emp = matchEmployee(name, tasks);
+    if (!emp) {
+      unmatched.add(name);
+      continue;
+    }
+    for (const col of dateCols) {
+      const raw = (line[col.index] ?? '').trim();
+      if (!raw) {
+        skippedEmpty += 1;
+        continue;
+      }
+      const status = parseAttendanceStatus(raw);
+      if (!status) {
+        errors.push(`Estado no reconocido (${emp.employeeName} / ${col.dateKey}): "${raw}"`);
+        continue;
+      }
+      pushRow(emp, col.dateKey, status);
+    }
+  }
+
+  const dates = rows.map((r) => r.dateKey).sort();
+  return {
+    rows,
+    unmatchedNames: [...unmatched],
+    skippedEmpty,
+    format: 'wide',
+    dateFrom: dates[0] ?? null,
+    dateTo: dates[dates.length - 1] ?? null,
+    errors: [...new Set(errors)].slice(0, 8),
+  };
+}
+
+export function mergeAttendanceImport(
+  store: AttendanceStore,
+  rows: AttendanceImportRow[],
+  recordedBy: { id: string; name: string },
+): AttendanceStore {
+  let next = store;
+  for (const row of rows) {
+    next = upsertAttendance(next, {
+      employeeId: row.employeeId,
+      employeeName: row.employeeName,
+      dateKey: row.dateKey,
+      monthKey: row.monthKey,
+      status: row.status,
+      notes: '',
+      recordedById: recordedBy.id,
+      recordedByName: recordedBy.name,
+    });
+  }
+  return next;
 }

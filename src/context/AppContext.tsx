@@ -113,6 +113,7 @@ import {
   loadAttendanceStore,
   saveAttendanceStore,
   upsertAttendance,
+  mergeAttendanceImport,
 } from '../utils/attendance';
 import {
   loadManagerObservations,
@@ -309,6 +310,9 @@ interface AppContextValue {
     status: import('../types').AttendanceStatus;
     notes?: string;
   }) => void;
+  importAttendanceRows: (
+    rows: import('../utils/attendance').AttendanceImportRow[],
+  ) => number;
   trackProjectMinutes: (
     projectId: string,
     minutes: number,
@@ -2999,6 +3003,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [user],
   );
 
+  const importAttendanceRows = useCallback(
+    (rows: import('../utils/attendance').AttendanceImportRow[]) => {
+      if (!user || !canEditAll || rows.length === 0) return 0;
+      setAttendanceStore((prev) =>
+        mergeAttendanceImport(prev, rows, { id: user.id, name: user.name }),
+      );
+      return rows.length;
+    },
+    [user, canEditAll],
+  );
+
   const trackProjectMinutes = useCallback(
     (
       projectId: string,
@@ -3242,6 +3257,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteExtraProject,
       attendanceStore,
       setAttendanceStatus,
+      importAttendanceRows,
       managerObservations,
       getManagerObservation: getManagerObservationFor,
       setManagerObservation,
@@ -3338,6 +3354,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deleteExtraProject,
       attendanceStore,
       setAttendanceStatus,
+      importAttendanceRows,
       managerObservations,
       getManagerObservationFor,
       setManagerObservation,

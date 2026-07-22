@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { useApp } from '../context/AppContext';
+import { useToast } from '../context/ToastContext';
 import { AttendanceMemberPie } from './AttendanceMemberPie';
 import { formatDayMonthLabel, formatDayShortLabel, formatLongDate } from '../utils/formatDate';
 import { getMonthKey, formatMonthLabel } from '../utils/performanceHistory';
@@ -14,8 +15,10 @@ import {
   filterDaysByRange,
   getAttendanceForDay,
   nextAttendanceStatus,
+  parseAttendanceImport,
   summarizeAttendance,
   todayDateKey,
+  type AttendanceImportResult,
 } from '../utils/attendance';
 import type { AttendanceStatus } from '../types';
 import './AttendanceView.css';
@@ -31,14 +34,25 @@ const DAY_STAT_LABELS: Record<AttendanceStatus, string> = {
 };
 
 export function AttendanceView() {
-  const { marketingTasks, attendanceStore, canEditAll, user, setAttendanceStatus } = useApp();
+  const {
+    marketingTasks,
+    attendanceStore,
+    canEditAll,
+    user,
+    setAttendanceStatus,
+    importAttendanceRows,
+  } = useApp();
+  const toast = useToast();
   const currentMonth = getMonthKey();
   const [monthKey, setMonthKey] = useState(currentMonth);
   const [selectedDay, setSelectedDay] = useState(() => defaultSelectedDay(currentMonth));
   const [chartEmployee, setChartEmployee] = useState<string>('all');
   const [chartRangeFrom, setChartRangeFrom] = useState('');
   const [chartRangeTo, setChartRangeTo] = useState('');
+  const [importPreview, setImportPreview] = useState<AttendanceImportResult | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
   const dayStripRef = useRef<HTMLDivElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const team = useMemo(
     () => marketingTasks.filter((t) => t.employeeId !== 'emp-orlando'),
@@ -201,6 +215,42 @@ export function AttendanceView() {
     if (dateKey < chartRangeFrom) setChartRangeFrom(dateKey);
   };
 
+  const handleImportFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !canEditAll) return;
+    setImportBusy(true);
+    try {
+      const text = await file.text();
+      const result = parseAttendanceImport(text, marketingTasks);
+      if (result.rows.length === 0 && result.errors.length > 0) {
+        toast.error(result.errors[0]);
+        return;
+      }
+      if (result.rows.length === 0) {
+        toast.info('No se encontraron asistencias para importar en ese archivo.');
+        return;
+      }
+      setImportPreview(result);
+    } catch {
+      toast.error('No se pudo leer el archivo. Guárdalo como CSV e inténtalo de nuevo.');
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
+  const confirmImport = () => {
+    if (!importPreview?.rows.length) return;
+    const count = importAttendanceRows(importPreview.rows);
+    const firstMonth = importPreview.dateFrom?.slice(0, 7);
+    if (firstMonth) setMonthKey(firstMonth);
+    if (importPreview.dateFrom) setSelectedDay(importPreview.dateFrom);
+    setImportPreview(null);
+    toast.success(
+      `Se actualizaron ${count} registro${count === 1 ? '' : 's'} de asistencia.`,
+    );
+  };
+
   return (
     <div className="attendance-view">
       <header className="attendance-hero">
@@ -208,7 +258,7 @@ export function AttendanceView() {
           <h1 className="attendance-title">Asistencia del área</h1>
           <p className="attendance-sub">
             {canEditAll
-              ? 'Elige un día, revisa quién vino y controla el mes con la gráfica de abajo.'
+              ? 'Marca el día a día o sube el archivo de la puerta (semana o mes) y se actualiza el equipo.'
               : 'Consulta día por día quién asistió y quién no del equipo de Marketing.'}
           </p>
         </div>
@@ -223,15 +273,103 @@ export function AttendanceView() {
               ))}
             </select>
           </label>
+          {canEditAll && (
+            <>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".csv,.txt,.tsv,text/csv,text/plain"
+                className="visually-hidden"
+                onChange={handleImportFile}
+              />
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={importBusy}
+                onClick={() => importInputRef.current?.click()}
+              >
+                {importBusy ? 'Leyendo…' : 'Subir asistencias'}
+              </button>
+            </>
+          )}
           <button
             type="button"
-            className="btn-primary"
+            className="btn-ghost"
             onClick={() => exportAttendanceCsv(attendanceStore, marketingTasks, monthKey)}
           >
             Descargar reporte
           </button>
         </div>
       </header>
+
+      {canEditAll && (
+        <p className="attendance-import-hint">
+          Acepta CSV de la puerta o el reporte de Yaavs: semana o mes completo. En Excel usa
+          «Guardar como → CSV». Estados: Asistió, Falta, Enfermedad, Retardo, Vacaciones (también
+          A/F/E/R/V).
+        </p>
+      )}
+
+      {importPreview && (
+        <div className="attendance-import-overlay" role="presentation">
+          <div
+            className="attendance-import-panel"
+            role="dialog"
+            aria-labelledby="attendance-import-title"
+          >
+            <h3 id="attendance-import-title">Confirmar carga de asistencias</h3>
+            <p>
+              Formato detectado:{' '}
+              <strong>
+                {importPreview.format === 'wide'
+                  ? 'tabla (colaborador × fechas)'
+                  : importPreview.format === 'long'
+                    ? 'lista (colaborador, fecha, estado)'
+                    : 'desconocido'}
+              </strong>
+            </p>
+            <ul className="attendance-import-stats">
+              <li>
+                <strong>{importPreview.rows.length}</strong> registros a actualizar
+              </li>
+              {importPreview.dateFrom && importPreview.dateTo && (
+                <li>
+                  Rango: {formatDayMonthLabel(importPreview.dateFrom)} →{' '}
+                  {formatDayMonthLabel(importPreview.dateTo)}
+                </li>
+              )}
+              {importPreview.skippedEmpty > 0 && (
+                <li>{importPreview.skippedEmpty} celdas vacías (se omiten)</li>
+              )}
+            </ul>
+            {importPreview.unmatchedNames.length > 0 && (
+              <div className="attendance-import-warn">
+                <p>No se encontraron en el equipo:</p>
+                <p>{importPreview.unmatchedNames.slice(0, 8).join(', ')}</p>
+              </div>
+            )}
+            {importPreview.errors.length > 0 && (
+              <div className="attendance-import-warn">
+                {importPreview.errors.map((err) => (
+                  <p key={err}>{err}</p>
+                ))}
+              </div>
+            )}
+            <div className="attendance-import-actions">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setImportPreview(null)}
+              >
+                Cancelar
+              </button>
+              <button type="button" className="btn-primary" onClick={confirmImport}>
+                Aplicar al tablero
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="attendance-stats yaavs-stagger" aria-label="Resumen del mes">
         <div className="attendance-stat attendance-stat--ok">
