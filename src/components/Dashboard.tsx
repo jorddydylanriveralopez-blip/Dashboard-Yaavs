@@ -10,7 +10,6 @@ import { AbsenceReportControl } from './AbsenceReportControl';
 import { InstallPwaSidebarButton } from './InstallPwaSidebarButton';
 import { TechAmbience } from './TechAmbience';
 import { YaavsAssistant } from './YaavsAssistant';
-import { OnboardingTour } from './OnboardingTour';
 import { ProfileModal } from './ProfileModal';
 import { UserAvatar } from './UserAvatar';
 import { PerformanceAlertBanner, PerformanceAlertBadge } from './PerformanceAlertBanner';
@@ -612,14 +611,6 @@ export function Dashboard() {
           <span className="spy-indicator-dot" aria-hidden />
         </button>
       )}
-      {user && (
-        <OnboardingTour
-          userId={user.id}
-          isManager={canEditAll}
-          onNavigate={setView}
-        />
-      )}
-
       <aside className="sidebar sidebar-desktop">
         <div className="sidebar-brand">
           <AbsenceReportControl variant="logo">
