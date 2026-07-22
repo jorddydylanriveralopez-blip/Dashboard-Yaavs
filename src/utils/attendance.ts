@@ -316,7 +316,7 @@ export interface AttendanceImportResult {
   rows: AttendanceImportRow[];
   unmatchedNames: string[];
   skippedEmpty: number;
-  format: 'wide' | 'long' | 'unknown';
+  format: 'wide' | 'long' | 'punch' | 'unknown';
   dateFrom: string | null;
   dateTo: string | null;
   errors: string[];
@@ -578,13 +578,31 @@ export function parseAttendanceDateKey(
   return null;
 }
 
+/** Nombres del checador → colaborador del tablero. */
+const CHECADOR_NAME_HINTS: { pattern: RegExp; employeeId: string }[] = [
+  { pattern: /\bandrea\b/, employeeId: 'emp-andrea' },
+  { pattern: /\broberto\b/, employeeId: 'emp-roberto' },
+  { pattern: /\bjesus\b|\bjesús\b/, employeeId: 'emp-jesus' },
+  { pattern: /\bandres\b|\bandrés\b/, employeeId: 'emp-andres' },
+  { pattern: /\bjuan\s*carlos\b|\btrejo\b/, employeeId: 'emp-juancarlos' },
+  { pattern: /\byared\b/, employeeId: 'emp-yared' },
+  { pattern: /\bjorddy\b|\bdylan\b|\brivera\b/, employeeId: 'emp-jorddy' },
+];
+
 function matchEmployee(
   name: string,
   tasks: EmployeeTask[],
 ): EmployeeTask | undefined {
   const team = tasks.filter((t) => t.employeeId !== 'emp-orlando');
-  const q = normalizeForSearch(name);
+  const q = normalizeForSearch(name).replace(/\./g, ' ');
   if (!q) return undefined;
+
+  for (const hint of CHECADOR_NAME_HINTS) {
+    if (hint.pattern.test(q)) {
+      const hit = team.find((t) => t.employeeId === hint.employeeId);
+      if (hit) return hit;
+    }
+  }
 
   const exact = team.find((t) => normalizeForSearch(t.employeeName) === q);
   if (exact) return exact;
@@ -613,6 +631,154 @@ function detectFallbackMonth(matrix: string[][]): string {
     }
   }
   return getMonthKey();
+}
+
+
+const LATE_AFTER_MINUTES = 9 * 60 + 15; // 09:15
+
+function parsePunchDateTime(raw: string): { dateKey: string; minutes: number } | null {
+  const value = raw.trim();
+  if (!value) return null;
+  const m = value.match(
+    /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:\s+|T)(\d{1,2}):(\d{2})(?::(\d{2}))?/,
+  );
+  if (m) {
+    let y = Number(m[3]);
+    if (y < 100) y += 2000;
+    const dateKey = toDateKey(y, Number(m[2]), Number(m[1]));
+    if (!dateKey) return null;
+    const minutes = Number(m[4]) * 60 + Number(m[5]);
+    return { dateKey, minutes };
+  }
+  const dateKey = parseAttendanceDateKey(value.slice(0, 10));
+  if (!dateKey) return null;
+  const hm = value.match(/(\d{1,2}):(\d{2})/);
+  const minutes = hm ? Number(hm[1]) * 60 + Number(hm[2]) : 9 * 60;
+  return { dateKey, minutes };
+}
+
+/**
+ * Concentrado del checador: ID | Nombre | Tiempo | … | ENTRADA/SALIDA.
+ * Una o más marcas del día → Asistió; entrada después de 09:15 → Retardo.
+ */
+export function parsePunchClockAttendance(
+  matrix: string[][],
+  tasks: EmployeeTask[],
+): AttendanceImportResult {
+  const errors: string[] = [];
+  if (!matrix.length) {
+    return {
+      rows: [],
+      unmatchedNames: [],
+      skippedEmpty: 0,
+      format: 'unknown',
+      dateFrom: null,
+      dateTo: null,
+      errors: ['Archivo vacío.'],
+    };
+  }
+
+  let headerIdx = -1;
+  let nameCol = -1;
+  let timeCol = -1;
+  let stateCol = -1;
+
+  for (let r = 0; r < Math.min(matrix.length, 30); r++) {
+    const norm = matrix[r].map((c) => normalizeHeader(c ?? ''));
+    const n = norm.findIndex((h) => h === 'nombre' || h === 'nombres');
+    const t = norm.findIndex(
+      (h) => h.includes('tiempo') || h === 'fecha' || h === 'fechahora',
+    );
+    const s = norm.findIndex(
+      (h) =>
+        h.includes('estadodetrabajo') ||
+        h === 'estado' ||
+        h === 'tipo' ||
+        h.includes('entrada'),
+    );
+    if (n >= 0 && t >= 0) {
+      headerIdx = r;
+      nameCol = n;
+      timeCol = t;
+      stateCol = s >= 0 ? s : -1;
+      break;
+    }
+  }
+
+  if (headerIdx < 0) {
+    return {
+      rows: [],
+      unmatchedNames: [],
+      skippedEmpty: 0,
+      format: 'unknown',
+      dateFrom: null,
+      dateTo: null,
+      errors: [],
+    };
+  }
+
+  type Agg = { employeeId: string; employeeName: string; entradas: number[]; salidas: number[] };
+  const byDay = new Map<string, Agg>();
+  const unmatched = new Set<string>();
+
+  for (const line of matrix.slice(headerIdx + 1)) {
+    const name = (line[nameCol] ?? '').trim();
+    const timeRaw = (line[timeCol] ?? '').trim();
+    if (!name || !timeRaw) continue;
+    const stateRaw = stateCol >= 0 ? (line[stateCol] ?? '').trim().toUpperCase() : 'ENTRADA';
+    const emp = matchEmployee(name, tasks);
+    if (!emp) {
+      unmatched.add(name);
+      continue;
+    }
+    const parsed = parsePunchDateTime(timeRaw);
+    if (!parsed) {
+      errors.push(`Fecha/hora no reconocida: "${timeRaw}"`);
+      continue;
+    }
+    const key = `${emp.employeeId}::${parsed.dateKey}`;
+    let agg = byDay.get(key);
+    if (!agg) {
+      agg = {
+        employeeId: emp.employeeId,
+        employeeName: emp.employeeName,
+        entradas: [],
+        salidas: [],
+      };
+      byDay.set(key, agg);
+    }
+    if (stateRaw.includes('SALIDA')) agg.salidas.push(parsed.minutes);
+    else agg.entradas.push(parsed.minutes);
+  }
+
+  const rows: AttendanceImportRow[] = [];
+  for (const [key, agg] of byDay) {
+    const dateKey = key.split('::')[1];
+    if (!agg.entradas.length && !agg.salidas.length) continue;
+    let status: AttendanceStatus = 'present';
+    if (agg.entradas.length) {
+      const first = Math.min(...agg.entradas);
+      if (first > LATE_AFTER_MINUTES) status = 'late';
+    }
+    rows.push({
+      employeeId: agg.employeeId,
+      employeeName: agg.employeeName,
+      dateKey,
+      monthKey: dateKey.slice(0, 7),
+      status,
+    });
+  }
+
+  const dates = rows.map((r) => r.dateKey).sort();
+  return {
+    rows,
+    unmatchedNames: [...unmatched],
+    skippedEmpty: 0,
+    format: 'punch',
+    dateFrom: dates[0] ?? null,
+    dateTo: dates[dates.length - 1] ?? null,
+    errors: [...new Set(errors)].slice(0, 8),
+  };
 }
 
 /**

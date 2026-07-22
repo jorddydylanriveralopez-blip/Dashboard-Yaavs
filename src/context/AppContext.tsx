@@ -122,6 +122,10 @@ import {
   upsertAttendance,
   mergeAttendanceImport,
 } from '../utils/attendance';
+import {
+  ATTENDANCE_CHECADOR_SEED_ROWS,
+  ATTENDANCE_CHECADOR_SEED_VERSION,
+} from '../data/attendanceChecadorSeed';
 import { MAX_PROGRESS_FILES } from '../utils/fileAttachments';
 import {
   formatOvertimeShort,
@@ -515,6 +519,11 @@ function softDedupeProjectsByNameAndCollaborators<
 >(projects: T[]): T[] {
   const byKey = new Map<string, T>();
   for (const project of projects) {
+    // Concluidos NUNCA se colapsan: cada uno debe seguir visible en Concluidos.
+    if (project.status === 'terminado') {
+      byKey.set(`done:${project.id}`, project);
+      continue;
+    }
     const name = normalizeExtraProjectName(project.projectName ?? '');
     if (!name) {
       byKey.set(`id:${project.id}`, project);
@@ -529,14 +538,6 @@ function softDedupeProjectsByNameAndCollaborators<
       byKey.set(key, project);
       continue;
     }
-    const existingDone = existing.status === 'terminado';
-    const nextDone = project.status === 'terminado';
-    // No perder concluidos al colapsar duplicados blandos.
-    if (nextDone && !existingDone) {
-      byKey.set(key, project);
-      continue;
-    }
-    if (existingDone && !nextDone) continue;
     const existingExtra = existing.id.startsWith('extra-project-');
     const nextExtra = project.id.startsWith('extra-project-');
     const existingNewer =
@@ -551,6 +552,29 @@ function softDedupeProjectsByNameAndCollaborators<
   return [...byKey.values()];
 }
 
+
+
+function attendanceRecordKey(r: { employeeId: string; dateKey: string }): string {
+  return `${r.employeeId}::${r.dateKey}`;
+}
+
+function mergeAttendanceStores(
+  local: AttendanceStore | undefined,
+  remote: AttendanceStore | undefined,
+): AttendanceStore {
+  const byKey = new Map<string, import('../types').AttendanceRecord>();
+  for (const r of remote?.records ?? []) {
+    byKey.set(attendanceRecordKey(r), r);
+  }
+  for (const r of local?.records ?? []) {
+    const k = attendanceRecordKey(r);
+    const cur = byKey.get(k);
+    if (!cur || (r.updatedAt || '') >= (cur.updatedAt || '')) {
+      byKey.set(k, r);
+    }
+  }
+  return { records: [...byKey.values()] };
+}
 
 /** Une concluidos del remoto al payload local para no borrarlos en el PUT. */
 function mergeCompletedIntoSyncState(
@@ -1027,6 +1051,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveAttendanceStore(attendanceStore);
   }, [attendanceStore]);
 
+  // Carga inicial del concentrado del checador (una sola vez por navegador).
+  useEffect(() => {
+    const key = `empresa-board-attendance-checador-v${ATTENDANCE_CHECADOR_SEED_VERSION}`;
+    try {
+      if (localStorage.getItem(key) === '1') return;
+    } catch {
+      return;
+    }
+    setAttendanceStore((prev) => {
+      const merged = mergeAttendanceImport(
+        prev,
+        ATTENDANCE_CHECADOR_SEED_ROWS,
+        { id: 'system-checador', name: 'Checador' },
+      );
+      try {
+        localStorage.setItem(key, '1');
+      } catch {
+        /* ignore */
+      }
+      return merged;
+    });
+  }, []);
+
+
+
   useEffect(() => {
     localStorage.setItem(MANAGER_OBSERVATIONS_KEY, JSON.stringify(managerObservations));
   }, [managerObservations]);
@@ -1256,6 +1305,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       deletedProjectIds: deleted,
       extraProjects,
       officeOvertime,
+      attendanceStore,
       updatedAt: new Date().toISOString(),
     };
   }, [
@@ -1269,6 +1319,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     socialAccounts,
     extraProjects,
     officeOvertime,
+    attendanceStore,
   ]);
 
   const schedulePush = useCallback((opts?: { immediate?: boolean }) => {
@@ -1389,6 +1440,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!changed) return prev;
         return { ...prev, projects };
       });
+      if (remote.attendanceStore?.records?.length) {
+        setAttendanceStore((prev) => mergeAttendanceStores(prev, remote.attendanceStore));
+      }
     };
 
     if (!forceTakeRemote && localEditAt.current && remote.updatedAt < localEditAt.current) {
@@ -1649,6 +1703,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
+    if (remote.attendanceStore?.records) {
+      setAttendanceStore((prev) => {
+        const merged = mergeAttendanceStores(prev, remote.attendanceStore);
+        if (merged.records.length !== prev.records.length) preservedLocal = true;
+        return merged;
+      });
+    }
+
     if (preservedLocal) needsRepushAfterRemote.current = true;
 
     window.setTimeout(() => {
@@ -1764,6 +1826,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deletedProjectIds,
     extraProjects,
     officeOvertime,
+    attendanceStore,
     schedulePush,
   ]);
 
@@ -3771,8 +3834,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           recordedByName: user.name,
         }),
       );
+      schedulePush({ immediate: true });
     },
-    [user],
+    [user, schedulePush],
   );
 
   const importAttendanceRows = useCallback(
@@ -3781,9 +3845,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAttendanceStore((prev) =>
         mergeAttendanceImport(prev, rows, { id: user.id, name: user.name }),
       );
+      schedulePush({ immediate: true });
       return rows.length;
     },
-    [user, canEditAll],
+    [user, canEditAll, schedulePush],
   );
 
   const trackProjectMinutes = useCallback(

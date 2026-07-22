@@ -623,5 +623,7 @@ export interface AppSyncState {
   extraProjects?: ExtraProjectEntry[];
   /** Tiempo extra en oficina por empleado. */
   officeOvertime?: OfficeOvertimeStore;
+  /** Asistencias del área (sincronizadas celular ↔ web). */
+  attendanceStore?: AttendanceStore;
   updatedAt: string;
 }

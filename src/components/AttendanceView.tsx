@@ -15,11 +15,11 @@ import {
   filterDaysByRange,
   getAttendanceForDay,
   nextAttendanceStatus,
-  parseAttendanceImport,
   summarizeAttendance,
   todayDateKey,
   type AttendanceImportResult,
 } from '../utils/attendance';
+import { parseAttendanceFile } from '../utils/attendanceExcel';
 import type { AttendanceStatus } from '../types';
 import './AttendanceView.css';
 
@@ -221,8 +221,7 @@ export function AttendanceView() {
     if (!file || !canEditAll) return;
     setImportBusy(true);
     try {
-      const text = await file.text();
-      const result = parseAttendanceImport(text, marketingTasks);
+      const result = await parseAttendanceFile(file, marketingTasks);
       if (result.rows.length === 0 && result.errors.length > 0) {
         toast.error(result.errors[0]);
         return;
@@ -233,7 +232,7 @@ export function AttendanceView() {
       }
       setImportPreview(result);
     } catch {
-      toast.error('No se pudo leer el archivo. Guárdalo como CSV e inténtalo de nuevo.');
+      toast.error('No se pudo leer el archivo. Prueba con .xlsx del checador o CSV.');
     } finally {
       setImportBusy(false);
     }
@@ -278,7 +277,7 @@ export function AttendanceView() {
               <input
                 ref={importInputRef}
                 type="file"
-                accept=".csv,.txt,.tsv,text/csv,text/plain"
+                accept=".xlsx,.xls,.csv,.txt,.tsv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain"
                 className="visually-hidden"
                 onChange={handleImportFile}
               />
@@ -288,7 +287,7 @@ export function AttendanceView() {
                 disabled={importBusy}
                 onClick={() => importInputRef.current?.click()}
               >
-                {importBusy ? 'Leyendo…' : 'Subir asistencias'}
+                {importBusy ? 'Leyendo…' : 'Subir Excel / CSV'}
               </button>
             </>
           )}
@@ -304,9 +303,8 @@ export function AttendanceView() {
 
       {canEditAll && (
         <p className="attendance-import-hint">
-          Acepta CSV de la puerta o el reporte de Yaavs: semana o mes completo. En Excel usa
-          «Guardar como → CSV». Estados: Asistió, Falta, Enfermedad, Retardo, Vacaciones (también
-          A/F/E/R/V).
+          Sube el Excel del checador (ENTRADA/SALIDA) o un CSV de Yaavs. Puedes ir cargando
+          actualizaciones: se mezclan con lo ya registrado. Entrada después de 09:15 = retardo.
         </p>
       )}
 
