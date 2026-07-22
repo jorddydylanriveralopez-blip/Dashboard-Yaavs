@@ -1096,9 +1096,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const deleted = deletedProjectIdsRef.current;
     const leanBoard: BoardState = {
       ...board,
-      projects: (board.projects ?? [])
-        .filter((p) => !deleted[p.id])
-        .map((p) => {
+      projects: softDedupeProjectsByNameAndCollaborators(
+        (board.projects ?? []).filter((p) => !deleted[p.id]),
+      ).map((p) => {
           const { attachments, ...base } = { ...p, ...sanitizeProjectCollaborators(p) };
           if (!attachments?.length) return base;
           return { ...base, attachmentCount: attachments.length };
@@ -1285,9 +1285,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      const projects = [...byId.values()]
-        .filter((p) => !deleted[p.id])
-        .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      const projects = softDedupeProjectsByNameAndCollaborators(
+        [...byId.values()].filter((p) => !deleted[p.id]),
+      ).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
 
       // Mezclar tareas: no borrar trabajo recién aceptado por un pull viejo.
       const remoteTasks = (remote.board.tasks ?? []).filter(
@@ -1397,9 +1397,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
             preservedLocal = true;
           }
         }
-        return [...byId.values()].sort((a, b) =>
-          (b.doneDate || '').localeCompare(a.doneDate || ''),
-        );
+        return [...byId.values()]
+          .map((entry) => {
+            // Si el proyecto del board ya está tombstoned, no revivir el link.
+            if (entry.linkedProjectId && deleted[entry.linkedProjectId]) {
+              return {
+                ...entry,
+                linkedProjectId: undefined,
+                status: 'rejected' as const,
+                rejectReason:
+                  entry.rejectReason || 'Proyecto eliminado del tablero',
+              };
+            }
+            return entry;
+          })
+          .sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
       });
     }
 
@@ -2355,18 +2367,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? Math.max(1, Math.round(input.minutes))
           : undefined;
       const now = new Date().toISOString();
+      const projectName = input.projectName.trim();
+      if (!projectName) return null;
+
+      const nameKey = normalizeExtraProjectName(projectName);
+      const collabKey = collaboratorKey(collaborators);
+      // Evitar duplicados: mismo nombre + mismos colaboradores (pendiente o aprobado).
+      const existingDup = extraProjects.find((e) => {
+        if ((e.status ?? 'approved') === 'rejected') return false;
+        if (normalizeExtraProjectName(e.projectName) !== nameKey) return false;
+        const eCollab = (e.employeeIds ?? [e.employeeId])
+          .map(collaboratorForEmployeeId)
+          .filter(Boolean) as Collaborator[];
+        return collaboratorKey(eCollab) === collabKey;
+      });
+      if (existingDup) return existingDup;
+
       // Orlando/admin puede publicar directo; el resto espera aprobación.
       const autoApprove = canEditAll;
-      const projectId = autoApprove
-        ? `extra-project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-        : undefined;
+      const entryId = `extra-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const projectId = autoApprove ? boardIdForExtraEntry(entryId) : undefined;
       const entry: ExtraProjectEntry = {
-        id: `extra-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: entryId,
         employeeId: employeeIds[0],
         employeeName: employeeNames[0],
         employeeIds,
         employeeNames,
-        projectName: input.projectName.trim(),
+        projectName,
         minutes,
         doneDate: input.doneDate || now.slice(0, 10),
         notes: input.notes?.trim() || undefined,
@@ -2378,7 +2405,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         createdAt: now,
         updatedAt: now,
       };
-      if (!entry.projectName) return null;
 
       setExtraProjects((prev) => [entry, ...prev]);
 
@@ -2392,10 +2418,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           projectId,
           now,
         );
-        setBoard((prev) => ({
-          ...prev,
-          projects: [activeProject, ...(prev.projects ?? [])],
-        }));
+        setBoard((prev) => {
+          const withoutDupes = softDedupeProjectsByNameAndCollaborators(
+            (prev.projects ?? []).filter((p) => p.id !== projectId),
+          ).filter((p) => {
+            if (normalizeExtraProjectName(p.projectName) !== nameKey) return true;
+            return collaboratorKey(p.collaborators) !== collabKey;
+          });
+          return {
+            ...prev,
+            projects: [activeProject, ...withoutDupes],
+          };
+        });
         logActivity(
           'project_progress',
           `${user.name} registró proyecto extra «${entry.projectName}» para ${employeeNames.join(', ')}${
@@ -2426,6 +2460,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       canEditAll,
       board.tasks,
       activeUsers,
+      extraProjects,
       logActivity,
       buildExtraActiveProject,
     ],
@@ -2552,6 +2587,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return false;
       }
       setExtraProjects((prev) => prev.filter((e) => e.id !== id));
+      // Si ya estaba en el tablero, borrarlo (tombstone) para que no reaparezca.
+      const linkedId = target.linkedProjectId ?? boardIdForExtraEntry(target.id);
+      if (linkedId) {
+        const now = new Date().toISOString();
+        const nextDeleted = mergeDeletedProjectIds(deletedProjectIdsRef.current, {
+          [linkedId]: now,
+        });
+        deletedProjectIdsRef.current = nextDeleted;
+        setDeletedProjectIds(nextDeleted);
+        setBoard((prev) => ({
+          ...prev,
+          projects: (prev.projects ?? []).filter((p) => p.id !== linkedId),
+        }));
+        setAssignments((prev) =>
+          prev.map((a) =>
+            a.brief?.projectId === linkedId && a.status === 'pending'
+              ? { ...a, status: 'cancelled' as const, respondedAt: now }
+              : a,
+          ),
+        );
+      }
       return true;
     },
     [user, canEditAll, extraProjects],
@@ -2579,8 +2635,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const now = new Date().toISOString();
       const projectId =
-        current.linkedProjectId ??
-        `extra-project-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        current.linkedProjectId ?? boardIdForExtraEntry(current.id);
       const next: ExtraProjectEntry = {
         ...current,
         status: 'approved',
@@ -2605,11 +2660,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         prev.map((entry) => (entry.id === id ? next : entry)),
       );
       setBoard((prev) => {
-        const exists = (prev.projects ?? []).some((p) => p.id === projectId);
+        const nameKey = normalizeExtraProjectName(next.projectName);
+        const collabKey = collaboratorKey(collaborators);
+        const cleaned = softDedupeProjectsByNameAndCollaborators(
+          (prev.projects ?? []).filter((p) => {
+            if (p.id === projectId) return true;
+            if (deletedProjectIdsRef.current[p.id]) return false;
+            if (normalizeExtraProjectName(p.projectName) !== nameKey) return true;
+            return collaboratorKey(p.collaborators) !== collabKey;
+          }),
+        );
+        const exists = cleaned.some((p) => p.id === projectId);
         return {
           ...prev,
           projects: exists
-            ? (prev.projects ?? []).map((p) =>
+            ? cleaned.map((p) =>
                 p.id === projectId
                   ? {
                       ...p,
@@ -2629,7 +2694,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     }
                   : p,
               )
-            : [activeProject, ...(prev.projects ?? [])],
+            : [activeProject, ...cleaned],
         };
       });
       logActivity(

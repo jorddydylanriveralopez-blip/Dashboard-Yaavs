@@ -100,6 +100,44 @@ function wouldWipeProjects(incoming, existing) {
   return false;
 }
 
+const DELETED_PROJECT_TTL_MS = 1000 * 60 * 60 * 24 * 90; // 90 días
+
+function pruneDeletedProjectIds(map, now = Date.now()) {
+  const next = {};
+  if (!map || typeof map !== 'object') return next;
+  for (const [id, at] of Object.entries(map)) {
+    const ts = Date.parse(String(at));
+    if (!Number.isFinite(ts) || now - ts < DELETED_PROJECT_TTL_MS) {
+      next[id] = at;
+    }
+  }
+  return next;
+}
+
+function mergeDeletedProjectIds(...maps) {
+  const merged = {};
+  for (const map of maps) {
+    if (!map || typeof map !== 'object') continue;
+    for (const [id, at] of Object.entries(map)) {
+      if (!merged[id] || String(at) > String(merged[id])) merged[id] = at;
+    }
+  }
+  return pruneDeletedProjectIds(merged);
+}
+
+function stripDeletedProjects(state, deletedProjectIds) {
+  const projects = Array.isArray(state?.board?.projects) ? state.board.projects : [];
+  const live = projects.filter((p) => p?.id && !deletedProjectIds[p.id]);
+  return {
+    ...state,
+    board: {
+      ...(state?.board ?? {}),
+      projects: live,
+    },
+    deletedProjectIds,
+  };
+}
+
 function preferRicherState(a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -272,10 +310,20 @@ export async function loadAppState() {
  * Rechaza un tablero vacío que pisaría datos existentes (salvo allowEmpty).
  */
 export async function saveAppState(body, { allowEmpty = false } = {}) {
-  const state = { ...body, updatedAt: new Date().toISOString() };
+  const existing = await loadExistingState();
+
+  // Unir tombstones: un delete en cualquier cliente debe sobrevivir al push de otro.
+  const deletedProjectIds = mergeDeletedProjectIds(
+    existing?.deletedProjectIds,
+    body?.deletedProjectIds,
+  );
+
+  let state = stripDeletedProjects(
+    { ...body, updatedAt: new Date().toISOString() },
+    deletedProjectIds,
+  );
 
   if (!allowEmpty && !isMeaningfulState(state)) {
-    const existing = await loadExistingState();
     if (isMeaningfulState(existing)) {
       throw new Error(
         'Se rechazó guardar un tablero vacío sobre datos existentes. Usa allowEmpty si es intencional.',
@@ -283,11 +331,18 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
     }
   }
 
-  // Protección extra: no pisar un tablero con muchos proyectos con uno casi vacío
-  // (aunque todavía tenga tareas y pase isMeaningfulState).
-  if (!allowEmpty) {
-    const existing = await loadExistingState();
-    if (wouldWipeProjects(state, existing)) {
+  // Protección: no pisar un tablero rico con uno casi vacío.
+  // Un borrado legítimo (tombstones nuevos que explican la baja) sí se permite.
+  if (!allowEmpty && existing && wouldWipeProjects(state, existing)) {
+    const existingDeleted = existing.deletedProjectIds || {};
+    const newlyDeleted = Object.keys(deletedProjectIds).filter(
+      (id) => !existingDeleted[id],
+    );
+    const existingIds = new Set(
+      (existing.board?.projects || []).map((p) => p?.id).filter(Boolean),
+    );
+    const explainedByTombstones = newlyDeleted.some((id) => existingIds.has(id));
+    if (!explainedByTombstones && newlyDeleted.length === 0) {
       throw new Error(
         'Se rechazó guardar: el estado nuevo borraría proyectos existentes. Usa allowEmpty si es intencional.',
       );
