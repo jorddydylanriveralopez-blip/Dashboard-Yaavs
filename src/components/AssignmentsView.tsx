@@ -60,6 +60,7 @@ export function AssignmentsView() {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const assignable = useMemo(
     () => assignableMarketingTasks(board.tasks, activeUsers),
@@ -229,46 +230,48 @@ export function AssignmentsView() {
       {canEditAll && (
         <div className="assign-manager-layout">
           <section className="assign-section assign-compose">
-            <h2>Enviar indicación al equipo</h2>
-            <p className="assign-hint">
-              Describe qué debe hacer la persona, la fecha límite y adjunta archivos si hace falta.
-            </p>
-            <form className="assign-form" onSubmit={handleSend}>
-              <label>
-                Colaborador(es)
+            <h2>Nueva indicación</h2>
+            <form className="assign-form assign-form--composer" onSubmit={handleSend}>
+              <label className="assign-field">
+                Para
                 <EmployeeMultiSelect
                   assignable={assignable}
                   values={employeeIds}
                   onChange={setEmployeeIds}
+                  variant="chips"
                 />
                 {selectedWorkload && (
                   <span
                     className={`assign-workload-hint${selectedWorkload.allowed ? '' : ' assign-workload-hint--full'}`}
                   >
-                    Carga actual: {workloadLabel(selectedWorkload)} ·{' '}
+                    Carga: {workloadLabel(selectedWorkload)} ·{' '}
                     {selectedWorkload.current.projects} proyecto
-                    {selectedWorkload.current.projects === 1 ? '' : 's'} activo
                     {selectedWorkload.current.projects === 1 ? '' : 's'}
-                    {!selectedWorkload.allowed && ' — límite alcanzado (pedirá contraseña)'}
+                    {!selectedWorkload.allowed && ' — límite (pedirá contraseña)'}
                   </span>
                 )}
               </label>
-              <label>
+              <label className="assign-field assign-field--main">
                 Qué debe hacer
                 <SpellCheckTextarea
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  rows={2}
+                  rows={3}
                   required
+                  placeholder="Describe la tarea con claridad…"
                 />
               </label>
-              <label>
+              <label className="assign-field">
                 Objetivo
-                <SpellCheckInput value={objective} onChange={(e) => setObjective(e.target.value)} />
+                <SpellCheckInput
+                  value={objective}
+                  onChange={(e) => setObjective(e.target.value)}
+                  placeholder="Resultado esperado (opcional)"
+                />
               </label>
-              <div className="assign-form-row">
-                <label>
-                  Fecha límite
+              <div className="assign-composer-bar">
+                <label className="assign-field">
+                  Fecha
                   <input
                     type="date"
                     value={dueDate}
@@ -276,7 +279,7 @@ export function AssignmentsView() {
                     required
                   />
                 </label>
-                <label>
+                <label className="assign-field">
                   Prioridad
                   <select
                     value={priority}
@@ -289,53 +292,69 @@ export function AssignmentsView() {
                     <option value="alta">Alta</option>
                   </select>
                 </label>
+                <button type="submit" className="btn-primary assign-composer-send">
+                  Enviar
+                </button>
               </div>
-              <div className="assign-attachments-field">
-                <span className="assign-attachments-field-label">Archivos e imágenes</span>
-                <p className="assign-attachments-field-hint">
-                  Briefs, mockups o PDFs (opcional).
-                </p>
-                <FileAttachmentsEditor
-                  attachments={attachments}
-                  onChange={setAttachments}
-                  onError={(msg) => toast.info(msg)}
-                  onSuccess={(msg) => toast.success(msg)}
-                  enableLibrary
-                />
+              <div className="assign-more">
+                <button
+                  type="button"
+                  className="assign-more-toggle"
+                  aria-expanded={moreOpen}
+                  onClick={() => setMoreOpen((v) => !v)}
+                >
+                  {moreOpen ? 'Ocultar opciones' : 'Más opciones'}
+                  {(attachments.length > 0 || notes.trim() || attachmentUrl.trim()) && (
+                    <span className="assign-more-dot" aria-hidden="true" />
+                  )}
+                </button>
+                {moreOpen && (
+                  <div className="assign-more-body">
+                    <div className="assign-attachments-field assign-attachments-field--slim">
+                      <span className="assign-attachments-field-label">Archivos</span>
+                      <FileAttachmentsEditor
+                        attachments={attachments}
+                        onChange={setAttachments}
+                        onError={(msg) => toast.info(msg)}
+                        onSuccess={(msg) => toast.success(msg)}
+                        enableLibrary
+                      />
+                    </div>
+                    <label className="assign-field">
+                      Enlace (Figma, Drive…)
+                      <input
+                        type="url"
+                        value={attachmentUrl}
+                        onChange={(e) => setAttachmentUrl(e.target.value)}
+                        placeholder="https://…"
+                      />
+                    </label>
+                    <label className="assign-field">
+                      Notas
+                      <SpellCheckTextarea
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        rows={2}
+                        placeholder="Contexto extra (opcional)"
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
-              <label>
-                Enlace externo (Figma, Drive…)
-                <input
-                  type="url"
-                  value={attachmentUrl}
-                  onChange={(e) => setAttachmentUrl(e.target.value)}
-                  placeholder="https://…"
-                />
-              </label>
-              <label>
-                Notas
-                <SpellCheckTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-              </label>
-              <button type="submit" className="btn-primary">
-                Enviar indicación
-              </button>
             </form>
           </section>
 
           <section className="assign-section assign-pending-panel">
             <h2>
-              Indicaciones pendientes
+              Pendientes
               {managerList.length > 0 && (
                 <span className="assign-badge">{managerList.length}</span>
               )}
             </h2>
-            <p className="assign-hint">
-              Al aceptar, rechazar o cancelar, la indicación desaparece del listado.
-            </p>
             {managerList.length === 0 ? (
-              <p className="assign-empty">No hay indicaciones pendientes.</p>
+              <p className="assign-empty">Nada pendiente de aceptar.</p>
             ) : (
-              <ul className="assign-list assign-list--scroll">
+              <ul className="assign-list assign-list--scroll assign-list--inbox">
                 {managerList.map((a) => (
                   <AssignmentCard
                     key={a.id}
@@ -458,11 +477,29 @@ function AssignmentCard({
     minute: '2-digit',
   });
 
+  const dueLabel = (() => {
+    const raw = assignment.dueDate?.trim();
+    if (!raw) return 'Sin fecha';
+    const parsed = new Date(`${raw}T12:00:00`);
+    if (Number.isNaN(parsed.getTime())) return raw;
+    return parsed.toLocaleDateString('es-MX', {
+      day: 'numeric',
+      month: 'short',
+    });
+  })();
+
   const titleText =
     assignment.title.trim() ||
     assignment.objective?.trim() ||
     assignment.brief?.projectName?.trim() ||
     'Sin título';
+
+  const avatar = (() => {
+    const parts = assignment.employeeName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  })();
 
   return (
     <li
@@ -474,6 +511,11 @@ function AssignmentCard({
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
+        {compact && (
+          <span className="assign-card-avatar" aria-hidden="true">
+            {avatar}
+          </span>
+        )}
         <div className="assign-card-header-main">
           {!compact && (
             <div className="assign-card-top">
@@ -491,9 +533,9 @@ function AssignmentCard({
               <>
                 <strong>{assignment.employeeName}</strong>
                 <span className="assign-card-dot">·</span>
-                Entrega {assignment.dueDate}
+                {dueLabel}
                 <span className="assign-card-dot">·</span>
-                <span className={`assign-priority-inline assign-priority-inline--${assignment.priority}`}>
+                <span className={`assign-priority-chip assign-priority-chip--${assignment.priority}`}>
                   {PRIORITY_LABELS[assignment.priority]}
                 </span>
               </>
@@ -505,11 +547,6 @@ function AssignmentCard({
             )}
           </p>
         </div>
-        {compact && (
-          <span className={`assign-status assign-status-${assignment.status} assign-status--pill`}>
-            Pendiente
-          </span>
-        )}
         <span className="assign-card-chevron" aria-hidden="true">
           ▾
         </span>

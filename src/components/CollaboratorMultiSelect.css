@@ -42,3 +42,82 @@
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
 }
+
+/* Chip picker (composer) */
+.collab-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.collab-chips--disabled {
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.collab-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px 4px 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.collab-chip--all {
+  padding: 6px 12px;
+}
+
+.collab-chip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-surface));
+}
+
+.collab-chip--on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, white);
+  color: var(--yaavs-ink, #0f172a);
+}
+
+.collab-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.collab-chip-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 18%, #e2e8f0);
+  color: var(--accent);
+  font-size: 0.625rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+.collab-chip--on .collab-chip-avatar {
+  background: var(--accent);
+  color: #fff;
+}
+
+.collab-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 9.5rem;
+}
