@@ -511,6 +511,9 @@ function AssignmentCard({
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
+        {compact && assignment.status === 'pending' && (
+          <span className="assign-card-pending-dot" title="Pendiente" aria-hidden="true" />
+        )}
         {compact && (
           <span className="assign-card-avatar" aria-hidden="true">
             {avatar}
