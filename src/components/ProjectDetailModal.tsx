@@ -43,16 +43,15 @@ import {
   hoursPaceBarColor,
   hoursProgressPercent,
 } from '../utils/projectHours';
-import { CollaboratorMultiSelect } from './CollaboratorMultiSelect';
 import { EmployeeMultiSelect } from './EmployeeMultiSelect';
 import { ProjectTimelineCountdown } from './ProjectTimelineCountdown';
 import {
   getProjectCollaborators,
-  labelForProjectCollaborators,
-  normalizeProjectCollaborators,
+  patchForCollaboratorsChange,
 } from '../utils/projectCollaborators';
 import {
   canEmployeeCompleteProject,
+  collaboratorForEmployeeId,
   projectNeedsAcceptance,
   projectVisibleToUser,
 } from '../utils/collaboratorMap';
@@ -184,9 +183,12 @@ export function ProjectDetailModal({
 
   // No auto-cerrar si el proyecto "desaparece" un instante por sync.
 
-  const projectCollaborators = p ? getProjectCollaborators(p) : [];
-
+  // Destinatarios: en borrador empiezan vacíos; en proyecto guardado, según colaboradores.
   useEffect(() => {
+    if (isDraft) {
+      setAssignToIds([]);
+      return;
+    }
     if (!p) return;
     const collabs = getProjectCollaborators(p);
     if (collabs.includes('todos')) {
@@ -197,7 +199,9 @@ export function ProjectDetailModal({
       .map((slug) => employeeIdForCollaborator(slug, activeUsers))
       .filter((id): id is string => Boolean(id));
     setAssignToIds(ids);
-  }, [projectId, p, assignable, activeUsers]);
+    // Solo al abrir / cambiar de proyecto (no en cada tecleo del borrador).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- p deliberadamente omitido en borrador
+  }, [projectId, isDraft, assignable, activeUsers]);
 
   useEffect(() => {
     if (isDraft) return;
@@ -379,8 +383,62 @@ export function ProjectDetailModal({
     if (ok) deleteProjectProgress(projectId, updateId);
   };
 
+  const collaboratorsFromAssignIds = () => {
+    const slugs = assignToIds
+      .map((id) => collaboratorForEmployeeId(id))
+      .filter((slug): slug is NonNullable<typeof slug> => Boolean(slug));
+    if (!slugs.length) {
+      return { collaborator: 'todos' as const, collaborators: ['todos' as const] };
+    }
+    if (slugs.length === assignable.length && assignable.length > 0) {
+      return patchForCollaboratorsChange(['todos']);
+    }
+    return patchForCollaboratorsChange(slugs);
+  };
+
+  const persistDraftProject = () => {
+    if (!draft) return null;
+    const now = new Date().toISOString();
+    const today = now.slice(0, 10);
+    const projectForSave: CreativeProject = {
+      ...draft,
+      ...collaboratorsFromAssignIds(),
+      updatedAt: now,
+      finishedDate: draft.finishedDate || today,
+      completedAt: draft.completedAt || (draft.status === 'terminado' ? now : undefined),
+      completedByName:
+        draft.completedByName ||
+        (draft.status === 'terminado' ? user?.name ?? user?.username : undefined),
+    };
+    commitProject(projectForSave);
+    if (projectAttachments.length > 0) {
+      void persistProjectAttachments(projectForSave.id, projectAttachments, (id, patch) =>
+        updateProject(id, patch),
+      );
+    }
+    return projectForSave;
+  };
+
+  /** Borrador ya marcado como Concluido: publicar en Concluidos sin forzar indicación. */
+  const handleSaveCompletedDraft = () => {
+    if (!p || !isDraft) return;
+    if (!p.projectName.trim()) {
+      toast.info('Pon un nombre al proyecto antes de guardarlo.');
+      return;
+    }
+    const saved = persistDraftProject();
+    if (!saved) return;
+    toast.success(`«${saved.projectName.trim()}» guardado en Concluidos`);
+    goToCompletedProjects();
+    onClose();
+  };
+
   const handleSendAssignment = () => {
     if (!p) return;
+    if (isDraft && p.status === 'terminado') {
+      handleSaveCompletedDraft();
+      return;
+    }
     if (assignToIds.length === 0) {
       toast.info('Elige a quién enviar la indicación.');
       return;
@@ -392,14 +450,9 @@ export function ProjectDetailModal({
 
     let projectForSend = p;
     if (isDraft && draft) {
-      const now = new Date().toISOString();
-      projectForSend = { ...draft, updatedAt: now };
-      commitProject(projectForSend);
-      if (projectAttachments.length > 0) {
-        void persistProjectAttachments(projectForSend.id, projectAttachments, (id, patch) =>
-          updateProject(id, patch),
-        );
-      }
+      const saved = persistDraftProject();
+      if (!saved) return;
+      projectForSend = saved;
     }
 
     const recipients = assignable.filter((t) => assignToIds.includes(t.employeeId));
@@ -438,8 +491,15 @@ export function ProjectDetailModal({
     }
 
     const name = p.projectName.trim();
+    const collabPatch = collaboratorsFromAssignIds();
+    const slugs = (collabPatch.collaborators ?? []).filter((c) => c !== 'todos');
+    if (collabPatch.collaborators?.includes('todos')) {
+      assignProjectCollaborators(p.id, ['todos']);
+    } else if (slugs.length > 0) {
+      assignProjectCollaborators(p.id, slugs);
+    }
     // Refrescar datos de indicaciones YA vinculadas (sin crear nuevas).
-    syncAssignmentsFromProject(p);
+    syncAssignmentsFromProject({ ...p, ...collabPatch });
 
     const notifyIds =
       assignToIds.length > 0
@@ -800,36 +860,6 @@ export function ProjectDetailModal({
               ),
             )}
             {field(
-              'Colaborador(es)',
-              managerEditable ? (
-                <CollaboratorMultiSelect
-                  values={projectCollaborators}
-                  onChange={(next) => {
-                    const normalized = normalizeProjectCollaborators(next);
-                    if (
-                      normalized.length === getProjectCollaborators(p).length &&
-                      normalized.every((slug) => getProjectCollaborators(p).includes(slug))
-                    ) {
-                      return;
-                    }
-                    if (isDraft) {
-                      applyPatch({
-                        collaborators: normalized,
-                        collaborator: normalized[0] ?? 'todos',
-                      });
-                      toast.success('Colaboradores listos (se guardan al enviar)');
-                      return;
-                    }
-                    assignProjectCollaborators(p.id, normalized, () => {
-                      toast.success('Colaboradores del proyecto actualizados');
-                    });
-                  }}
-                />
-              ) : (
-                <ReadOnly>{labelForProjectCollaborators(p)}</ReadOnly>
-              ),
-            )}
-            {field(
               'Status',
               managerEditable ? (
                 <select
@@ -837,18 +867,21 @@ export function ProjectDetailModal({
                   onChange={(e) => {
                     const status = e.target.value as CreativeProject['status'];
                     if (status === 'terminado') {
-                      applyPatch( {
+                      applyPatch({
                         status,
                         finishedDate:
                           p.finishedDate ?? new Date().toISOString().slice(0, 10),
                         completedAt: new Date().toISOString(),
                         completedByName: user?.name ?? user?.username,
                       });
-                      goToCompletedProjects();
-                      onClose();
+                      if (!isDraft) {
+                        toast.success(
+                          'Proyecto marcado como concluido. Guarda o cierra; ya aparece en Concluidos.',
+                        );
+                      }
                       return;
                     }
-                    applyPatch( { status });
+                    applyPatch({ status });
                   }}
                 >
                   {PROJECT_STATUSES.map((o) => (
@@ -1073,14 +1106,13 @@ export function ProjectDetailModal({
             aria-label={isDraft ? 'Enviar indicación' : 'Colaboradores'}
           >
             <h3 className="project-attachments-heading">
-              {isDraft ? 'Enviar indicación a' : 'Colaboradores del proyecto'}
+              {isDraft ? 'Enviar indicación a' : 'Quién ve / recibe el proyecto'}
             </h3>
-            {!isDraft && (
-              <p className="project-attachments-sub">
-                Los cambios de fechas o detalles se guardan en el proyecto. No se crea otra
-                indicación.
-              </p>
-            )}
+            <p className="project-attachments-sub">
+              {isDraft
+                ? 'Elige a quién enviar la indicación (uno, varios, Todos o Ninguno si solo guardas como concluido).'
+                : 'Los cambios de fechas o detalles se guardan en el proyecto. No se crea otra indicación.'}
+            </p>
             <EmployeeMultiSelect
               assignable={assignable}
               values={assignToIds}
@@ -1124,10 +1156,24 @@ export function ProjectDetailModal({
               <button
                 type="button"
                 className="btn-primary project-detail-footer-send"
-                disabled={isDraft && assignToIds.length === 0}
-                onClick={isDraft ? handleSendAssignment : handleUpdateProject}
+                disabled={
+                  isDraft &&
+                  p.status !== 'terminado' &&
+                  assignToIds.length === 0
+                }
+                onClick={
+                  isDraft
+                    ? p.status === 'terminado'
+                      ? handleSaveCompletedDraft
+                      : handleSendAssignment
+                    : handleUpdateProject
+                }
               >
-                {isDraft ? 'Crear y enviar' : 'Actualizar proyecto'}
+                {isDraft
+                  ? p.status === 'terminado'
+                    ? 'Guardar en Concluidos'
+                    : 'Crear y enviar'
+                  : 'Actualizar proyecto'}
               </button>
             </>
           ) : (

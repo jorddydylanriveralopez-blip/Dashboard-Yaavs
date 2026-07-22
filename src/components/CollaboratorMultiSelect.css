@@ -121,3 +121,15 @@
   white-space: nowrap;
   max-width: 9.5rem;
 }
+
+.collab-multi-top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.collab-multi-option--none {
+  flex: 1;
+  min-width: 120px;
+}
