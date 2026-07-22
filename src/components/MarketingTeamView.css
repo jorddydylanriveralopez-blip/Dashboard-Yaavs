@@ -18,12 +18,23 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.team-toolbar .btn-primary {
+  flex: 0 0 auto;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .team-count {
   font-size: 0.8125rem;
   color: var(--text-secondary);
   font-weight: 600;
+  line-height: 1.4;
 }
 
 .team-hub-tabs {
@@ -65,5 +76,15 @@
 }
 
 .team-hub-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.team-cards-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   min-width: 0;
 }

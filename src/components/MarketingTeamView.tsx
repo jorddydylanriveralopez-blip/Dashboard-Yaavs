@@ -76,6 +76,7 @@ export function MarketingTeamView({
       <div className="team-hub-panel" role="tabpanel">
         {tab === 'cards' && (
           <>
+            <div className="team-cards-stack">
             <p className="team-intro">
               {personalOnly
                 ? 'Tu perfil y trabajo actual. Al marcar un trabajo como Completado, la tarjeta se reinicia sola.'
@@ -100,6 +101,7 @@ export function MarketingTeamView({
               onSendKpi={canSendKpiObjectives ? onSendKpi : undefined}
               onOpenProject={onOpenProject}
             />
+            </div>
           </>
         )}
 
