@@ -493,33 +493,40 @@ export function ProjectDetailModal({
     const name = p.projectName.trim();
     const collabPatch = collaboratorsFromAssignIds();
     const slugs = (collabPatch.collaborators ?? []).filter((c) => c !== 'todos');
+
+    const finishUpdate = () => {
+      syncAssignmentsFromProject({ ...p, ...collabPatch });
+
+      const notifyIds =
+        assignToIds.length > 0
+          ? assignToIds
+          : assignable.map((t) => t.employeeId).filter(Boolean);
+
+      if (notifyIds.length > 0) {
+        notifyPush({
+          audience: 'employees',
+          employeeIds: notifyIds,
+          excludeUserId: user?.id,
+          title: 'Proyecto actualizado',
+          body: `Orlando actualizó «${name}» (fechas o detalles). Revisa el proyecto.`,
+          url: '/proyectos',
+          tag: `proj-update-${p.id}`,
+        });
+      }
+
+      toast.success(`Proyecto «${name}» actualizado. Sin indicación nueva.`);
+      onClose();
+    };
+
     if (collabPatch.collaborators?.includes('todos')) {
-      assignProjectCollaborators(p.id, ['todos']);
-    } else if (slugs.length > 0) {
-      assignProjectCollaborators(p.id, slugs);
+      assignProjectCollaborators(p.id, ['todos'], finishUpdate);
+      return;
     }
-    // Refrescar datos de indicaciones YA vinculadas (sin crear nuevas).
-    syncAssignmentsFromProject({ ...p, ...collabPatch });
-
-    const notifyIds =
-      assignToIds.length > 0
-        ? assignToIds
-        : assignable.map((t) => t.employeeId).filter(Boolean);
-
-    if (notifyIds.length > 0) {
-      notifyPush({
-        audience: 'employees',
-        employeeIds: notifyIds,
-        excludeUserId: user?.id,
-        title: 'Proyecto actualizado',
-        body: `Orlando actualizó «${name}» (fechas o detalles). Revisa el proyecto.`,
-        url: '/proyectos',
-        tag: `proj-update-${p.id}`,
-      });
+    if (slugs.length > 0) {
+      assignProjectCollaborators(p.id, slugs, finishUpdate);
+      return;
     }
-
-    toast.success(`Proyecto «${name}» actualizado. Sin indicación nueva.`);
-    onClose();
+    finishUpdate();
   };
 
   const duration = calcProjectDurationDays(p.requestDate, p.finishedDate, p.status);
