@@ -73,6 +73,7 @@ import {
 } from '../utils/fileAttachments';
 import { useWorkloadGuard } from '../hooks/useWorkloadGuard';
 import { WorkloadOverrideModal } from './WorkloadOverrideModal';
+import { notifyPush } from '../api/pushClient';
 import type { CreativeProject, FileAttachment } from '../types';
 import './ProjectDetailModal.css';
 
@@ -115,6 +116,7 @@ export function ProjectDetailModal({
     board,
     updateProject,
     commitProject,
+    syncAssignmentsFromProject,
     deleteProject,
     activeUsers,
     acceptProject,
@@ -425,6 +427,39 @@ export function ProjectDetailModal({
         onClose();
       },
     );
+  };
+
+  /** Proyectos ya publicados: guardar cambios sin crear otra indicación. */
+  const handleUpdateProject = () => {
+    if (!p || isDraft) return;
+    if (!p.projectName.trim()) {
+      toast.info('Pon un nombre al proyecto.');
+      return;
+    }
+
+    const name = p.projectName.trim();
+    // Refrescar datos de indicaciones YA vinculadas (sin crear nuevas).
+    syncAssignmentsFromProject(p);
+
+    const notifyIds =
+      assignToIds.length > 0
+        ? assignToIds
+        : assignable.map((t) => t.employeeId).filter(Boolean);
+
+    if (notifyIds.length > 0) {
+      notifyPush({
+        audience: 'employees',
+        employeeIds: notifyIds,
+        excludeUserId: user?.id,
+        title: 'Proyecto actualizado',
+        body: `Orlando actualizó «${name}» (fechas o detalles). Revisa el proyecto.`,
+        url: '/proyectos',
+        tag: `proj-update-${p.id}`,
+      });
+    }
+
+    toast.success(`Proyecto «${name}» actualizado. Sin indicación nueva.`);
+    onClose();
   };
 
   const duration = calcProjectDurationDays(p.requestDate, p.finishedDate, p.status);
@@ -1033,8 +1068,19 @@ export function ProjectDetailModal({
         )}
 
         {managerEditable && (
-          <section className="project-assign-bar" aria-label="Enviar indicación">
-            <h3 className="project-attachments-heading">Enviar indicación a</h3>
+          <section
+            className="project-assign-bar"
+            aria-label={isDraft ? 'Enviar indicación' : 'Colaboradores'}
+          >
+            <h3 className="project-attachments-heading">
+              {isDraft ? 'Enviar indicación a' : 'Colaboradores del proyecto'}
+            </h3>
+            {!isDraft && (
+              <p className="project-attachments-sub">
+                Los cambios de fechas o detalles se guardan en el proyecto. No se crea otra
+                indicación.
+              </p>
+            )}
             <EmployeeMultiSelect
               assignable={assignable}
               values={assignToIds}
@@ -1078,10 +1124,10 @@ export function ProjectDetailModal({
               <button
                 type="button"
                 className="btn-primary project-detail-footer-send"
-                disabled={assignToIds.length === 0}
-                onClick={handleSendAssignment}
+                disabled={isDraft && assignToIds.length === 0}
+                onClick={isDraft ? handleSendAssignment : handleUpdateProject}
               >
-                {isDraft ? 'Crear y enviar' : 'Enviar indicación'}
+                {isDraft ? 'Crear y enviar' : 'Actualizar proyecto'}
               </button>
             </>
           ) : (

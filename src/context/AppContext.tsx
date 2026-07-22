@@ -106,6 +106,11 @@ import {
 } from '../utils/collaboratorMap';
 import { labelFor, PROJECT_STATUSES } from '../data/projectOptions';
 import {
+  briefFromProject,
+  buildObjectiveFromProject,
+  assignmentPriorityFromProject,
+} from '../utils/assignmentBrief';
+import {
   getProjectCollaborators,
   normalizeProjectCollaborators,
   patchForCollaboratorsChange,
@@ -253,6 +258,8 @@ interface AppContextValue {
   addProject: () => CreativeProject;
   /** Publica un borrador en el tablero (solo entonces aparece en Proyectos). */
   commitProject: (project: CreativeProject) => void;
+  /** Actualiza indicaciones vinculadas al proyecto (sin crear nuevas). */
+  syncAssignmentsFromProject: (project: CreativeProject) => void;
   updateProject: (
     id: string,
     patch: Partial<CreativeProject>,
@@ -2170,6 +2177,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const syncAssignmentsFromProject = useCallback((project: CreativeProject) => {
+    if (!project.id) return;
+    const title = project.projectName.trim() || 'Proyecto creativo';
+    const objective = buildObjectiveFromProject(project);
+    const dueDate =
+      project.finishedDate || project.commitmentDate || project.requestDate;
+    const brief = briefFromProject(project);
+    const priority = assignmentPriorityFromProject(project.priority);
+    setAssignments((prev) =>
+      prev.map((a) => {
+        if (a.brief?.projectId !== project.id) return a;
+        if (a.status === 'cancelled') return a;
+        return {
+          ...a,
+          title,
+          objective,
+          dueDate,
+          priority,
+          brief,
+        };
+      }),
+    );
+  }, []);
+
   const updateProject = useCallback(
     (
       id: string,
@@ -3129,15 +3160,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const employee = board.tasks.find((t) => t.employeeId === input.employeeId);
       if (!employee) return { ok: false, reason: 'forbidden' };
 
-      // No duplicar: si ya existe la misma indicación pendiente para este
-      // colaborador, no se crea otra (evita dobles envíos o dobles clics).
+      // No duplicar: misma indicación pendiente para este colaborador
+      // (mismo proyecto vinculado, o mismo título+fecha).
       const cleanTitle = input.title.trim().toLowerCase();
+      const projectId = input.brief?.projectId;
       const alreadyPending = assignments.some(
         (a) =>
           a.status === 'pending' &&
           a.employeeId === input.employeeId &&
-          a.title.trim().toLowerCase() === cleanTitle &&
-          a.dueDate === input.dueDate,
+          ((projectId && a.brief?.projectId === projectId) ||
+            (a.title.trim().toLowerCase() === cleanTitle &&
+              a.dueDate === input.dueDate)),
       );
       if (alreadyPending) return { ok: true };
 
@@ -3868,6 +3901,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       visibleCompletedProjects,
       addProject,
       commitProject,
+      syncAssignmentsFromProject,
       updateProject,
       deleteProject,
       acceptProject,
@@ -3972,6 +4006,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       visibleCompletedProjects,
       addProject,
       commitProject,
+      syncAssignmentsFromProject,
       updateProject,
       deleteProject,
       acceptProject,
