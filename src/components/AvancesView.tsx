@@ -28,9 +28,11 @@ interface FeedItem {
   update: ProjectProgressUpdate;
 }
 
-interface CollaboratorGroup {
-  authorId: string;
-  authorName: string;
+interface TeamMemberRow {
+  userId: string;
+  name: string;
+  avatarColor: string;
+  count: number;
   items: FeedItem[];
 }
 
@@ -67,7 +69,7 @@ export function AvancesView() {
   const [text, setText] = useState('');
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [busy, setBusy] = useState(false);
-  const [collabFilter, setCollabFilter] = useState<string>('all');
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
 
   const allFeedItems = useMemo(() => {
     const source = canEditAll ? visibleProjects : myProjects;
@@ -88,39 +90,50 @@ export function AvancesView() {
     );
   }, [canEditAll, visibleProjects, myProjects, user?.id]);
 
-  const collaboratorGroups = useMemo((): CollaboratorGroup[] => {
-    const map = new Map<string, CollaboratorGroup>();
+  const teamMembers = useMemo((): TeamMemberRow[] => {
+    const byAuthor = new Map<string, FeedItem[]>();
     for (const item of allFeedItems) {
       const key = item.update.authorId || item.update.authorName || 'unknown';
-      const existing = map.get(key);
-      if (existing) {
-        existing.items.push(item);
-      } else {
-        map.set(key, {
-          authorId: key,
-          authorName: item.update.authorName || 'Sin nombre',
-          items: [item],
-        });
-      }
+      const list = byAuthor.get(key) ?? [];
+      list.push(item);
+      byAuthor.set(key, list);
     }
-    return [...map.values()].sort((a, b) =>
-      a.authorName.localeCompare(b.authorName, 'es'),
-    );
-  }, [allFeedItems]);
 
-  const recentFeed = useMemo(() => {
-    if (!canEditAll) return allFeedItems.slice(0, 40);
-    if (collabFilter === 'all') return allFeedItems.slice(0, 60);
-    return allFeedItems
-      .filter((item) => item.update.authorId === collabFilter)
-      .slice(0, 60);
-  }, [canEditAll, allFeedItems, collabFilter]);
+    const employees = activeUsers
+      .filter((u) => u.role === 'empleado' && u.employeeId)
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'));
 
-  const visibleGroups = useMemo(() => {
-    if (!canEditAll) return [];
-    if (collabFilter === 'all') return collaboratorGroups;
-    return collaboratorGroups.filter((g) => g.authorId === collabFilter);
-  }, [canEditAll, collaboratorGroups, collabFilter]);
+    const rows: TeamMemberRow[] = employees.map((u) => {
+      const items = byAuthor.get(u.id) ?? [];
+      return {
+        userId: u.id,
+        name: u.name,
+        avatarColor: u.avatarColor || '#64748b',
+        count: items.length,
+        items,
+      };
+    });
+
+    // Avances de autores que ya no están en el roster (o admin/líder)
+    for (const [authorId, items] of byAuthor) {
+      if (rows.some((r) => r.userId === authorId)) continue;
+      const name = items[0]?.update.authorName || 'Sin nombre';
+      rows.push({
+        userId: authorId,
+        name,
+        avatarColor: '#94a3b8',
+        count: items.length,
+        items,
+      });
+    }
+
+    return rows.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }, [activeUsers, allFeedItems]);
+
+  const selectedMember =
+    teamMembers.find((m) => m.userId === selectedMemberId) ?? null;
+
+  const recentFeed = useMemo(() => allFeedItems.slice(0, 40), [allFeedItems]);
 
   const handleSubmit = () => {
     if (!selected) {
@@ -159,15 +172,108 @@ export function AvancesView() {
     toast.info('Avance eliminado');
   };
 
+  if (canEditAll) {
+    return (
+      <div className="avances-view">
+        <header className="avances-hero">
+          <div>
+            <h1 className="avances-title">Avances y evidencias</h1>
+            <p className="avances-sub">
+              Elige a un colaborador para ver todos sus avances y observaciones completas:
+              textos, videos, GIFs, PDFs e imágenes.
+            </p>
+          </div>
+        </header>
+
+        <div className="avances-manager-layout">
+          <aside className="avances-people" aria-label="Colaboradores">
+            <h2>Equipo</h2>
+            {teamMembers.length === 0 ? (
+              <p className="avances-empty">No hay colaboradores en el roster.</p>
+            ) : (
+              <ul className="avances-people-list">
+                {teamMembers.map((member) => {
+                  const active = selectedMemberId === member.userId;
+                  return (
+                    <li key={member.userId}>
+                      <button
+                        type="button"
+                        className={`avances-person-btn${active ? ' is-active' : ''}`}
+                        onClick={() => setSelectedMemberId(member.userId)}
+                        aria-pressed={active}
+                      >
+                        <span
+                          className="avances-person-avatar"
+                          style={{ background: member.avatarColor }}
+                          aria-hidden
+                        >
+                          {member.name.trim().charAt(0).toUpperCase() || '?'}
+                        </span>
+                        <span className="avances-person-meta">
+                          <span className="avances-person-name">{member.name}</span>
+                          <span className="avances-person-count">
+                            {member.count === 0
+                              ? 'Sin avances'
+                              : `${member.count} avance${member.count === 1 ? '' : 's'}`}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </aside>
+
+          <section className="avances-member-feed" aria-label="Avances del colaborador">
+            {!selectedMember ? (
+              <div className="avances-pick-hint">
+                <p>Selecciona a alguien del equipo para ver sus avances.</p>
+              </div>
+            ) : (
+              <>
+                <header className="avances-member-head">
+                  <div>
+                    <h2>{selectedMember.name}</h2>
+                    <p>
+                      {selectedMember.count === 0
+                        ? 'Todavía no ha registrado avances.'
+                        : `${selectedMember.count} avance${selectedMember.count === 1 ? '' : 's'} registrado${selectedMember.count === 1 ? '' : 's'}`}
+                    </p>
+                  </div>
+                </header>
+
+                {selectedMember.items.length === 0 ? (
+                  <p className="avances-empty">Sin registros por ahora.</p>
+                ) : (
+                  <ul className="avances-feed-list avances-feed-list--full">
+                    {selectedMember.items.map((item) => (
+                      <FeedCard
+                        key={`${item.projectId}-${item.update.id}`}
+                        item={item}
+                        canDelete
+                        onDelete={() => handleDelete(item.projectId, item.update.id)}
+                        showAuthor={false}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </section>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="avances-view">
       <header className="avances-hero">
         <div>
           <h1 className="avances-title">Avances y evidencias</h1>
           <p className="avances-sub">
-            {canEditAll
-              ? 'Revisa los avances y evidencias de cada colaborador: textos, videos, GIFs, PDFs e imágenes.'
-              : 'Elige tu proyecto, cuenta qué hiciste y sube varias evidencias. Orlando recibe aviso al instante.'}
+            Elige tu proyecto, cuenta qué hiciste y sube varias evidencias. Orlando recibe aviso al
+            instante.
           </p>
         </div>
       </header>
@@ -176,11 +282,7 @@ export function AvancesView() {
         <section className="avances-compose" aria-label="Registrar avance">
           <h2>Registrar avance</h2>
           {myProjects.length === 0 ? (
-            <p className="avances-empty">
-              {canEditAll
-                ? 'No hay proyectos activos para registrar avances.'
-                : 'No tienes proyectos activos asignados.'}
-            </p>
+            <p className="avances-empty">No tienes proyectos activos asignados.</p>
           ) : (
             <form
               className="avances-form"
@@ -241,7 +343,7 @@ export function AvancesView() {
               <h3>Historial de este proyecto</h3>
               <ProgressList
                 project={selected}
-                canDelete={(up) => canEditAll || up.authorId === user?.id}
+                canDelete={(up) => up.authorId === user?.id}
                 onDelete={(id) => handleDelete(selected.id, id)}
               />
             </div>
@@ -249,80 +351,20 @@ export function AvancesView() {
         </section>
 
         <section className="avances-feed" aria-label="Actividad reciente">
-          {canEditAll ? (
-            <>
-              <h2>Por colaborador</h2>
-              {collaboratorGroups.length === 0 ? (
-                <p className="avances-empty">Todavía no hay avances registrados.</p>
-              ) : (
-                <>
-                  <div className="avances-collab-tabs" role="tablist" aria-label="Filtrar por colaborador">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={collabFilter === 'all'}
-                      className={`avances-collab-tab${collabFilter === 'all' ? ' is-active' : ''}`}
-                      onClick={() => setCollabFilter('all')}
-                    >
-                      Todos ({allFeedItems.length})
-                    </button>
-                    {collaboratorGroups.map((g) => (
-                      <button
-                        key={g.authorId}
-                        type="button"
-                        role="tab"
-                        aria-selected={collabFilter === g.authorId}
-                        className={`avances-collab-tab${collabFilter === g.authorId ? ' is-active' : ''}`}
-                        onClick={() => setCollabFilter(g.authorId)}
-                      >
-                        {g.authorName} ({g.items.length})
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="avances-collab-groups">
-                    {visibleGroups.map((group) => (
-                      <div key={group.authorId} className="avances-collab-group">
-                        <h3 className="avances-collab-name">
-                          {group.authorName}
-                          <span>{group.items.length} avance{group.items.length === 1 ? '' : 's'}</span>
-                        </h3>
-                        <ul className="avances-feed-list">
-                          {(collabFilter === 'all' ? group.items.slice(0, 12) : group.items.slice(0, 40)).map(
-                            (item) => (
-                              <FeedCard
-                                key={`${item.projectId}-${item.update.id}`}
-                                item={item}
-                                canDelete={canEditAll || item.update.authorId === user?.id}
-                                onDelete={() => handleDelete(item.projectId, item.update.id)}
-                              />
-                            ),
-                          )}
-                        </ul>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </>
+          <h2>Tus últimos avances</h2>
+          {recentFeed.length === 0 ? (
+            <p className="avances-empty">Todavía no hay avances registrados.</p>
           ) : (
-            <>
-              <h2>Tus últimos avances</h2>
-              {recentFeed.length === 0 ? (
-                <p className="avances-empty">Todavía no hay avances registrados.</p>
-              ) : (
-                <ul className="avances-feed-list">
-                  {recentFeed.map((item) => (
-                    <FeedCard
-                      key={`${item.projectId}-${item.update.id}`}
-                      item={item}
-                      canDelete={item.update.authorId === user?.id}
-                      onDelete={() => handleDelete(item.projectId, item.update.id)}
-                    />
-                  ))}
-                </ul>
-              )}
-            </>
+            <ul className="avances-feed-list avances-feed-list--full">
+              {recentFeed.map((item) => (
+                <FeedCard
+                  key={`${item.projectId}-${item.update.id}`}
+                  item={item}
+                  canDelete={item.update.authorId === user?.id}
+                  onDelete={() => handleDelete(item.projectId, item.update.id)}
+                />
+              ))}
+            </ul>
           )}
         </section>
       </div>
@@ -334,19 +376,25 @@ function FeedCard({
   item,
   canDelete,
   onDelete,
+  showAuthor = true,
 }: {
   item: FeedItem;
   canDelete: boolean;
   onDelete: () => void;
+  showAuthor?: boolean;
 }) {
   return (
     <li className="avances-feed-item">
       <div className="avances-feed-head">
-        <strong>{item.update.authorName}</strong>
+        {showAuthor ? <strong>{item.update.authorName}</strong> : <strong>{item.projectName}</strong>}
         <span>{formatProgressDate(item.update.createdAt)}</span>
       </div>
-      <p className="avances-feed-project">{item.projectName}</p>
-      {item.update.text && <p className="avances-feed-text">{item.update.text}</p>}
+      {showAuthor && <p className="avances-feed-project">{item.projectName}</p>}
+      {item.update.text ? (
+        <p className="avances-feed-text">{item.update.text}</p>
+      ) : (
+        <p className="avances-feed-text avances-feed-text--muted">Sin observación escrita.</p>
+      )}
       {(item.update.files?.length ?? 0) > 0 && (
         <FileAttachmentsList attachments={item.update.files!} compact />
       )}

@@ -20,7 +20,7 @@
 
 .avances-sub {
   margin: 0;
-  max-width: 560px;
+  max-width: 620px;
   font-size: 0.875rem;
   color: var(--text-secondary);
   line-height: 1.45;
@@ -34,7 +34,9 @@
 }
 
 .avances-compose,
-.avances-feed {
+.avances-feed,
+.avances-people,
+.avances-member-feed {
   padding: 16px 18px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -44,6 +46,7 @@
 
 .avances-compose h2,
 .avances-feed h2,
+.avances-people h2,
 .avances-project-history h3 {
   margin: 0 0 12px;
   font-size: 1rem;
@@ -122,6 +125,135 @@
   border-top: 1px dashed var(--border);
 }
 
+/* Manager: equipo + detalle */
+.avances-manager-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+  min-height: min(70vh, 720px);
+}
+
+.avances-people {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 100px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.avances-people-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  padding-right: 2px;
+  scrollbar-width: thin;
+}
+
+.avances-person-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-muted, #f8fafc) 70%, white);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.avances-person-btn:hover {
+  border-color: color-mix(in srgb, var(--yaavs-electric) 35%, var(--border));
+}
+
+.avances-person-btn.is-active {
+  border-color: color-mix(in srgb, var(--yaavs-electric) 55%, var(--border));
+  background: color-mix(in srgb, var(--yaavs-electric) 10%, #fff);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--yaavs-electric) 25%, transparent);
+}
+
+.avances-person-avatar {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.avances-person-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.avances-person-name {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--yaavs-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.avances-person-count {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.avances-member-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 420px;
+  max-height: calc(100vh - 100px);
+  overflow: hidden;
+}
+
+.avances-member-head h2 {
+  margin: 0 0 4px;
+  font-size: 1.125rem;
+  color: var(--yaavs-ink);
+}
+
+.avances-member-head p {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.avances-pick-hint {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-muted, #f8fafc) 55%, white);
+}
+
 .avances-feed {
   position: sticky;
   top: 12px;
@@ -137,7 +269,7 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   overflow-y: auto;
   min-height: 0;
   flex: 1;
@@ -145,15 +277,21 @@
   scrollbar-width: thin;
 }
 
+.avances-feed-list--full {
+  overflow-y: auto;
+  max-height: none;
+}
+
 .avances-feed-list--compact {
   max-height: 360px;
 }
 
 .avances-feed-item {
-  padding: 12px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: color-mix(in srgb, var(--bg-muted, #f8fafc) 70%, white);
+  overflow: visible;
 }
 
 .avances-feed-head {
@@ -170,18 +308,29 @@
 }
 
 .avances-feed-project {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--accent);
 }
 
 .avances-feed-text {
-  margin: 0 0 8px;
-  font-size: 0.8125rem;
-  line-height: 1.45;
+  margin: 0 0 10px;
+  font-size: 0.875rem;
+  line-height: 1.55;
   color: var(--text-primary);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: visible;
+  max-height: none;
+  display: block;
+  -webkit-line-clamp: unset;
+}
+
+.avances-feed-text--muted {
+  color: var(--text-secondary);
+  font-style: italic;
 }
 
 .avances-feed-delete {
@@ -211,68 +360,29 @@
   object-fit: cover;
 }
 
-.avances-collab-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 0 0 14px;
-}
-
-.avances-collab-tab {
-  border: 1px solid var(--border);
-  background: var(--bg-input);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 6px 10px;
-  border-radius: 999px;
-  cursor: pointer;
-}
-
-.avances-collab-tab.is-active {
-  border-color: color-mix(in srgb, var(--yaavs-electric) 45%, var(--border));
-  background: color-mix(in srgb, var(--yaavs-electric) 12%, #fff);
-  color: var(--yaavs-ink);
-}
-
-.avances-collab-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.avances-collab-group {
-  padding-top: 4px;
-}
-
-.avances-collab-name {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 0 0 8px;
-  font-size: 0.9375rem;
-  color: var(--yaavs-ink);
-}
-
-.avances-collab-name span {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-
 @media (max-width: 980px) {
-  .avances-layout {
+  .avances-layout,
+  .avances-manager-layout {
     grid-template-columns: 1fr;
   }
 
-  .avances-feed {
+  .avances-feed,
+  .avances-people,
+  .avances-member-feed {
     position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .avances-people-list {
     max-height: none;
   }
 
   .avances-feed-list {
-    max-height: 480px;
+    max-height: none;
+  }
+
+  .avances-feed-list--compact {
+    max-height: 360px;
   }
 }
