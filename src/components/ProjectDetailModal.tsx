@@ -81,6 +81,11 @@ interface Props {
   onClose: () => void;
   /** Al abrir desde Inicio → Trabajo concluido, enfoca la sección de entrega. */
   focusCompletion?: boolean;
+  /**
+   * Borrador recién creado (aún no está en el tablero).
+   * Solo se publica al enviar la indicación.
+   */
+  initialDraft?: CreativeProject;
 }
 
 function ReadOnly({ children }: { children: ReactNode }) {
@@ -98,12 +103,18 @@ function formatProgressDate(iso: string): string {
   });
 }
 
-export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Props) {
+export function ProjectDetailModal({
+  projectId,
+  onClose,
+  focusCompletion,
+  initialDraft,
+}: Props) {
   const {
     user,
     canEditAll,
     board,
     updateProject,
+    commitProject,
     deleteProject,
     activeUsers,
     acceptProject,
@@ -128,10 +139,18 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   const [progressBusy, setProgressBusy] = useState(false);
   const [declineBusy, setDeclineBusy] = useState(false);
 
-  const p = useMemo(
+  const boardProject = useMemo(
     () => (board.projects ?? []).find((x) => x.id === projectId),
     [board.projects, projectId],
   );
+
+  const [draft, setDraft] = useState<CreativeProject | null>(() => {
+    if (initialDraft && initialDraft.id === projectId) return initialDraft;
+    return null;
+  });
+
+  const isDraft = !boardProject && Boolean(draft);
+  const p = boardProject ?? draft;
 
   const canView = useMemo(
     () => (p ? projectVisibleToUser(p, user, canEditAll, activeUsers) : false),
@@ -139,10 +158,22 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   );
 
   useEffect(() => {
-    if (!p || canView) return;
+    if (!p || canView || isDraft) return;
     const t = window.setTimeout(() => onClose(), 800);
     return () => window.clearTimeout(t);
-  }, [p, canView, onClose]);
+  }, [p, canView, isDraft, onClose]);
+
+  const applyPatch = (patch: Partial<CreativeProject>) => {
+    if (isDraft) {
+      setDraft((prev) =>
+        prev
+          ? { ...prev, ...patch, updatedAt: new Date().toISOString() }
+          : prev,
+      );
+      return;
+    }
+    updateProject(projectId, patch);
+  };
 
   const assignable = useMemo(
     () => assignableMarketingTasks(board.tasks, activeUsers),
@@ -167,6 +198,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
   }, [projectId, p, assignable, activeUsers]);
 
   useEffect(() => {
+    if (isDraft) return;
     attachmentsTouchedRef.current = false;
     let cancelled = false;
     void loadProjectAttachments(projectId).then((files) => {
@@ -175,9 +207,10 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, isDraft]);
 
   useEffect(() => {
+    if (isDraft) return;
     let cancelled = false;
     void loadProjectCompletionProof(projectId).then((proof) => {
       if (!cancelled) setCompletionProof(proof);
@@ -185,11 +218,12 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, isDraft]);
 
   const handleProjectAttachmentsChange = (attachments: FileAttachment[]) => {
     attachmentsTouchedRef.current = true;
     setProjectAttachments(attachments);
+    if (isDraft) return;
     void (async () => {
       try {
         await persistProjectAttachments(projectId, attachments, (id, patch) =>
@@ -349,16 +383,33 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
       toast.info('Elige a quién enviar la indicación.');
       return;
     }
+    if (!p.projectName.trim()) {
+      toast.info('Pon un nombre al proyecto antes de enviarlo.');
+      return;
+    }
+
+    let projectForSend = p;
+    if (isDraft && draft) {
+      const now = new Date().toISOString();
+      projectForSend = { ...draft, updatedAt: now };
+      commitProject(projectForSend);
+      if (projectAttachments.length > 0) {
+        void persistProjectAttachments(projectForSend.id, projectAttachments, (id, patch) =>
+          updateProject(id, patch),
+        );
+      }
+    }
+
     const recipients = assignable.filter((t) => assignToIds.includes(t.employeeId));
     submitAssignment(
       {
         employeeIds: assignToIds,
-        title: p.projectName.trim() || 'Proyecto creativo',
-        objective: buildObjectiveFromProject(p),
-        dueDate: p.finishedDate || p.requestDate,
-        priority: assignmentPriorityFromProject(p.priority),
+        title: projectForSend.projectName.trim() || 'Proyecto creativo',
+        objective: buildObjectiveFromProject(projectForSend),
+        dueDate: projectForSend.finishedDate || projectForSend.requestDate,
+        priority: assignmentPriorityFromProject(projectForSend.priority),
         notes: '',
-        brief: briefFromProject(p),
+        brief: briefFromProject(projectForSend),
         attachments: cloneAttachments(projectAttachments),
       },
       () => {
@@ -368,8 +419,8 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
         const names = recipients.map((r) => r.employeeName).join(', ');
         toast.success(
           recipients.length
-            ? `Indicación enviada a ${names}${fileNote}`
-            : `Indicación enviada${fileNote}`,
+            ? `Proyecto creado e indicación enviada a ${names}${fileNote}`
+            : `Proyecto creado e indicación enviada${fileNote}`,
         );
         onClose();
       },
@@ -425,15 +476,21 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
       >
         <header className="modal-header">
           <div>
-            <h2>{displayName}</h2>
-            <span
-              className={`status-pill-project status-pill-project--${p.status}`}
-              style={
-                { '--status-color': PROJECT_STATUS_COLORS[p.status] } as CSSProperties
-              }
-            >
-              {labelFor(PROJECT_STATUSES, p.status)}
-            </span>
+            <h2>{isDraft ? (p.projectName.trim() || 'Nuevo proyecto') : displayName}</h2>
+            {isDraft ? (
+              <span className="status-pill-project" style={{ opacity: 0.85 }}>
+                Borrador — aún no está en Proyectos
+              </span>
+            ) : (
+              <span
+                className={`status-pill-project status-pill-project--${p.status}`}
+                style={
+                  { '--status-color': PROJECT_STATUS_COLORS[p.status] } as CSSProperties
+                }
+              >
+                {labelFor(PROJECT_STATUSES, p.status)}
+              </span>
+            )}
           </div>
           <button type="button" className="btn-icon" onClick={onClose} aria-label="Cerrar">
             ×
@@ -529,7 +586,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
               managerEditable ? (
                 <SpellCheckInput
                   value={p.projectName}
-                  onChange={(e) => updateProject(p.id, { projectName: e.target.value })}
+                  onChange={(e) => applyPatch( { projectName: e.target.value })}
                   autoFix={false}
                   placeholder="Ej. Campaña lanzamiento verano"
                   autoFocus={!p.projectName.trim()}
@@ -548,7 +605,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 <input
                   type="date"
                   value={p.requestDate}
-                  onChange={(e) => updateProject(p.id, { requestDate: e.target.value })}
+                  onChange={(e) => applyPatch( { requestDate: e.target.value })}
                 />
               ) : (
                 <ReadOnly>{formatShortDate(p.requestDate)}</ReadOnly>
@@ -563,7 +620,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                   min={p.requestDate}
                   onChange={(e) => {
                     const due = e.target.value || undefined;
-                    updateProject(p.id, {
+                    applyPatch( {
                       finishedDate: due,
                       commitmentDate: due ?? p.commitmentDate,
                     });
@@ -581,7 +638,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 <select
                   value={p.businessUnit}
                   onChange={(e) =>
-                    updateProject(p.id, {
+                    applyPatch( {
                       businessUnit: e.target.value as CreativeProject['businessUnit'],
                     })
                   }
@@ -601,7 +658,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
               managerEditable ? (
                 <select
                   value={normalizeRequestedBy(p.requestedBy)}
-                  onChange={(e) => updateProject(p.id, { requestedBy: e.target.value })}
+                  onChange={(e) => applyPatch( { requestedBy: e.target.value })}
                 >
                   <option value="">Seleccionar…</option>
                   {REQUESTED_BY_OPTIONS.map((o) => (
@@ -620,7 +677,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 <select
                   value={p.requestingDepartment}
                   onChange={(e) =>
-                    updateProject(p.id, {
+                    applyPatch( {
                       requestingDepartment: e.target
                         .value as CreativeProject['requestingDepartment'],
                     })
@@ -642,7 +699,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 <select
                   value={p.projectType}
                   onChange={(e) =>
-                    updateProject(p.id, {
+                    applyPatch( {
                       projectType: e.target.value as CreativeProject['projectType'],
                     })
                   }
@@ -669,7 +726,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                       aria-checked={p.priority === o.value}
                       className={`priority-picker-btn priority-picker-btn--${o.value} ${p.priority === o.value ? 'is-active' : ''}`}
                       onClick={() =>
-                        updateProject(p.id, {
+                        applyPatch( {
                           priority: o.value,
                         })
                       }
@@ -692,7 +749,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 <select
                   value={normalizeInternalArea(p.internalArea)}
                   onChange={(e) =>
-                    updateProject(p.id, {
+                    applyPatch( {
                       internalArea: e.target.value as CreativeProject['internalArea'],
                     })
                   }
@@ -720,6 +777,14 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                     ) {
                       return;
                     }
+                    if (isDraft) {
+                      applyPatch({
+                        collaborators: normalized,
+                        collaborator: normalized[0] ?? 'todos',
+                      });
+                      toast.success('Colaboradores listos (se guardan al enviar)');
+                      return;
+                    }
                     assignProjectCollaborators(p.id, normalized, () => {
                       toast.success('Colaboradores del proyecto actualizados');
                     });
@@ -737,7 +802,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                   onChange={(e) => {
                     const status = e.target.value as CreativeProject['status'];
                     if (status === 'terminado') {
-                      updateProject(p.id, {
+                      applyPatch( {
                         status,
                         finishedDate:
                           p.finishedDate ?? new Date().toISOString().slice(0, 10),
@@ -748,7 +813,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                       onClose();
                       return;
                     }
-                    updateProject(p.id, { status });
+                    applyPatch( { status });
                   }}
                 >
                   {PROJECT_STATUSES.map((o) => (
@@ -773,7 +838,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
                 placeholder="Notas, cambios, bloqueos…"
                 autoFix={false}
                 extraWords={[p.projectName, p.requestedBy]}
-                onChange={(e) => updateProject(p.id, { comments: e.target.value })}
+                onChange={(e) => applyPatch( { comments: e.target.value })}
               />
             ) : (
               <ReadOnly>{p.comments || 'Sin comentarios'}</ReadOnly>
@@ -805,6 +870,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
           )}
         </section>
 
+        {!isDraft && (
         <section className="project-progress-section" aria-label="Avances y evidencia">
           <h3 className="project-attachments-heading">Avances y evidencia</h3>
           <p className="project-attachments-sub">
@@ -891,6 +957,7 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
             <p className="project-readonly">Aún no hay avances registrados.</p>
           )}
         </section>
+        )}
 
         {canCompleteWork && (
           <section
@@ -980,31 +1047,41 @@ export function ProjectDetailModal({ projectId, onClose, focusCompletion }: Prop
         <footer className="modal-footer project-detail-footer">
           {managerEditable ? (
             <>
-              <button
-                type="button"
-                className="btn-danger project-detail-footer-delete"
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: 'Eliminar proyecto',
-                    message: `¿Eliminar «${p.projectName}» por completo?`,
-                    confirmLabel: 'Eliminar',
-                    danger: true,
-                  });
-                  if (ok) {
-                    deleteProject(p.id);
-                    onClose();
-                  }
-                }}
-              >
-                Eliminar proyecto
-              </button>
+              {isDraft ? (
+                <button
+                  type="button"
+                  className="btn-ghost project-detail-footer-delete"
+                  onClick={onClose}
+                >
+                  Descartar
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-danger project-detail-footer-delete"
+                  onClick={async () => {
+                    const ok = await confirm({
+                      title: 'Eliminar proyecto',
+                      message: `¿Eliminar «${p.projectName}» por completo?`,
+                      confirmLabel: 'Eliminar',
+                      danger: true,
+                    });
+                    if (ok) {
+                      deleteProject(p.id);
+                      onClose();
+                    }
+                  }}
+                >
+                  Eliminar proyecto
+                </button>
+              )}
               <button
                 type="button"
                 className="btn-primary project-detail-footer-send"
                 disabled={assignToIds.length === 0}
                 onClick={handleSendAssignment}
               >
-                Enviar indicación
+                {isDraft ? 'Crear y enviar' : 'Enviar indicación'}
               </button>
             </>
           ) : (

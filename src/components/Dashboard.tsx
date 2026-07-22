@@ -949,6 +949,7 @@ export function Dashboard() {
           {selectedProject && (
             <ProjectDetailModal
               projectId={selectedProject.id}
+              initialDraft={selectedProject}
               focusCompletion={projectFocusCompletion}
               onClose={() => {
                 setSelectedProject(null);

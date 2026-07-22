@@ -250,6 +250,8 @@ interface AppContextValue {
   visibleProjects: CreativeProject[];
   visibleCompletedProjects: CreativeProject[];
   addProject: () => CreativeProject;
+  /** Publica un borrador en el tablero (solo entonces aparece en Proyectos). */
+  commitProject: (project: CreativeProject) => void;
   updateProject: (
     id: string,
     patch: Partial<CreativeProject>,
@@ -2128,7 +2130,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       d.setDate(d.getDate() + 2);
       return d.toISOString().slice(0, 10);
     })();
-    const newProject: CreativeProject = {
+    // Borrador: NO se agrega al tablero hasta commitProject / enviar.
+    return {
       id: `proj-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       requestDate: today,
       projectName: '',
@@ -2147,11 +2150,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createdAt: now,
       updatedAt: now,
     };
-    setBoard((prev) => ({
-      ...prev,
-      projects: [newProject, ...(prev.projects ?? [])],
-    }));
-    return newProject;
+  }, []);
+
+  const commitProject = useCallback((project: CreativeProject) => {
+    const now = new Date().toISOString();
+    const next = { ...project, updatedAt: now };
+    setBoard((prev) => {
+      const list = prev.projects ?? [];
+      const idx = list.findIndex((p) => p.id === next.id);
+      if (idx >= 0) {
+        const projects = [...list];
+        projects[idx] = { ...projects[idx], ...next };
+        return { ...prev, projects };
+      }
+      return { ...prev, projects: [next, ...list] };
+    });
   }, []);
 
   const updateProject = useCallback(
@@ -3808,6 +3821,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       visibleProjects,
       visibleCompletedProjects,
       addProject,
+      commitProject,
       updateProject,
       deleteProject,
       acceptProject,
@@ -3911,6 +3925,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       visibleProjects,
       visibleCompletedProjects,
       addProject,
+      commitProject,
       updateProject,
       deleteProject,
       acceptProject,

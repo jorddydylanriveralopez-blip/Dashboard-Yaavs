@@ -201,7 +201,7 @@ export function ProjectsBoard({ projects, filter, onSelect, onGoCompleted }: Pro
             <p className="projects-empty-title">Aún no hay proyectos</p>
             <p className="projects-empty-sub">
               {canEditAll
-                ? 'El tablero está limpio. Pulsa el botón de abajo para crear tu primera solicitud creativa.'
+                ? 'El tablero está limpio. Crea un proyecto, llénalo y envíalo: solo entonces aparece aquí.'
                 : 'Cuando el gerente te asigne un proyecto, aparecerá aquí.'}
             </p>
             {canEditAll && (
