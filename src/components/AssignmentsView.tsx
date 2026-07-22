@@ -227,125 +227,130 @@ export function AssignmentsView() {
       )}
 
       {canEditAll && (
-        <section className="assign-section">
-          <h2>Enviar indicación al equipo</h2>
-          <p className="assign-hint">
-            Describe qué debe hacer la persona, la fecha límite y adjunta archivos si hace falta.
-          </p>
-          <form className="assign-form" onSubmit={handleSend}>
-            <label>
-              Colaborador(es)
-              <EmployeeMultiSelect
-                assignable={assignable}
-                values={employeeIds}
-                onChange={setEmployeeIds}
-              />
-              {selectedWorkload && (
-                <span
-                  className={`assign-workload-hint${selectedWorkload.allowed ? '' : ' assign-workload-hint--full'}`}
-                >
-                  Carga actual: {workloadLabel(selectedWorkload)} ·{' '}
-                  {selectedWorkload.current.projects} proyecto
-                  {selectedWorkload.current.projects === 1 ? '' : 's'} activo
-                  {selectedWorkload.current.projects === 1 ? '' : 's'}
-                  {!selectedWorkload.allowed && ' — límite alcanzado (pedirá contraseña)'}
-                </span>
-              )}
-            </label>
-            <div className="assign-attachments-field">
-              <span className="assign-attachments-field-label">Archivos e imágenes</span>
-              <p className="assign-attachments-field-hint">
-                Adjunta briefs, mockups o PDFs. El colaborador los verá en la indicación.
-              </p>
-              <FileAttachmentsEditor
-                attachments={attachments}
-                onChange={setAttachments}
-                onError={(msg) => toast.info(msg)}
-                onSuccess={(msg) => toast.success(msg)}
-                enableLibrary
-              />
-            </div>
-            <label>
-              Qué debe hacer
-              <SpellCheckTextarea
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                rows={2}
-                required
-              />
-            </label>
-            <label>
-              Objetivo
-              <SpellCheckInput value={objective} onChange={(e) => setObjective(e.target.value)} />
-            </label>
-            <div className="assign-form-row">
+        <div className="assign-manager-layout">
+          <section className="assign-section assign-compose">
+            <h2>Enviar indicación al equipo</h2>
+            <p className="assign-hint">
+              Describe qué debe hacer la persona, la fecha límite y adjunta archivos si hace falta.
+            </p>
+            <form className="assign-form" onSubmit={handleSend}>
               <label>
-                Fecha límite
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
+                Colaborador(es)
+                <EmployeeMultiSelect
+                  assignable={assignable}
+                  values={employeeIds}
+                  onChange={setEmployeeIds}
+                />
+                {selectedWorkload && (
+                  <span
+                    className={`assign-workload-hint${selectedWorkload.allowed ? '' : ' assign-workload-hint--full'}`}
+                  >
+                    Carga actual: {workloadLabel(selectedWorkload)} ·{' '}
+                    {selectedWorkload.current.projects} proyecto
+                    {selectedWorkload.current.projects === 1 ? '' : 's'} activo
+                    {selectedWorkload.current.projects === 1 ? '' : 's'}
+                    {!selectedWorkload.allowed && ' — límite alcanzado (pedirá contraseña)'}
+                  </span>
+                )}
+              </label>
+              <div className="assign-attachments-field">
+                <span className="assign-attachments-field-label">Archivos e imágenes</span>
+                <p className="assign-attachments-field-hint">
+                  Adjunta briefs, mockups o PDFs. El colaborador los verá en la indicación.
+                </p>
+                <FileAttachmentsEditor
+                  attachments={attachments}
+                  onChange={setAttachments}
+                  onError={(msg) => toast.info(msg)}
+                  onSuccess={(msg) => toast.success(msg)}
+                  enableLibrary
+                />
+              </div>
+              <label>
+                Qué debe hacer
+                <SpellCheckTextarea
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  rows={2}
                   required
                 />
               </label>
               <label>
-                Prioridad
-                <select
-                  value={priority}
-                  onChange={(e) =>
-                    setPriority(e.target.value as 'baja' | 'media' | 'alta')
-                  }
-                >
-                  <option value="baja">Baja</option>
-                  <option value="media">Media</option>
-                  <option value="alta">Alta</option>
-                </select>
+                Objetivo
+                <SpellCheckInput value={objective} onChange={(e) => setObjective(e.target.value)} />
               </label>
-            </div>
-            <label>
-              Enlace externo (Figma, Drive…)
-              <input
-                type="url"
-                value={attachmentUrl}
-                onChange={(e) => setAttachmentUrl(e.target.value)}
-                placeholder="https://…"
-              />
-            </label>
-            <label>
-              Notas
-              <SpellCheckTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-            </label>
-            <button type="submit" className="btn-primary">
-              Enviar indicación
-            </button>
-          </form>
-        </section>
-      )}
-
-      {canEditAll && (
-        <section className="assign-section">
-          <h2>Indicaciones pendientes</h2>
-          <p className="assign-hint">
-            Al aceptar, rechazar o cancelar, la indicación desaparece del listado.
-          </p>
-          {managerList.length === 0 ? (
-            <p className="assign-empty">No hay indicaciones pendientes.</p>
-          ) : (
-            <ul className="assign-list">
-              {managerList.map((a) => (
-                <AssignmentCard
-                  key={a.id}
-                  assignment={a}
-                  canCancel={isPendingAssignment(a)}
-                  onCancel={() => {
-                    cancelAssignment(a.id);
-                    toast.info('Indicación cancelada');
-                  }}
+              <div className="assign-form-row">
+                <label>
+                  Fecha límite
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    required
+                  />
+                </label>
+                <label>
+                  Prioridad
+                  <select
+                    value={priority}
+                    onChange={(e) =>
+                      setPriority(e.target.value as 'baja' | 'media' | 'alta')
+                    }
+                  >
+                    <option value="baja">Baja</option>
+                    <option value="media">Media</option>
+                    <option value="alta">Alta</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Enlace externo (Figma, Drive…)
+                <input
+                  type="url"
+                  value={attachmentUrl}
+                  onChange={(e) => setAttachmentUrl(e.target.value)}
+                  placeholder="https://…"
                 />
-              ))}
-            </ul>
-          )}
-        </section>
+              </label>
+              <label>
+                Notas
+                <SpellCheckTextarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+              </label>
+              <button type="submit" className="btn-primary">
+                Enviar indicación
+              </button>
+            </form>
+          </section>
+
+          <section className="assign-section assign-pending-panel">
+            <h2>
+              Indicaciones pendientes
+              {managerList.length > 0 && (
+                <span className="assign-badge">{managerList.length}</span>
+              )}
+            </h2>
+            <p className="assign-hint">
+              Al aceptar, rechazar o cancelar, la indicación desaparece del listado.
+            </p>
+            {managerList.length === 0 ? (
+              <p className="assign-empty">No hay indicaciones pendientes.</p>
+            ) : (
+              <ul className="assign-list assign-list--scroll">
+                {managerList.map((a) => (
+                  <AssignmentCard
+                    key={a.id}
+                    assignment={a}
+                    canCancel={isPendingAssignment(a)}
+                    onCancel={() => {
+                      cancelAssignment(a.id);
+                      toast.info('Indicación cancelada');
+                    }}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       )}
 
       {!canEditAll && myHistory.length > 0 && (
