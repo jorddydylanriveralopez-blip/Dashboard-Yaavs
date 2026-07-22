@@ -253,19 +253,6 @@ export function AssignmentsView() {
                   </span>
                 )}
               </label>
-              <div className="assign-attachments-field">
-                <span className="assign-attachments-field-label">Archivos e imágenes</span>
-                <p className="assign-attachments-field-hint">
-                  Adjunta briefs, mockups o PDFs. El colaborador los verá en la indicación.
-                </p>
-                <FileAttachmentsEditor
-                  attachments={attachments}
-                  onChange={setAttachments}
-                  onError={(msg) => toast.info(msg)}
-                  onSuccess={(msg) => toast.success(msg)}
-                  enableLibrary
-                />
-              </div>
               <label>
                 Qué debe hacer
                 <SpellCheckTextarea
@@ -302,6 +289,19 @@ export function AssignmentsView() {
                     <option value="alta">Alta</option>
                   </select>
                 </label>
+              </div>
+              <div className="assign-attachments-field">
+                <span className="assign-attachments-field-label">Archivos e imágenes</span>
+                <p className="assign-attachments-field-hint">
+                  Briefs, mockups o PDFs (opcional).
+                </p>
+                <FileAttachmentsEditor
+                  attachments={attachments}
+                  onChange={setAttachments}
+                  onError={(msg) => toast.info(msg)}
+                  onSuccess={(msg) => toast.success(msg)}
+                  enableLibrary
+                />
               </div>
               <label>
                 Enlace externo (Figma, Drive…)
@@ -340,6 +340,7 @@ export function AssignmentsView() {
                   <AssignmentCard
                     key={a.id}
                     assignment={a}
+                    compact
                     canCancel={isPendingAssignment(a)}
                     onCancel={() => {
                       cancelAssignment(a.id);
@@ -418,6 +419,7 @@ function AssignmentCard({
   showActions,
   canCancel,
   defaultExpanded = false,
+  compact = false,
   onAccept,
   onReject,
   onCancel,
@@ -426,6 +428,7 @@ function AssignmentCard({
   showActions?: boolean;
   canCancel?: boolean;
   defaultExpanded?: boolean;
+  compact?: boolean;
   onAccept?: () => void;
   onReject?: () => void;
   onCancel?: () => void;
@@ -455,9 +458,15 @@ function AssignmentCard({
     minute: '2-digit',
   });
 
+  const titleText =
+    assignment.title.trim() ||
+    assignment.objective?.trim() ||
+    assignment.brief?.projectName?.trim() ||
+    'Sin título';
+
   return (
     <li
-      className={`assign-card status-${assignment.status}${expanded ? ' assign-card--open' : ''}`}
+      className={`assign-card status-${assignment.status}${expanded ? ' assign-card--open' : ''}${compact ? ' assign-card--compact' : ''}`}
     >
       <button
         type="button"
@@ -466,20 +475,41 @@ function AssignmentCard({
         aria-expanded={expanded}
       >
         <div className="assign-card-header-main">
-          <div className="assign-card-top">
-            <span className={`assign-status assign-status-${assignment.status}`}>
-              {ASSIGNMENT_STATUS_LABELS[assignment.status]}
-            </span>
-            <span className="assign-priority">
-              {PRIORITY_LABELS[assignment.priority]}
-            </span>
-          </div>
-          <h3>{assignment.title}</h3>
+          {!compact && (
+            <div className="assign-card-top">
+              <span className={`assign-status assign-status-${assignment.status}`}>
+                {ASSIGNMENT_STATUS_LABELS[assignment.status]}
+              </span>
+              <span className="assign-priority">
+                {PRIORITY_LABELS[assignment.priority]}
+              </span>
+            </div>
+          )}
+          <h3>{titleText}</h3>
           <p className="assign-card-subtitle">
-            Para <strong>{assignment.employeeName}</strong> · Entrega{' '}
-            {assignment.dueDate}
+            {compact ? (
+              <>
+                <strong>{assignment.employeeName}</strong>
+                <span className="assign-card-dot">·</span>
+                Entrega {assignment.dueDate}
+                <span className="assign-card-dot">·</span>
+                <span className={`assign-priority-inline assign-priority-inline--${assignment.priority}`}>
+                  {PRIORITY_LABELS[assignment.priority]}
+                </span>
+              </>
+            ) : (
+              <>
+                Para <strong>{assignment.employeeName}</strong> · Entrega{' '}
+                {assignment.dueDate}
+              </>
+            )}
           </p>
         </div>
+        {compact && (
+          <span className={`assign-status assign-status-${assignment.status} assign-status--pill`}>
+            Pendiente
+          </span>
+        )}
         <span className="assign-card-chevron" aria-hidden="true">
           ▾
         </span>
