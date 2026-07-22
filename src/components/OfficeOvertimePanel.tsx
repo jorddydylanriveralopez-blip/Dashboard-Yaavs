@@ -5,6 +5,7 @@ import {
   canUseOfficeOvertime,
   formatOvertimeClock,
   formatOvertimeShort,
+  isBeforeSixPm,
   isOvertimeRunning,
   liveOvertimeSeconds,
 } from '../utils/officeOvertime';
@@ -33,46 +34,85 @@ export function OfficeOvertimePanel({ mode, compact }: Props) {
     const entry = officeOvertime[employeeId!];
     const running = isOvertimeRunning(entry);
     const seconds = liveOvertimeSeconds(entry, now);
+    const waitingForSix = running && isBeforeSixPm(now) && seconds === 0;
+
+    if (!running) {
+      return (
+        <section
+          className={`office-ot office-ot--invite${compact ? ' office-ot--compact' : ''}`}
+          aria-label="Tiempo extra en oficina"
+        >
+          <div className="office-ot-copy">
+            <span className="office-ot-label">Oficina</span>
+            <strong className="office-ot-question">¿Te vas a quedar más tiempo?</strong>
+            <span className="office-ot-hint">
+              Si te quedas después de las 6:00 p.m., inicia el cronómetro. Al terminar, Orlando
+              recibe el tiempo extra.
+            </span>
+          </div>
+          <div className="office-ot-actions">
+            <button
+              type="button"
+              className="btn-primary office-ot-btn"
+              onClick={() => {
+                if (startOfficeOvertime()) {
+                  toast.success('Cronómetro iniciado. Al terminar se avisa a Orlando.');
+                } else {
+                  toast.info('No se pudo iniciar el cronómetro');
+                }
+              }}
+            >
+              Sí, me quedo
+            </button>
+          </div>
+          {seconds > 0 && (
+            <p className="office-ot-banked">
+              Hoy ya registraste {formatOvertimeShort(seconds)} después de las 6:00 p.m.
+            </p>
+          )}
+        </section>
+      );
+    }
 
     return (
       <section
-        className={`office-ot${compact ? ' office-ot--compact' : ''}${running ? ' office-ot--running' : ''}`}
-        aria-label="Tiempo extra en oficina"
+        className={`office-ot office-ot--running${compact ? ' office-ot--compact' : ''}`}
+        aria-label="Cronómetro de tiempo extra"
       >
         <div className="office-ot-copy">
-          <span className="office-ot-label">Tiempo extra hoy</span>
+          <span className="office-ot-label">Cronómetro activo</span>
           <strong className="office-ot-clock" aria-live="polite">
             {formatOvertimeClock(seconds)}
           </strong>
           <span className="office-ot-hint">
-            {running
-              ? 'Cronómetro activo — marca cuánto te quedaste de más'
-              : 'Inicia al quedarte después de tu horario'}
+            {waitingForSix
+              ? 'Aún no son las 6:00 p.m. — el tiempo extra empieza a contar desde entonces.'
+              : 'Tiempo extra después de las 6:00 p.m. Cuando te vayas, pulsa Terminar.'}
           </span>
         </div>
         <div className="office-ot-actions">
-          {running ? (
-            <button
-              type="button"
-              className="btn-primary office-ot-btn"
-              onClick={() => {
-                if (stopOfficeOvertime()) toast.success('Tiempo extra guardado');
-              }}
-            >
-              Detener
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="btn-primary office-ot-btn"
-              onClick={() => {
-                if (startOfficeOvertime()) toast.success('Cronómetro iniciado');
-                else toast.info('No se pudo iniciar el cronómetro');
-              }}
-            >
-              Iniciar
-            </button>
-          )}
+          <button
+            type="button"
+            className="btn-primary office-ot-btn office-ot-btn--stop"
+            onClick={() => {
+              const result = stopOfficeOvertime();
+              if (!result.ok) {
+                toast.info('No había un cronómetro activo');
+                return;
+              }
+              if (result.afterSixSeconds > 0) {
+                toast.success(
+                  `Listo. Orlando recibió ${formatOvertimeShort(result.afterSixSeconds)} de tiempo extra.`,
+                );
+              } else {
+                toast.info(
+                  'Cronómetro cerrado. No hubo tiempo extra después de las 6:00 p.m.',
+                );
+              }
+            }}
+          >
+            Terminar
+          </button>
         </div>
       </section>
     );
@@ -99,7 +139,9 @@ export function OfficeOvertimePanel({ mode, compact }: Props) {
       <section className={`office-ot office-ot--team${compact ? ' office-ot--compact' : ''}`}>
         <div className="office-ot-copy">
           <span className="office-ot-label">Tiempo extra del equipo</span>
-          <p className="office-ot-empty">Nadie ha marcado tiempo extra hoy.</p>
+          <p className="office-ot-empty">
+            Nadie ha marcado tiempo extra después de las 6:00 p.m. hoy.
+          </p>
         </div>
       </section>
     );
@@ -112,7 +154,7 @@ export function OfficeOvertimePanel({ mode, compact }: Props) {
     >
       <div className="office-ot-copy">
         <span className="office-ot-label">Tiempo extra del equipo</span>
-        <p className="office-ot-hint">Cuánto se quedaron hoy (excepto Orlando).</p>
+        <p className="office-ot-hint">Después de las 6:00 p.m. (excepto Orlando).</p>
       </div>
       <ul className="office-ot-team-list">
         {rows.map((row) => (

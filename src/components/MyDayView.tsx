@@ -250,8 +250,6 @@ export function MyDayView({
 
       <KpiObjectiveInbox compact onGoKpis={onGoKpis} />
 
-      <OfficeOvertimePanel mode="self" compact />
-
       {showUrgentBlock && (
         <section className="my-day-block my-day-urgent my-day-block--tight">
           <div className="my-day-block-head">
@@ -335,6 +333,8 @@ export function MyDayView({
         </div>
 
         <aside className="my-day-aside">
+          <OfficeOvertimePanel mode="self" compact />
+
           {personalObservation && (
             <HomeObservationsPanel mode="personal" observation={personalObservation} compact />
           )}

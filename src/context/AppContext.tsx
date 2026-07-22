@@ -118,6 +118,11 @@ import {
 } from '../utils/attendance';
 import { MAX_PROGRESS_FILES } from '../utils/fileAttachments';
 import {
+  formatOvertimeShort,
+  overtimeSecondsAfterSix,
+  todayDateKey,
+} from '../utils/officeOvertime';
+import {
   loadManagerObservations,
   upsertManagerObservation,
 } from '../utils/managerObservations';
@@ -336,7 +341,7 @@ interface AppContextValue {
   deleteProjectProgress: (projectId: string, updateId: string) => void;
   officeOvertime: OfficeOvertimeStore;
   startOfficeOvertime: () => boolean;
-  stopOfficeOvertime: () => boolean;
+  stopOfficeOvertime: () => { ok: boolean; afterSixSeconds: number };
   attendanceStore: AttendanceStore;
   managerObservations: ManagerObservationsStore;
   getManagerObservation: (
@@ -3611,8 +3616,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const startOfficeOvertime = useCallback((): boolean => {
     if (!user?.employeeId) return false;
     if (user.employeeId === 'emp-orlando') return false;
-    const now = new Date().toISOString();
-    const today = now.slice(0, 10);
+    const nowMs = Date.now();
+    const now = new Date(nowMs).toISOString();
+    const today = todayDateKey(nowMs);
     setOfficeOvertime((prev) => {
       const current = prev[user.employeeId!];
       if (current?.runningStartedAt) return prev;
@@ -3629,40 +3635,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       return { ...prev, [user.employeeId!]: next };
     });
+    logActivity(
+      'project_progress',
+      `${user.name} marcó que se queda tiempo extra en oficina`,
+      user.name,
+    );
     return true;
-  }, [user]);
+  }, [user, logActivity]);
 
-  const stopOfficeOvertime = useCallback((): boolean => {
-    if (!user?.employeeId) return false;
-    if (user.employeeId === 'emp-orlando') return false;
+  const stopOfficeOvertime = useCallback((): {
+    ok: boolean;
+    afterSixSeconds: number;
+  } => {
+    if (!user?.employeeId) return { ok: false, afterSixSeconds: 0 };
+    if (user.employeeId === 'emp-orlando') {
+      return { ok: false, afterSixSeconds: 0 };
+    }
     let stopped = false;
+    let sessionAfterSix = 0;
+    let totalAfterSix = 0;
     setOfficeOvertime((prev) => {
       const current = prev[user.employeeId!];
       if (!current?.runningStartedAt) return prev;
       stopped = true;
       const nowMs = Date.now();
       const now = new Date(nowMs).toISOString();
-      const today = now.slice(0, 10);
+      const today = todayDateKey(nowMs);
       const started = Date.parse(current.runningStartedAt);
-      const elapsedSec = Number.isFinite(started)
-        ? Math.max(0, Math.floor((nowMs - started) / 1000))
+      sessionAfterSix = Number.isFinite(started)
+        ? overtimeSecondsAfterSix(started, nowMs)
         : 0;
       const base =
         current.todayDate === today ? current.todaySeconds || 0 : 0;
-      const runDate = current.runningDate || current.runningStartedAt.slice(0, 10);
+      totalAfterSix = base + sessionAfterSix;
       const next: OfficeOvertimeEntry = {
         employeeId: user.employeeId!,
         employeeName: user.name,
         runningStartedAt: null,
         runningDate: null,
-        todaySeconds: runDate === today ? base + elapsedSec : elapsedSec,
+        todaySeconds: totalAfterSix,
         todayDate: today,
         updatedAt: now,
       };
       return { ...prev, [user.employeeId!]: next };
     });
-    return stopped;
-  }, [user]);
+    if (!stopped) return { ok: false, afterSixSeconds: 0 };
+
+    const label = formatOvertimeShort(sessionAfterSix);
+    logActivity(
+      'project_progress',
+      sessionAfterSix > 0
+        ? `${user.name} terminó tiempo extra: ${label} después de las 6:00 p.m.`
+        : `${user.name} terminó el cronómetro sin tiempo extra después de las 6:00 p.m.`,
+      user.name,
+    );
+    notifyPush({
+      audience: 'employees',
+      employeeIds: ['emp-orlando'],
+      excludeUserId: user.id,
+      title: 'Tiempo extra en oficina',
+      body:
+        sessionAfterSix > 0
+          ? `${user.name} se quedó ${label} después de las 6:00 p.m.`
+          : `${user.name} cerró el cronómetro (aún no había tiempo después de las 6:00 p.m.)`,
+      url: '/inicio',
+      tag: `office-ot-${user.employeeId}-${todayDateKey()}`,
+    });
+    return { ok: true, afterSixSeconds: sessionAfterSix };
+  }, [user, logActivity]);
 
   const sendChatMessage = useCallback(
     (text: string) => {
