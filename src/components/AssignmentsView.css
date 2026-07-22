@@ -48,8 +48,8 @@
 }
 
 .assign-delete {
-  margin-top: 8px;
-  width: 100%;
+  margin: 0 18px 16px;
+  width: calc(100% - 36px);
   color: #e2445c;
   font-weight: 600;
 }

@@ -42,6 +42,7 @@ export function AssignmentsView() {
     acceptAssignment,
     rejectAssignment,
     cancelAssignment,
+    deleteAssignment,
     assignmentSearch,
     setAssignmentSearch,
   } = useApp();
@@ -376,9 +377,20 @@ export function AssignmentsView() {
       {!canEditAll && myHistory.length > 0 && (
         <section className="assign-section">
           <h2>Respondidas</h2>
+          <p className="assign-hint">
+            Historial de lo que ya aceptaste o rechazaste. Puedes borrarlo si ya no lo necesitas.
+          </p>
           <ul className="assign-list">
             {myHistory.map((a) => (
-              <AssignmentCard key={a.id} assignment={a} />
+              <AssignmentCard
+                key={a.id}
+                assignment={a}
+                canDelete
+                onDelete={() => {
+                  deleteAssignment(a.id);
+                  toast.info('Indicación eliminada del historial');
+                }}
+              />
             ))}
           </ul>
         </section>
@@ -387,10 +399,20 @@ export function AssignmentsView() {
       {canEditAll && managerResponses.length > 0 && (
         <section className="assign-section">
           <h2>Respuestas del equipo</h2>
-          <p className="assign-hint">Indicaciones que el equipo ya aceptó o rechazó.</p>
+          <p className="assign-hint">
+            Indicaciones que el equipo ya aceptó o rechazó. Puedes eliminarlas del historial.
+          </p>
           <ul className="assign-list">
             {managerResponses.map((a) => (
-              <AssignmentCard key={a.id} assignment={a} />
+              <AssignmentCard
+                key={a.id}
+                assignment={a}
+                canDelete
+                onDelete={() => {
+                  deleteAssignment(a.id);
+                  toast.info('Indicación eliminada del historial');
+                }}
+              />
             ))}
           </ul>
         </section>
@@ -437,20 +459,24 @@ function AssignmentCard({
   assignment,
   showActions,
   canCancel,
+  canDelete,
   defaultExpanded = false,
   compact = false,
   onAccept,
   onReject,
   onCancel,
+  onDelete,
 }: {
   assignment: TaskAssignment;
   showActions?: boolean;
   canCancel?: boolean;
+  canDelete?: boolean;
   defaultExpanded?: boolean;
   compact?: boolean;
   onAccept?: () => void;
   onReject?: () => void;
   onCancel?: () => void;
+  onDelete?: () => void;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [loadedFiles, setLoadedFiles] = useState<FileAttachment[]>([]);
@@ -628,6 +654,18 @@ function AssignmentCard({
       {canCancel && expanded && (
         <button type="button" className="btn-ghost assign-cancel" onClick={onCancel}>
           Cancelar indicación
+        </button>
+      )}
+      {canDelete && (
+        <button
+          type="button"
+          className="btn-ghost assign-delete"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete?.();
+          }}
+        >
+          Eliminar del historial
         </button>
       )}
     </li>

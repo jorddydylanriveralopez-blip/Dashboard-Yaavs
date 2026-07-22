@@ -1903,6 +1903,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const assignment = assignments.find((a) => a.id === id);
       if (!assignment) return;
       if (!canEditAll && user?.employeeId !== assignment.employeeId) return;
+      // Colaboradores solo borran historial (ya respondidas), no pendientes.
+      if (!canEditAll && assignment.status === 'pending') return;
       setAssignments((prev) => prev.filter((a) => a.id !== id));
     },
     [assignments, canEditAll, user?.employeeId],
