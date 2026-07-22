@@ -6,6 +6,7 @@ import { formatShortDate } from '../utils/formatDate';
 import { formatHoursMinutes } from '../utils/projectHours';
 import { assignableMarketingTasks } from '../utils/assignmentBrief';
 import { EmployeeMultiSelect } from './EmployeeMultiSelect';
+import { SpellCheckTextarea } from './SpellCheckField';
 import type { ExtraProjectEntry, ExtraProjectStatus } from '../types';
 import './ExtraProjectsView.css';
 
@@ -335,11 +336,11 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
           </label>
           <label className="extra-projects-notes">
             Notas (opcional)
-            <input
+            <SpellCheckTextarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Cliente, herramientas, detalle…"
-              maxLength={240}
+              placeholder="Cliente, herramientas, detalle… Escribe todo lo que necesites."
+              rows={5}
             />
           </label>
         </div>

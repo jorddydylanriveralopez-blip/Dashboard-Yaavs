@@ -71,14 +71,22 @@
   color: var(--text-secondary);
 }
 
-.extra-projects-form input {
+.extra-projects-form input,
+.extra-projects-form textarea {
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  font: inherit;
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--yaavs-ink);
   background: #fff;
+}
+
+.extra-projects-form textarea {
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.45;
 }
 
 .extra-projects-notes {
