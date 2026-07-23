@@ -112,6 +112,28 @@ function wouldWipeProjects(incoming, existing) {
   return false;
 }
 
+function mergeKeepExistingExtras(incoming, existing) {
+  const byId = new Map();
+  for (const e of Array.isArray(existing?.extraProjects) ? existing.extraProjects : []) {
+    if (e?.id) byId.set(e.id, e);
+  }
+  for (const e of Array.isArray(incoming?.extraProjects) ? incoming.extraProjects : []) {
+    if (!e?.id) continue;
+    const cur = byId.get(e.id);
+    if (!cur) {
+      byId.set(e.id, e);
+      continue;
+    }
+    if (String(e.updatedAt || e.createdAt || '') >= String(cur.updatedAt || cur.createdAt || '')) {
+      byId.set(e.id, { ...cur, ...e });
+    }
+  }
+  return {
+    ...incoming,
+    extraProjects: [...byId.values()],
+  };
+}
+
 const DELETED_PROJECT_TTL_MS = 1000 * 60 * 60 * 24 * 90; // 90 días
 
 function pruneDeletedProjectIds(map, now = Date.now()) {
@@ -389,6 +411,8 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
 
   // No dejar que un cliente sin Concluidos borre los del servidor.
   state = mergeKeepExistingProjects(state, existing, deletedProjectIds);
+  // Tampoco borrar Extras que otro dispositivo aún no tiene en su snapshot.
+  state = mergeKeepExistingExtras(state, existing);
   // Mover dataUrls pesados a /api/evidence/... (no borrarlos).
   state = externalizeProjectEvidence(state);
 

@@ -616,6 +616,38 @@ function mergeCompletedIntoSyncState(
   };
 }
 
+/** Une Extras del remoto al payload local para no borrarlos en el PUT. */
+function mergeExtrasIntoSyncState(
+  local: AppSyncState,
+  remote: AppSyncState | null,
+): AppSyncState {
+  const remoteExtras = remote?.extraProjects;
+  if (!Array.isArray(remoteExtras) || remoteExtras.length === 0) return local;
+  const byId = new Map<string, ExtraProjectEntry>();
+  for (const e of local.extraProjects ?? []) {
+    if (e?.id) byId.set(e.id, e);
+  }
+  let changed = false;
+  for (const e of remoteExtras) {
+    if (!e?.id) continue;
+    const cur = byId.get(e.id);
+    if (!cur) {
+      byId.set(e.id, e);
+      changed = true;
+      continue;
+    }
+    if ((e.updatedAt || '') > (cur.updatedAt || '')) {
+      byId.set(e.id, e);
+      changed = true;
+    }
+  }
+  if (!changed) return local;
+  return {
+    ...local,
+    extraProjects: [...byId.values()],
+  };
+}
+
 
 /** Incorpora proyectos (sobre todo concluidos) del remoto sin pisar ediciones locales. */
 function absorbRemoteProjects(
@@ -1389,7 +1421,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const localState = buildSyncState();
           const remote = await fetchSyncState();
-          const state = mergeCompletedIntoSyncState(localState, remote);
+          const withCompleted = mergeCompletedIntoSyncState(localState, remote);
+          const state = mergeExtrasIntoSyncState(withCompleted, remote);
           // Si recuperamos concluidos del remoto, reflejarlos también en el board local.
           if (state !== localState) {
             const recovered = (state.board.projects ?? []).filter(
@@ -1675,15 +1708,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (Array.isArray(remote.extraProjects)) {
       setExtraProjects((prev) => {
         const byId = new Map(remote.extraProjects!.map((e) => [e.id, e]));
-        const remoteAt = remote.updatedAt || '';
         for (const local of prev) {
           const remoteEntry = byId.get(local.id);
           if (!remoteEntry) {
-            // Solo conservar extras locales recién creados (aún no en servidor).
-            if ((local.createdAt || local.updatedAt || '') > remoteAt) {
-              byId.set(local.id, local);
-              preservedLocal = true;
-            }
+            // Nunca tirar un Extra solo-local: el pull no debe borrar lo que
+            // Yared (u otro) acaba de enviar antes de que el PUT llegue.
+            byId.set(local.id, local);
+            preservedLocal = true;
             continue;
           }
           if ((local.updatedAt || '') > (remoteEntry.updatedAt || '')) {
@@ -1705,7 +1736,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }
             return entry;
           })
-          .sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
+          .sort((a, b) => (b.createdAt || b.doneDate || '').localeCompare(a.createdAt || a.doneDate || ''));
       });
     }
 
@@ -2868,6 +2899,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
 
       setExtraProjects((prev) => [entry, ...prev]);
+      // Empujar al instante para que un pull de otro dispositivo no lo borre.
+      window.setTimeout(() => schedulePush({ immediate: true }), 0);
 
       if (autoApprove && projectId) {
         const activeProject = buildExtraActiveProject(
@@ -2924,6 +2957,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       extraProjects,
       logActivity,
       buildExtraActiveProject,
+      schedulePush,
     ],
   );
 
