@@ -247,6 +247,8 @@ export interface BoardState {
   companyName: string;
 }
 
+export type CalendarEventKind = 'event' | 'busy';
+
 export interface CalendarEvent {
   id: string;
   userId: string;
@@ -261,6 +263,12 @@ export interface CalendarEvent {
   remindedAt?: string;
   /** Correo de recordatorio ya enviado. */
   emailRemindedAt?: string;
+  /** `busy` = día/horario ocupado (sin cronómetro típico). */
+  kind?: CalendarEventKind;
+  /** Visible en la agenda del equipo. */
+  shared?: boolean;
+  /** Nombre del dueño para la vista de equipo. */
+  ownerName?: string;
 }
 
 export interface ActiveTimer {

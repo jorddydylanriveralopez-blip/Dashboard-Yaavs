@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { useApp } from '../context/AppContext';
 import { REMINDER_OPTIONS } from '../constants';
 import { reminderEmailForUser } from '../api/calendar';
@@ -10,6 +10,7 @@ import {
   monthLabel,
   toDateKey,
 } from '../utils/calendarDates';
+import { parseIcsFile } from '../utils/icsImport';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
 import { useSharedNow } from '../hooks/useSharedNow';
 import type { CalendarEvent } from '../types';
@@ -21,6 +22,9 @@ export function CalendarView() {
   const {
     user,
     calendar,
+    calendarStore,
+    canEditAll,
+    activeUsers,
     addCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,
@@ -32,6 +36,8 @@ export function CalendarView() {
   } = useApp();
 
   const reminderEmail = user ? reminderEmailForUser(user.id, user.email) : null;
+  const icsInputRef = useRef<HTMLInputElement>(null);
+  const [icsStatus, setIcsStatus] = useState<string | null>(null);
 
   const initialNow = new Date();
   const [year, setYear] = useState(initialNow.getFullYear());
@@ -66,7 +72,40 @@ export function CalendarView() {
     return map;
   }, [activeEvents]);
 
+  /** Eventos compartidos de otros usuarios (agenda del equipo). */
+  const teamEvents = useMemo(() => {
+    if (!user) return [] as CalendarEvent[];
+    const nameById = new Map(activeUsers.map((u) => [u.id, u.name]));
+    const list: CalendarEvent[] = [];
+    for (const [uid, state] of Object.entries(calendarStore)) {
+      if (uid === user.id) continue;
+      for (const ev of state.events) {
+        if (ev.done) continue;
+        // shared !== false: incluye eventos nuevos (true) y legacy (undefined)
+        if (ev.shared === false) continue;
+        list.push({
+          ...ev,
+          ownerName: ev.ownerName ?? nameById.get(uid) ?? uid,
+        });
+      }
+    }
+    return list.sort((a, b) =>
+      `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
+    );
+  }, [calendarStore, user, activeUsers]);
+
+  const teamByDate = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+    for (const ev of teamEvents) {
+      const list = map.get(ev.date) ?? [];
+      list.push(ev);
+      map.set(ev.date, list);
+    }
+    return map;
+  }, [teamEvents]);
+
   const dayEvents = eventsByDate.get(selectedDate) ?? [];
+  const dayTeamEvents = teamByDate.get(selectedDate) ?? [];
 
   const activeEvent = calendar.activeTimer
     ? calendar.events.find((e) => e.id === calendar.activeTimer?.eventId)
@@ -105,9 +144,56 @@ export function CalendarView() {
       reminderMinutes,
       estimatedMinutes,
       notes: notes.trim(),
+      kind: 'event',
+      shared: true,
     });
     setTitle('');
     setNotes('');
+  };
+
+  const handleMarkBusy = () => {
+    addCalendarEvent({
+      title: 'Día ocupado',
+      date: selectedDate,
+      time: time || '09:00',
+      reminderMinutes: 0,
+      estimatedMinutes: 0,
+      notes: notes.trim() || 'No disponible',
+      kind: 'busy',
+      shared: true,
+    });
+    setNotes('');
+  };
+
+  const handleIcsImport = async (file: File | null) => {
+    if (!file) return;
+    setIcsStatus('Importando…');
+    try {
+      const imported = await parseIcsFile(file);
+      if (imported.length === 0) {
+        setIcsStatus('No se encontraron eventos en el archivo.');
+        return;
+      }
+      let count = 0;
+      for (const item of imported) {
+        addCalendarEvent({
+          title: item.title,
+          date: item.date,
+          time: item.time,
+          reminderMinutes: 30,
+          estimatedMinutes: 60,
+          notes: item.notes ? `${item.notes}\n(Importado desde correo)` : 'Importado desde correo',
+          kind: 'event',
+          shared: true,
+        });
+        count += 1;
+      }
+      setIcsStatus(`Se importaron ${count} evento${count === 1 ? '' : 's'}.`);
+    } catch {
+      setIcsStatus('No se pudo leer el archivo .ics.');
+    } finally {
+      if (icsInputRef.current) icsInputRef.current.value = '';
+    }
   };
 
   const requestNotify = () => {
@@ -142,7 +228,8 @@ export function CalendarView() {
                 return <span key={`empty-${i}`} className="calendar-day empty" />;
               }
               const key = toDateKey(cell);
-              const count = eventsByDate.get(key)?.length ?? 0;
+              const ownCount = eventsByDate.get(key)?.length ?? 0;
+              const teamCount = teamByDate.get(key)?.length ?? 0;
               const isSelected = key === selectedDate;
               const isToday = key === toDateKey(new Date());
               return (
@@ -153,7 +240,12 @@ export function CalendarView() {
                   onClick={() => setSelectedDate(key)}
                 >
                   <span className="day-num">{cell.getDate()}</span>
-                  {count > 0 && <span className="day-dots">{count}</span>}
+                  {(ownCount > 0 || teamCount > 0) && (
+                    <span className="day-dots-row" aria-hidden>
+                      {ownCount > 0 && <span className="day-dot day-dot--own" />}
+                      {teamCount > 0 && <span className="day-dot day-dot--team" />}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -163,6 +255,10 @@ export function CalendarView() {
             <p>
               <strong>Tiempo registrado este mes:</strong>{' '}
               {formatDuration(monthTotalTracked)}
+            </p>
+            <p className="calendar-legend">
+              <span className="day-dot day-dot--own" /> Tuyos{' '}
+              <span className="day-dot day-dot--team" /> Equipo
             </p>
             <button type="button" className="btn-ghost notify-btn" onClick={requestNotify}>
               Activar notificaciones
@@ -263,10 +359,36 @@ export function CalendarView() {
                 placeholder="Detalles opcionales…"
               />
             </label>
-            <button type="submit" className="btn-primary">
-              Agregar pendiente
-            </button>
+            <div className="calendar-form-actions">
+              <button type="submit" className="btn-primary">
+                Agregar pendiente
+              </button>
+              <button type="button" className="btn-ghost" onClick={handleMarkBusy}>
+                Marcar día ocupado
+              </button>
+            </div>
           </form>
+
+          <div className="calendar-ics">
+            <h3>Importar desde correo (.ics)</h3>
+            <p>
+              En Gmail/Outlook exporta el evento o calendario como <code>.ics</code> y
+              súbelo aquí para registrarlo en la agenda del equipo.
+            </p>
+            <input
+              ref={icsInputRef}
+              type="file"
+              accept=".ics,text/calendar"
+              className="calendar-ics-input"
+              onChange={(e) => void handleIcsImport(e.target.files?.[0] ?? null)}
+            />
+            {icsStatus && <p className="calendar-ics-status">{icsStatus}</p>}
+            {(canEditAll || user?.employeeId === 'emp-orlando') && (
+              <p className="calendar-hint">
+                Los eventos importados se comparten con el equipo y generan notificación.
+              </p>
+            )}
+          </div>
 
           <div className="calendar-events">
             <h3>Pendientes del día ({dayEvents.length})</h3>
@@ -288,6 +410,32 @@ export function CalendarView() {
                     onDelete={() => deleteCalendarEvent(ev.id)}
                     onUpdateNotes={(n) => updateCalendarEvent(ev.id, { notes: n })}
                   />
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="calendar-team">
+            <h3>Agenda del equipo ({dayTeamEvents.length})</h3>
+            {dayTeamEvents.length === 0 ? (
+              <p className="calendar-empty">Nadie más tiene eventos compartidos este día.</p>
+            ) : (
+              <ul className="calendar-team-list">
+                {dayTeamEvents.map((ev) => (
+                  <li
+                    key={`${ev.userId}-${ev.id}`}
+                    className={`calendar-team-item ${ev.kind === 'busy' ? 'busy' : ''}`}
+                  >
+                    <div className="calendar-team-top">
+                      <strong>{ev.title}</strong>
+                      <span>{ev.time}</span>
+                    </div>
+                    <p className="calendar-team-owner">
+                      {ev.kind === 'busy' ? 'Ocupado · ' : ''}
+                      {ev.ownerName}
+                    </p>
+                    {ev.notes && <p className="calendar-team-notes">{ev.notes}</p>}
+                  </li>
                 ))}
               </ul>
             )}
@@ -317,34 +465,43 @@ function EventCard({
   onDelete: () => void;
   onUpdateNotes: (notes: string) => void;
 }) {
+  const isBusy = event.kind === 'busy';
   const tracked = event.trackedMinutes + (isTimerActive ? liveExtra : 0);
-  const progress = event.estimatedMinutes
-    ? Math.min(100, Math.round((tracked / event.estimatedMinutes) * 100))
-    : 0;
+  const progress =
+    !isBusy && event.estimatedMinutes
+      ? Math.min(100, Math.round((tracked / event.estimatedMinutes) * 100))
+      : 0;
 
   return (
-    <li className={`event-card ${event.done ? 'done' : ''}`}>
+    <li className={`event-card ${event.done ? 'done' : ''} ${isBusy ? 'busy' : ''}`}>
       <div className="event-card-top">
         <label className="event-check">
           <input type="checkbox" checked={event.done} onChange={onToggleDone} />
-          <span>{event.title}</span>
+          <span>
+            {isBusy && <span className="event-busy-badge">Ocupado</span>}
+            {event.title}
+          </span>
         </label>
         <span className="event-time">{event.time}</span>
       </div>
 
-      <div className="event-time-bar">
-        <div className="event-time-fill" style={{ width: `${progress}%` }} />
-      </div>
-      <p className="event-time-meta">
-        {formatDuration(tracked)} / {formatDuration(event.estimatedMinutes)} estimado
-        {event.reminderMinutes > 0 && (
-          <span className="event-reminder">
-            {' '}
-            · Recordatorio activo
-            {event.emailRemindedAt ? ' · Correo enviado' : ''}
-          </span>
-        )}
-      </p>
+      {!isBusy && (
+        <>
+          <div className="event-time-bar">
+            <div className="event-time-fill" style={{ width: `${progress}%` }} />
+          </div>
+          <p className="event-time-meta">
+            {formatDuration(tracked)} / {formatDuration(event.estimatedMinutes)} estimado
+            {event.reminderMinutes > 0 && (
+              <span className="event-reminder">
+                {' '}
+                · Recordatorio activo
+                {event.emailRemindedAt ? ' · Correo enviado' : ''}
+              </span>
+            )}
+          </p>
+        </>
+      )}
 
       <SpellCheckTextarea
         className="event-notes"
@@ -355,20 +512,21 @@ function EventCard({
       />
 
       <div className="event-actions">
-        {isTimerActive ? (
-          <button type="button" className="btn-primary" onClick={onStop}>
-            Detener cronómetro
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn-ghost"
-            onClick={onStart}
-            disabled={event.done}
-          >
-            Iniciar tiempo
-          </button>
-        )}
+        {!isBusy &&
+          (isTimerActive ? (
+            <button type="button" className="btn-primary" onClick={onStop}>
+              Detener cronómetro
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={onStart}
+              disabled={event.done}
+            >
+              Iniciar tiempo
+            </button>
+          ))}
         <button type="button" className="btn-icon danger" onClick={onDelete} title="Eliminar">
           ×
         </button>

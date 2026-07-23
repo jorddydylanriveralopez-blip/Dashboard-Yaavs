@@ -92,6 +92,146 @@
   min-width: 16px;
 }
 
+.day-dots-row {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  min-height: 6px;
+}
+
+.day-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.day-dot--own {
+  background: var(--accent, #5034ff);
+}
+
+.day-dot--team {
+  background: #00c875;
+}
+
+.calendar-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.calendar-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.calendar-form-actions .btn-primary,
+.calendar-form-actions .btn-ghost {
+  flex: 1;
+  min-width: 140px;
+}
+
+.calendar-ics {
+  padding-bottom: 18px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.calendar-ics h3 {
+  margin: 0 0 6px;
+  font-size: 0.875rem;
+}
+
+.calendar-ics p {
+  margin: 0 0 10px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.calendar-ics-input {
+  display: block;
+  width: 100%;
+  font-size: 0.8125rem;
+}
+
+.calendar-ics-status {
+  margin: 8px 0 0;
+  font-size: 0.8125rem;
+  color: var(--accent);
+}
+
+.calendar-team {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.calendar-team h3 {
+  margin: 0 0 10px;
+  font-size: 0.875rem;
+}
+
+.calendar-team-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-team-item {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-muted);
+}
+
+.calendar-team-item.busy {
+  border-color: rgba(226, 68, 92, 0.35);
+  background: rgba(226, 68, 92, 0.06);
+}
+
+.calendar-team-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.875rem;
+}
+
+.calendar-team-owner {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.calendar-team-notes {
+  margin: 6px 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+}
+
+.event-card.busy {
+  border-color: rgba(226, 68, 92, 0.35);
+  background: rgba(226, 68, 92, 0.06);
+}
+
+.event-busy-badge {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: #e2445c;
+  background: rgba(226, 68, 92, 0.12);
+}
+
 .calendar-summary {
   margin-top: 16px;
   padding-top: 14px;

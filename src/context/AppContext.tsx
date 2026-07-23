@@ -183,6 +183,8 @@ interface AppContextValue {
   user: User | null;
   board: BoardState;
   calendar: UserCalendarState;
+  /** Agendas de todos los usuarios (para vista de equipo). */
+  calendarStore: CalendarStore;
   login: (username: string, password: string) => boolean;
   logout: () => void;
   spyMode: boolean;
@@ -3378,10 +3380,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addCalendarEvent = useCallback(
     (input: Omit<CalendarEvent, 'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt'>) => {
-      if (!userKey) return;
+      if (!userKey || !user) return;
+      const kind = input.kind ?? 'event';
+      const shared =
+        input.shared ?? (kind === 'busy' || canEditAll || user.employeeId === 'emp-orlando');
       const ev: CalendarEvent = {
         ...input,
-        id: `cal-${Date.now()}`,
+        kind,
+        shared,
+        ownerName: input.ownerName ?? user.name,
+        id: `cal-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         userId: userKey,
         trackedMinutes: 0,
         done: false,
@@ -3392,8 +3400,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
           `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
         ),
       });
+
+      const isManager = canEditAll || user.employeeId === 'emp-orlando';
+      const busyLabel = kind === 'busy';
+      if (isManager) {
+        notifyPush({
+          audience: 'employees',
+          excludeUserId: user.id,
+          title: busyLabel
+            ? `Día ocupado — ${user.name}`
+            : `Agenda de ${user.name}`,
+          body: busyLabel
+            ? `${user.name} marcó ocupado el ${ev.date}${ev.time ? ` (${ev.time})` : ''}`
+            : `${ev.title} · ${ev.date} ${ev.time}`,
+          url: '/agenda',
+          tag: 'agenda',
+        });
+      } else {
+        notifyPush({
+          employeeIds: ['emp-orlando'],
+          excludeUserId: user.id,
+          title: busyLabel
+            ? `${user.name} marcó ocupado`
+            : `${user.name} agregó a su agenda`,
+          body: busyLabel
+            ? `${ev.date}${ev.time ? ` · ${ev.time}` : ''}`
+            : `${ev.title} · ${ev.date} ${ev.time}`,
+          url: '/agenda',
+          tag: 'agenda',
+        });
+      }
     },
-    [userKey, calendar, persistCalendar],
+    [userKey, user, calendar, persistCalendar, canEditAll],
   );
 
   const updateCalendarEvent = useCallback(
@@ -3408,14 +3446,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteCalendarEvent = useCallback(
     (id: string) => {
+      if (!user) return;
+      const removed = calendar.events.find((e) => e.id === id);
       const activeTimer =
         calendar.activeTimer?.eventId === id ? null : calendar.activeTimer;
       persistCalendar({
         events: calendar.events.filter((e) => e.id !== id),
         activeTimer,
       });
+      if (!removed) return;
+
+      const isManager = canEditAll || user.employeeId === 'emp-orlando';
+      const busyLabel = removed.kind === 'busy';
+      if (isManager) {
+        notifyPush({
+          audience: 'employees',
+          excludeUserId: user.id,
+          title: busyLabel
+            ? `Ocupación retirada — ${user.name}`
+            : `Agenda de ${user.name}`,
+          body: busyLabel
+            ? `${user.name} quitó ocupación del ${removed.date}`
+            : `Eliminó: ${removed.title} · ${removed.date}`,
+          url: '/agenda',
+          tag: 'agenda',
+        });
+      } else {
+        notifyPush({
+          employeeIds: ['emp-orlando'],
+          excludeUserId: user.id,
+          title: busyLabel
+            ? `${user.name} quitó ocupación`
+            : `${user.name} eliminó de su agenda`,
+          body: `${removed.title} · ${removed.date}`,
+          url: '/agenda',
+          tag: 'agenda',
+        });
+      }
     },
-    [calendar, persistCalendar],
+    [user, calendar, persistCalendar, canEditAll],
   );
 
   const toggleCalendarDone = useCallback(
@@ -4206,6 +4275,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       user,
       board,
       calendar,
+      calendarStore,
       login,
       logout,
       spyMode,
@@ -4313,6 +4383,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       user,
       board,
       calendar,
+      calendarStore,
       login,
       logout,
       spyMode,
