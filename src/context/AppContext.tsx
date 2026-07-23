@@ -653,11 +653,20 @@ function absorbRemoteProjects(
   return { projects: [...byId.values()], changed };
 }
 
-/** Quita data URLs enormes del sync (evidencias viven en IndexedDB / biblioteca). */
+/** Quita data URLs enormes del sync (evidencias viven en IndexedDB / biblioteca /api/evidence). */
 function leanFileForSync<T extends { dataUrl?: string; blobStored?: boolean }>(
   file: T,
 ): T {
   const dataUrl = file.dataUrl ?? '';
+  if (
+    typeof dataUrl === 'string' &&
+    (dataUrl.startsWith('http://') ||
+      dataUrl.startsWith('https://') ||
+      dataUrl.startsWith('/api/evidence/') ||
+      dataUrl.startsWith('/evidence/'))
+  ) {
+    return file;
+  }
   if (typeof dataUrl === 'string' && dataUrl.startsWith('data:') && dataUrl.length > 12_000) {
     return { ...file, dataUrl: '', blobStored: true };
   }
@@ -674,6 +683,14 @@ function leanProjectForSync(project: CreativeProject): CreativeProject {
     files: up.files?.map((f) => leanFileForSync(f)),
     images: up.images?.map((img) => {
       const dataUrl = img.dataUrl ?? '';
+      if (
+        dataUrl.startsWith('http://') ||
+        dataUrl.startsWith('https://') ||
+        dataUrl.startsWith('/api/evidence/') ||
+        dataUrl.startsWith('/evidence/')
+      ) {
+        return img;
+      }
       if (dataUrl.startsWith('data:') && dataUrl.length > 12_000) {
         return { ...img, dataUrl: '' };
       }

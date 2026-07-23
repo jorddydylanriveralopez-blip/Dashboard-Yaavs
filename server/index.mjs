@@ -13,6 +13,7 @@ import {
 } from './mediaLibraryStore.mjs';
 import { buildMediaCatalog, enrichLibraryItem, resolveLibraryImageUrl } from './mediaApiFormat.mjs';
 import { emptyAppState, loadAppState, saveAppState } from './appStateStore.mjs';
+import { readEvidenceFile } from './evidenceStore.mjs';
 import {
   resolveReminderEmail,
   sendCalendarReminderEmail,
@@ -31,6 +32,21 @@ app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'yaavs-board' });
+});
+
+app.get('/api/evidence/:filename', (req, res) => {
+  const file = readEvidenceFile(req.params.filename);
+  if (!file) {
+    res.status(404).json({ error: 'Evidencia no encontrada' });
+    return;
+  }
+  res.setHeader('Content-Type', file.mimeType);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename="${encodeURIComponent(file.filename)}"`,
+  );
+  res.send(file.buffer);
 });
 
 app.get('/api/state', async (_req, res) => {
