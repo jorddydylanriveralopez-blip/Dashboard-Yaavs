@@ -183,6 +183,47 @@ function stripDeletedProjects(state, deletedProjectIds) {
   };
 }
 
+const MAX_INLINE_DATA_URL = 12_000;
+
+/** Evita que evidencias base64 vuelvan a inflar /api/state y rompan el sync. */
+function stripHeavyDataUrl(file) {
+  if (!file || typeof file !== 'object') return file;
+  const du = file.dataUrl;
+  if (typeof du === 'string' && du.startsWith('data:') && du.length > MAX_INLINE_DATA_URL) {
+    return { ...file, dataUrl: '', blobStored: true };
+  }
+  return file;
+}
+
+function stripHeavyProjectPayloads(state) {
+  const projects = Array.isArray(state?.board?.projects) ? state.board.projects : [];
+  if (!projects.length) return state;
+  return {
+    ...state,
+    board: {
+      ...state.board,
+      projects: projects.map((p) => {
+        if (!p || typeof p !== 'object') return p;
+        const next = { ...p };
+        if (Array.isArray(p.attachments)) {
+          next.attachments = p.attachments.map(stripHeavyDataUrl);
+          next.attachmentCount = p.attachments.length;
+        }
+        if (Array.isArray(p.progressUpdates)) {
+          next.progressUpdates = p.progressUpdates.map((up) => ({
+            ...up,
+            files: Array.isArray(up.files) ? up.files.map(stripHeavyDataUrl) : up.files,
+            images: Array.isArray(up.images)
+              ? up.images.map((img) => stripHeavyDataUrl(img))
+              : up.images,
+          }));
+        }
+        return next;
+      }),
+    },
+  };
+}
+
 function preferRicherState(a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -339,12 +380,12 @@ export async function loadAppState() {
   }
 
   const preferred = preferRicherState(preferRicherState(fromDb, fromApi), fromBlob);
-  if (preferred && isMeaningfulState(preferred)) return preferred;
-  if (preferred) return preferred;
+  if (preferred && isMeaningfulState(preferred)) return stripHeavyProjectPayloads(preferred);
+  if (preferred) return stripHeavyProjectPayloads(preferred);
 
   if (!isServerless()) {
     const local = readLocalState();
-    if (local) return local;
+    if (local) return stripHeavyProjectPayloads(local);
   }
   return emptyAppState();
 }
@@ -370,6 +411,8 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
 
   // No dejar que un cliente sin Concluidos borre los del servidor.
   state = mergeKeepExistingProjects(state, existing, deletedProjectIds);
+  // Guardar liviano: dataUrls enormes rompen el pull y vacían Concluidos en la UI.
+  state = stripHeavyProjectPayloads(state);
 
   if (!allowEmpty && !isMeaningfulState(state)) {
     if (isMeaningfulState(existing)) {
