@@ -361,28 +361,95 @@
 }
 
 @media (max-width: 980px) {
+  .avances-view {
+    gap: 14px;
+  }
+
+  .avances-title {
+    font-size: 1.28rem;
+  }
+
+  .avances-sub {
+    font-size: 0.8125rem;
+    max-width: none;
+  }
+
   .avances-layout,
   .avances-manager-layout {
     grid-template-columns: 1fr;
+    gap: 12px;
+    min-height: 0;
   }
 
+  .avances-compose,
   .avances-feed,
   .avances-people,
   .avances-member-feed {
     position: static;
     max-height: none;
     overflow: visible;
+    padding: 14px;
+    border-radius: 16px;
+  }
+
+  .avances-people {
+    position: static;
   }
 
   .avances-people-list {
     max-height: none;
+    flex-direction: row;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 8px;
+    padding-bottom: 4px;
+  }
+
+  .avances-people-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .avances-people-list > li {
+    flex: 0 0 auto;
+    min-width: min(78vw, 260px);
+  }
+
+  .avances-person-btn {
+    min-height: 56px;
+  }
+
+  .avances-member-feed {
+    min-height: 0;
+  }
+
+  .avances-pick-hint {
+    padding: 28px 16px;
+    font-size: 0.875rem;
   }
 
   .avances-feed-list {
     max-height: none;
+    gap: 12px;
   }
 
   .avances-feed-list--compact {
-    max-height: 360px;
+    max-height: 320px;
+  }
+
+  .avances-feed-item {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .avances-feed-text {
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+
+  .avances-submit {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
   }
 }

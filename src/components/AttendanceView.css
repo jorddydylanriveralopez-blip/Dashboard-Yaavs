@@ -679,4 +679,29 @@
   .attendance-day-panel-head h2 {
     font-size: 1.0625rem;
   }
+
+  .attendance-pie-section {
+    padding: 16px 14px;
+    border-radius: 18px;
+  }
+
+  .attendance-pie-head {
+    flex-direction: column;
+    align-items: flex-start;
+    margin-bottom: 14px;
+  }
+
+  .attendance-pie-head h2 {
+    font-size: 1.125rem;
+  }
+
+  .attendance-pie-head p {
+    font-size: 0.8125rem;
+    max-width: none;
+  }
+
+  .attendance-pie-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
 }

@@ -461,18 +461,62 @@
 }
 
 @media (max-width: 768px) {
+  .projects-board {
+    gap: 12px;
+  }
+
+  .projects-layout-toggle {
+    width: 100%;
+  }
+
+  .projects-layout-btn {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  .projects-filters {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 8px;
+    margin: 0 -2px;
+    padding: 2px 2px 8px;
+  }
+
+  .projects-filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .projects-filters .project-filter-chip {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .projects-sections {
+    gap: 20px;
+  }
+
   .projects-grid {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .projects-add-mobile {
     display: flex;
     width: 100%;
     justify-content: center;
+    min-height: 48px;
+  }
+
+  .project-card {
+    padding: 14px;
+    border-radius: 16px;
   }
 
   .project-card-meta {
     grid-template-columns: 1fr;
+    gap: 8px;
   }
 
   .project-card-delete {

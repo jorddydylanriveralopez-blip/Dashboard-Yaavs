@@ -248,6 +248,37 @@
 @media (max-width: 600px) {
   .project-detail-grid {
     grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .project-detail-body {
+    padding: 12px 14px 16px;
+  }
+
+  .project-detail-footer {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .project-detail-footer-send {
+    max-width: none;
+    width: 100%;
+    order: -1;
+  }
+
+  .project-attachments-bar,
+  .project-completion-bar,
+  .project-assign-bar {
+    padding: 12px 14px;
+  }
+
+  .project-field input,
+  .project-field select,
+  .project-field textarea,
+  .project-field .spellcheck-field {
+    min-height: 44px;
+    font-size: 16px;
   }
 }
 

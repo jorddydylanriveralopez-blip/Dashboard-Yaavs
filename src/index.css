@@ -72,6 +72,21 @@ body {
   .filter-chip {
     min-height: 44px;
   }
+
+  /* Más aire entre bloques en pantallas chicas */
+  .main > * + * {
+    margin-top: 2px;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    background-size:
+      28px 28px,
+      28px 28px,
+      auto,
+      auto;
+  }
 }
 
 h1,

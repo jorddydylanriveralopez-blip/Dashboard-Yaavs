@@ -49,7 +49,8 @@ export function ProjectsHub({ filter, onSelect, initialTab }: Props) {
           className={tab === 'active' ? 'active' : ''}
           onClick={() => setTab('active')}
         >
-          Activos
+          <span className="projects-hub-tab-full">Activos</span>
+          <span className="projects-hub-tab-short">Activos</span>
         </button>
         <button
           type="button"
@@ -58,7 +59,8 @@ export function ProjectsHub({ filter, onSelect, initialTab }: Props) {
           className={tab === 'completed' ? 'active' : ''}
           onClick={() => setTab('completed')}
         >
-          Concluidos ✓
+          <span className="projects-hub-tab-full">Concluidos ✓</span>
+          <span className="projects-hub-tab-short">Concluidos</span>
         </button>
         <button
           type="button"
@@ -67,7 +69,8 @@ export function ProjectsHub({ filter, onSelect, initialTab }: Props) {
           className={tab === 'extras' ? 'active' : ''}
           onClick={() => setTab('extras')}
         >
-          Extras
+          <span className="projects-hub-tab-full">Extras</span>
+          <span className="projects-hub-tab-short">Extras</span>
           {canEditAll && pendingExtraProjects.length > 0 && (
             <span className="projects-hub-tab-badge">{pendingExtraProjects.length}</span>
           )}
@@ -80,7 +83,8 @@ export function ProjectsHub({ filter, onSelect, initialTab }: Props) {
             className={tab === 'history' ? 'active' : ''}
             onClick={() => setTab('history')}
           >
-            Resultados del mes
+            <span className="projects-hub-tab-full">Resultados del mes</span>
+            <span className="projects-hub-tab-short">Resultados</span>
           </button>
         )}
       </div>
