@@ -1,12 +1,12 @@
 import type { AppSyncState } from '../types';
 
-/** El estado puede traer evidencias grandes; 30s abortaba el pull y vaciaba Concluidos. */
-const FETCH_TIMEOUT_MS = 180_000;
+/** Estado completo (proyectos + evidencias) puede tardar; no bajar de ~2 min. */
+const STATE_TIMEOUT_MS = 180_000;
+const HEALTH_TIMEOUT_MS = 8_000;
 
 function apiBase(): string {
   const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '');
   if (fromEnv) return fromEnv;
-  // En producción las funciones /api/* viven en el mismo dominio (Vercel).
   if (import.meta.env.PROD && typeof window !== 'undefined') return window.location.origin;
   return '';
 }
@@ -34,10 +34,11 @@ export function isApiEnabled(): boolean {
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
-  init?: RequestInit,
+  init: RequestInit | undefined,
+  timeoutMs: number,
 ): Promise<Response> {
   const ctrl = new AbortController();
-  const timer = window.setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  const timer = window.setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: ctrl.signal });
   } finally {
@@ -45,27 +46,53 @@ async function fetchWithTimeout(
   }
 }
 
+async function withRetry<T>(
+  run: () => Promise<T | null>,
+  attempts = 2,
+  pauseMs = 1200,
+): Promise<T | null> {
+  let last: T | null = null;
+  for (let i = 0; i < attempts; i += 1) {
+    last = await run();
+    if (last != null) return last;
+    if (i < attempts - 1) {
+      await new Promise((r) => window.setTimeout(r, pauseMs * (i + 1)));
+    }
+  }
+  return last;
+}
+
 export async function fetchSyncState(): Promise<AppSyncState | null> {
   if (!isApiEnabled()) return null;
-  try {
-    const res = await fetchWithTimeout(`${API_URL}/api/state`, { cache: 'no-store' });
-    if (!res.ok) return null;
-    return (await res.json()) as AppSyncState;
-  } catch {
-    return null;
-  }
+  return withRetry(async () => {
+    try {
+      const res = await fetchWithTimeout(
+        `${API_URL}/api/state`,
+        { cache: 'no-store' },
+        STATE_TIMEOUT_MS,
+      );
+      if (!res.ok) return null;
+      return (await res.json()) as AppSyncState;
+    } catch {
+      return null;
+    }
+  });
 }
 
 export async function pushSyncState(
   state: AppSyncState,
-): Promise<{ ok: boolean; updatedAt?: string }> {
+): Promise<{ ok: boolean; updatedAt?: string; timedOut?: boolean }> {
   if (!isApiEnabled()) return { ok: false };
   try {
-    const res = await fetchWithTimeout(`${API_URL}/api/state`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...state, updatedAt: new Date().toISOString() }),
-    });
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/state`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...state, updatedAt: new Date().toISOString() }),
+      },
+      STATE_TIMEOUT_MS,
+    );
     if (!res.ok) return { ok: false };
     try {
       const body = (await res.json()) as { updatedAt?: string };
@@ -74,14 +101,18 @@ export async function pushSyncState(
       return { ok: true, updatedAt: state.updatedAt };
     }
   } catch {
-    return { ok: false };
+    return { ok: false, timedOut: true };
   }
 }
 
 export async function checkApiHealth(): Promise<boolean> {
   if (!isApiEnabled()) return false;
   try {
-    const res = await fetchWithTimeout(`${API_URL}/api/health`, { cache: 'no-store' });
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/health`,
+      { cache: 'no-store' },
+      HEALTH_TIMEOUT_MS,
+    );
     return res.ok;
   } catch {
     return false;

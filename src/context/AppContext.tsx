@@ -685,56 +685,55 @@ function absorbRemoteProjects(
   return { projects: [...byId.values()], changed };
 }
 
-/** Quita data URLs enormes del sync (evidencias viven en IndexedDB / biblioteca /api/evidence). */
-function leanFileForSync<T extends { dataUrl?: string; blobStored?: boolean }>(
-  file: T,
-): T {
-  const dataUrl = file.dataUrl ?? '';
-  if (
-    typeof dataUrl === 'string' &&
-    (dataUrl.startsWith('http://') ||
-      dataUrl.startsWith('https://') ||
-      dataUrl.startsWith('/api/evidence/') ||
-      dataUrl.startsWith('/evidence/'))
-  ) {
-    return file;
+/** Incorpora Extras del remoto sin borrar los solo-locales. */
+function absorbRemoteExtras(
+  localExtras: ExtraProjectEntry[],
+  remoteExtras: ExtraProjectEntry[] | undefined,
+): { extras: ExtraProjectEntry[]; changed: boolean } {
+  const byId = new Map<string, ExtraProjectEntry>();
+  for (const e of remoteExtras ?? []) {
+    if (e?.id) byId.set(e.id, e);
   }
-  if (typeof dataUrl === 'string' && dataUrl.startsWith('data:') && dataUrl.length > 12_000) {
-    return { ...file, dataUrl: '', blobStored: true };
+  let changed = false;
+  const localIds = new Set(localExtras.map((e) => e.id));
+  for (const e of remoteExtras ?? []) {
+    if (e?.id && !localIds.has(e.id)) changed = true;
   }
-  return file;
+  for (const local of localExtras) {
+    if (!local?.id) continue;
+    const remoteEntry = byId.get(local.id);
+    if (!remoteEntry) {
+      byId.set(local.id, local);
+      changed = true;
+      continue;
+    }
+    if ((local.updatedAt || '') > (remoteEntry.updatedAt || '')) {
+      byId.set(local.id, local);
+      changed = true;
+    }
+  }
+  const extras = [...byId.values()].sort((a, b) =>
+    (b.createdAt || b.doneDate || '').localeCompare(a.createdAt || a.doneDate || ''),
+  );
+  if (!changed && extras.length !== localExtras.length) changed = true;
+  return { extras, changed };
 }
 
+/** Quita adjuntos inline del sync; las evidencias de avance las externaliza el server. */
 function leanProjectForSync(project: CreativeProject): CreativeProject {
   const { attachments, ...base } = {
     ...project,
     ...sanitizeProjectCollaborators(project),
   };
-  const progressUpdates = (project.progressUpdates ?? []).map((up) => ({
-    ...up,
-    files: up.files?.map((f) => leanFileForSync(f)),
-    images: up.images?.map((img) => {
-      const dataUrl = img.dataUrl ?? '';
-      if (
-        dataUrl.startsWith('http://') ||
-        dataUrl.startsWith('https://') ||
-        dataUrl.startsWith('/api/evidence/') ||
-        dataUrl.startsWith('/evidence/')
-      ) {
-        return img;
-      }
-      if (dataUrl.startsWith('data:') && dataUrl.length > 12_000) {
-        return { ...img, dataUrl: '' };
-      }
-      return img;
-    }),
-  }));
+  // Mantener progressUpdates (texto + files/images). El server externaliza dataUrls.
   const next: CreativeProject = {
     ...base,
-    progressUpdates: progressUpdates.length ? progressUpdates : undefined,
+    progressUpdates: project.progressUpdates,
   };
   if (attachments?.length) {
     next.attachmentCount = attachments.length;
+  } else if (typeof project.attachmentCount === 'number') {
+    next.attachmentCount = project.attachmentCount;
   }
   return next;
 }
@@ -1028,6 +1027,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /** Snapshot del board para reglas de sync sin closures obsoletas. */
   const boardRef = useRef(board);
   boardRef.current = board;
+  const extraProjectsRef = useRef(extraProjects);
+  extraProjectsRef.current = extraProjects;
+  const schedulePushRef = useRef<(opts?: { immediate?: boolean }) => void>(() => {});
   // Modo espejo oculto: solo la cuenta de Dylan puede observar la vista de Orlando.
   const [spyMode, setSpyMode] = useState(false);
   const realSessionUserId = useRef<string | null>(
@@ -1360,6 +1362,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const deleted = deletedProjectIdsRef.current;
     // boardRef evita empujar un snapshot viejo justo después de marcar terminado.
     const liveBoard = boardRef.current ?? board;
+    const liveExtras = extraProjectsRef.current ?? extraProjects;
     const leanBoard: BoardState = {
       ...liveBoard,
       projects: softDedupeProjectsByNameAndCollaborators(
@@ -1381,7 +1384,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       teamRoster,
       socialAccounts,
       deletedProjectIds: deleted,
-      extraProjects,
+      extraProjects: liveExtras,
       officeOvertime,
       attendanceStore,
       updatedAt: new Date().toISOString(),
@@ -1421,9 +1424,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const localState = buildSyncState();
           const remote = await fetchSyncState();
+          // Si el pull falló/timeout, no empujar a ciegas (puede borrar Extras/Concluidos).
+          if (!remote) {
+            window.setTimeout(() => schedulePushRef.current(), 4000);
+            return;
+          }
           const withCompleted = mergeCompletedIntoSyncState(localState, remote);
           const state = mergeExtrasIntoSyncState(withCompleted, remote);
-          // Si recuperamos concluidos del remoto, reflejarlos también en el board local.
           if (state !== localState) {
             const recovered = (state.board.projects ?? []).filter(
               (p) => p.status === 'terminado',
@@ -1443,6 +1450,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 return { ...prev, projects: [...byId.values()] };
               });
             }
+            if (Array.isArray(state.extraProjects)) {
+              setExtraProjects(state.extraProjects);
+              extraProjectsRef.current = state.extraProjects;
+            }
           }
           const result = await pushSyncState(state);
           if (result.ok && result.updatedAt) {
@@ -1451,7 +1462,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               localEditAt.current = result.updatedAt;
             }
           } else if (!result.ok) {
-            window.setTimeout(() => schedulePush(), 4000);
+            window.setTimeout(() => schedulePushRef.current(), 4000);
           }
         } finally {
           pushInFlight.current = false;
@@ -1460,12 +1471,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (queued) applyRemoteRef.current?.(queued);
           if (pushQueued.current) {
             pushQueued.current = false;
-            schedulePush();
+            schedulePushRef.current();
           }
         }
       })();
     }, delay);
   }, [buildSyncState]);
+
+  schedulePushRef.current = schedulePush;
 
   // Referencia estable para llamar applyRemote desde schedulePush sin ciclos.
   const applyRemoteRef = useRef<((remote: AppSyncState) => void) | null>(null);
@@ -1518,6 +1531,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
         if (!changed) return prev;
         return { ...prev, projects };
+      });
+      setExtraProjects((prev) => {
+        const { extras, changed } = absorbRemoteExtras(prev, remote.extraProjects);
+        if (!changed) return prev;
+        extraProjectsRef.current = extras;
+        return extras;
       });
       if (remote.attendanceStore?.records?.length) {
         setAttendanceStore((prev) => mergeAttendanceStores(prev, remote.attendanceStore));
@@ -2899,8 +2918,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
 
       setExtraProjects((prev) => [entry, ...prev]);
+      extraProjectsRef.current = [entry, ...(extraProjectsRef.current ?? [])];
       // Empujar al instante para que un pull de otro dispositivo no lo borre.
-      window.setTimeout(() => schedulePush({ immediate: true }), 0);
+      window.setTimeout(() => schedulePushRef.current({ immediate: true }), 0);
 
       if (autoApprove && projectId) {
         const activeProject = buildExtraActiveProject(
@@ -2957,7 +2977,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       extraProjects,
       logActivity,
       buildExtraActiveProject,
-      schedulePush,
     ],
   );
 

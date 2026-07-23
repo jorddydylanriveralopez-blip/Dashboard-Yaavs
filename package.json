@@ -11,7 +11,9 @@
     "start": "node server/index.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "seed:server": "node server/seed-init.mjs"
+    "seed:server": "node server/seed-init.mjs",
+    "smoke": "node scripts/smoke-dashboard.mjs",
+    "ci": "npm run build && npm run smoke"
   },
   "dependencies": {
     "@google-analytics/data": "^6.1.0",

@@ -347,18 +347,22 @@ async function saveStateToBlob(state) {
 }
 
 async function loadExistingState() {
+  let fromDb = null;
+  let fromApi = null;
+  let fromBlob = null;
+
   if (databaseUrl()) {
-    const fromPg = await loadStateFromPostgres();
-    if (fromPg) return fromPg;
+    fromDb = await loadStateFromPostgres();
   }
-  if (hasSupabaseApi()) {
-    const fromApi = await loadStateFromSupabaseApi();
-    if (fromApi) return fromApi;
+  if ((!fromDb || !isMeaningfulState(fromDb)) && hasSupabaseApi()) {
+    fromApi = await loadStateFromSupabaseApi();
   }
   if (blobToken() || isServerless()) {
-    const fromBlob = await loadStateFromBlob();
-    if (fromBlob) return fromBlob;
+    fromBlob = await loadStateFromBlob();
   }
+
+  const preferred = preferRicherState(preferRicherState(fromDb, fromApi), fromBlob);
+  if (preferred) return preferred;
   if (!isServerless()) return readLocalState();
   return null;
 }
