@@ -248,6 +248,12 @@
   width: 100%;
 }
 
+.calendar-push-status {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  color: var(--accent);
+}
+
 .calendar-side-head h2 {
   font-size: 1.0625rem;
   text-transform: capitalize;

@@ -25,6 +25,7 @@ export function CalendarView() {
     calendarStore,
     canEditAll,
     activeUsers,
+    enablePushNotifications,
     addCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,
@@ -38,6 +39,7 @@ export function CalendarView() {
   const reminderEmail = user ? reminderEmailForUser(user.id, user.email) : null;
   const icsInputRef = useRef<HTMLInputElement>(null);
   const [icsStatus, setIcsStatus] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<string | null>(null);
 
   const initialNow = new Date();
   const [year, setYear] = useState(initialNow.getFullYear());
@@ -196,10 +198,24 @@ export function CalendarView() {
     }
   };
 
-  const requestNotify = () => {
-    if (typeof Notification !== 'undefined') {
-      Notification.requestPermission();
+  const requestNotify = async () => {
+    setPushStatus('Activando…');
+    const result = await enablePushNotifications();
+    if (result.ok) {
+      setPushStatus('Listo: este dispositivo recibirá avisos de agenda al instante.');
+      return;
     }
+    if (result.reason === 'no-vapid') {
+      setPushStatus(
+        'Falta configurar VITE_VAPID_PUBLIC_KEY en el servidor. Mientras tanto, Orlando recibe correo.',
+      );
+      return;
+    }
+    if (result.reason === 'denied' || result.reason === 'default') {
+      setPushStatus('Permiso de notificaciones denegado. Actívalo en el navegador.');
+      return;
+    }
+    setPushStatus('No se pudieron activar las notificaciones en este dispositivo.');
   };
 
   return (
@@ -260,9 +276,10 @@ export function CalendarView() {
               <span className="day-dot day-dot--own" /> Tuyos{' '}
               <span className="day-dot day-dot--team" /> Equipo
             </p>
-            <button type="button" className="btn-ghost notify-btn" onClick={requestNotify}>
+            <button type="button" className="btn-ghost notify-btn" onClick={() => void requestNotify()}>
               Activar notificaciones
             </button>
+            {pushStatus && <p className="calendar-push-status">{pushStatus}</p>}
           </div>
         </section>
 

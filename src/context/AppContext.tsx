@@ -35,8 +35,8 @@ import {
   pushSyncState,
 } from '../api/client';
 import { saveAssignmentAttachments } from '../utils/attachmentStore';
-import { syncCalendarForReminders } from '../api/calendar';
-import { notifyPush, subscribeToPush } from '../api/pushClient';
+import { syncCalendarForReminders, notifyOrlandoAgendaAlert } from '../api/calendar';
+import { notifyPush, subscribeToPush, showLocalNotification } from '../api/pushClient';
 import {
   ASSIGNMENTS_STORAGE_KEY,
   BOARD_SCHEMA_VERSION,
@@ -2085,6 +2085,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
+  // Orlando: aviso local al instante cuando el sync trae eventos nuevos del equipo.
+  const knownTeamEventIdsRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    if (!user || (user.employeeId !== 'emp-orlando' && user.id !== 'u-orlando')) return;
+
+    const ids = new Set<string>();
+    const fresh: { title: string; owner: string; date: string; time: string; id: string }[] =
+      [];
+    for (const [uid, state] of Object.entries(calendarStore)) {
+      if (uid === user.id) continue;
+      for (const ev of state.events ?? []) {
+        if (ev.done || ev.shared === false) continue;
+        const key = `${uid}:${ev.id}`;
+        ids.add(key);
+        if (knownTeamEventIdsRef.current && !knownTeamEventIdsRef.current.has(key)) {
+          fresh.push({
+            id: ev.id,
+            title: ev.title,
+            owner: ev.ownerName ?? uid,
+            date: ev.date,
+            time: ev.time,
+          });
+        }
+      }
+    }
+
+    if (knownTeamEventIdsRef.current === null) {
+      knownTeamEventIdsRef.current = ids;
+      return;
+    }
+
+    for (const ev of fresh.slice(0, 5)) {
+      void showLocalNotification(`Agenda — ${ev.owner}`, {
+        body: `${ev.title} · ${ev.date} ${ev.time}`,
+        tag: `team-agenda-${ev.id}`,
+      });
+    }
+    knownTeamEventIdsRef.current = ids;
+  }, [calendarStore, user]);
+
   const changePassword = useCallback(
     (current: string, next: string) => {
       if (!user) return false;
@@ -3417,17 +3457,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
           tag: 'agenda',
         });
       } else {
+        const title = busyLabel
+          ? `${user.name} marcó ocupado`
+          : `${user.name} agregó a su agenda`;
+        const body = busyLabel
+          ? `${ev.date}${ev.time ? ` · ${ev.time}` : ''}`
+          : `${ev.title} · ${ev.date} ${ev.time}`;
         notifyPush({
           employeeIds: ['emp-orlando'],
+          userIds: ['u-orlando'],
           excludeUserId: user.id,
-          title: busyLabel
-            ? `${user.name} marcó ocupado`
-            : `${user.name} agregó a su agenda`,
-          body: busyLabel
-            ? `${ev.date}${ev.time ? ` · ${ev.time}` : ''}`
-            : `${ev.title} · ${ev.date} ${ev.time}`,
+          title,
+          body,
           url: '/agenda',
-          tag: 'agenda',
+          tag: `agenda-${ev.id}`,
+        });
+        notifyOrlandoAgendaAlert({
+          actorName: user.name,
+          title,
+          body,
+          date: ev.date,
+          time: ev.time,
         });
       }
     },
@@ -3472,15 +3522,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
           tag: 'agenda',
         });
       } else {
+        const title = busyLabel
+          ? `${user.name} quitó ocupación`
+          : `${user.name} eliminó de su agenda`;
+        const body = `${removed.title} · ${removed.date}`;
         notifyPush({
           employeeIds: ['emp-orlando'],
+          userIds: ['u-orlando'],
           excludeUserId: user.id,
-          title: busyLabel
-            ? `${user.name} quitó ocupación`
-            : `${user.name} eliminó de su agenda`,
-          body: `${removed.title} · ${removed.date}`,
+          title,
+          body,
           url: '/agenda',
-          tag: 'agenda',
+          tag: `agenda-del-${removed.id}`,
+        });
+        notifyOrlandoAgendaAlert({
+          actorName: user.name,
+          title,
+          body,
+          date: removed.date,
+          time: removed.time,
         });
       }
     },

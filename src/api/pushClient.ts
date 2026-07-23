@@ -140,6 +140,7 @@ export async function unsubscribeFromPush(): Promise<void> {
 export interface PushNotifyPayload {
   audience?: 'all' | 'employees';
   employeeIds?: string[];
+  userIds?: string[];
   excludeUserId?: string;
   title: string;
   body?: string;
@@ -149,8 +150,8 @@ export interface PushNotifyPayload {
 
 /** Pide al servidor que envíe una notificación push. No bloquea la UI. */
 export function notifyPush(payload: PushNotifyPayload): void {
-  const key = vapidPublicKey();
-  if (!key) return;
+  // No exigir VITE_VAPID_PUBLIC_KEY aquí: esa clave solo hace falta para
+  // suscribir el dispositivo. El envío lo hace el servidor con VAPID_*.
   void fetch(`${apiBase()}/api/push`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

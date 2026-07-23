@@ -17,6 +17,7 @@ import { readEvidenceFile } from './evidenceStore.mjs';
 import {
   resolveReminderEmail,
   sendCalendarReminderEmail,
+  sendAgendaAlertEmail,
   eventsDueForReminder,
 } from './calendarReminders.mjs';
 import { removeSubscription, saveSubscription, sendPush } from './pushStore.mjs';
@@ -128,6 +129,33 @@ app.post('/api/calendar/send-reminder', async (req, res) => {
   });
   if (!result.ok) {
     res.status(500).json({ error: result.error ?? 'No se pudo enviar el correo' });
+    return;
+  }
+  res.json({ ok: true, to });
+});
+
+/** Aviso inmediato a Orlando (u otro destinatario) por cambios de agenda del equipo. */
+app.post('/api/calendar/send-alert', async (req, res) => {
+  const { toUserId, email, actorName, title, body, date, time } = req.body ?? {};
+  if (!title || !body) {
+    res.status(400).json({ error: 'Datos incompletos' });
+    return;
+  }
+  const to = resolveReminderEmail(toUserId || 'u-orlando', email);
+  if (!to) {
+    res.status(400).json({ error: 'Sin correo configurado para avisos' });
+    return;
+  }
+  const result = await sendAgendaAlertEmail({
+    to,
+    actorName: actorName ?? 'Equipo',
+    title,
+    body,
+    date,
+    time,
+  });
+  if (!result.ok) {
+    res.status(500).json({ error: result.error ?? 'No se pudo enviar el aviso' });
     return;
   }
   res.json({ ok: true, to });
@@ -358,7 +386,7 @@ app.all('/api/push', async (req, res) => {
       return;
     }
     if (action === 'notify') {
-      const { audience, employeeIds, excludeUserId, title, body: text, url, tag } = body;
+      const { audience, employeeIds, userIds, excludeUserId, title, body: text, url, tag } = body;
       if (!title) {
         res.status(400).json({ error: 'Falta el título' });
         return;
@@ -366,6 +394,7 @@ app.all('/api/push', async (req, res) => {
       const result = await sendPush({
         audience,
         employeeIds,
+        userIds,
         excludeUserId,
         title,
         body: text,

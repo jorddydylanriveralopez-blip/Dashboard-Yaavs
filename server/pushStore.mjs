@@ -37,13 +37,25 @@ export async function removeSubscription(endpoint) {
   await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
 }
 
-async function fetchTargets({ audience, employeeIds, excludeUserId }) {
+async function fetchTargets({ audience, employeeIds, userIds, excludeUserId }) {
   const rows = await sql`SELECT endpoint, subscription, user_id, employee_id FROM push_subscriptions`;
+  const empFilter = Array.isArray(employeeIds) && employeeIds.length > 0;
+  const userFilter = Array.isArray(userIds) && userIds.length > 0;
+
   return rows.filter((row) => {
     if (excludeUserId && row.user_id === excludeUserId) return false;
-    if (audience === 'employees' && Array.isArray(employeeIds) && employeeIds.length) {
-      return employeeIds.includes(row.employee_id);
+
+    // Si piden IDs concretos, solo esos (emp o user).
+    if (empFilter || userFilter) {
+      const matchEmp = empFilter && employeeIds.includes(row.employee_id);
+      const matchUser = userFilter && userIds.includes(row.user_id);
+      return Boolean(matchEmp || matchUser);
     }
+
+    if (audience === 'employees') {
+      return Boolean(row.employee_id);
+    }
+
     return true;
   });
 }
@@ -52,6 +64,7 @@ async function fetchTargets({ audience, employeeIds, excludeUserId }) {
 export async function sendPush({
   audience = 'all',
   employeeIds,
+  userIds,
   excludeUserId,
   title,
   body,
@@ -65,7 +78,7 @@ export async function sendPush({
     return { ok: false, error: 'Base de datos no configurada', sent: 0 };
   }
 
-  const targets = await fetchTargets({ audience, employeeIds, excludeUserId });
+  const targets = await fetchTargets({ audience, employeeIds, userIds, excludeUserId });
   const payload = JSON.stringify({ title, body, url: url ?? '/', tag });
 
   let sent = 0;
@@ -73,7 +86,11 @@ export async function sendPush({
   await Promise.all(
     targets.map(async (row) => {
       try {
-        await webpush.sendNotification(row.subscription, payload);
+        const sub =
+          typeof row.subscription === 'string'
+            ? JSON.parse(row.subscription)
+            : row.subscription;
+        await webpush.sendNotification(sub, payload);
         sent += 1;
       } catch (err) {
         const status = err?.statusCode;
@@ -83,9 +100,8 @@ export async function sendPush({
   );
 
   if (stale.length) {
-    const sql = await getSql();
     await sql`DELETE FROM push_subscriptions WHERE endpoint = ANY(${stale})`;
   }
 
-  return { ok: true, sent };
+  return { ok: true, sent, targeted: targets.length };
 }

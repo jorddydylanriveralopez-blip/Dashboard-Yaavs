@@ -110,3 +110,70 @@ export async function sendCalendarReminderEmail({ to, userName, event }) {
 
   return { ok: true };
 }
+
+export function buildAgendaAlertEmailHtml({ actorName, title, body, date, time }) {
+  const when =
+    date && time
+      ? formatEventWhen(date, time)
+      : date
+        ? date
+        : '';
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8" /></head>
+<body style="margin:0;padding:0;background:#f4f6fb;font-family:Segoe UI,system-ui,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 12px;">
+    <tr><td align="center">
+      <table width="100%" style="max-width:520px;background:#fff;border-radius:16px;border:1px solid #e6eaf2;overflow:hidden;">
+        <tr><td style="padding:22px 24px;background:linear-gradient(135deg,#2f4eb8,#4f6fe8);color:#fff;">
+          <div style="font-size:12px;opacity:.9;text-transform:uppercase;letter-spacing:.06em;">Yaavs — Agenda</div>
+          <h1 style="margin:8px 0 0;font-size:20px;">${escapeHtml(title)}</h1>
+        </td></tr>
+        <tr><td style="padding:24px;color:#1f2a44;line-height:1.5;">
+          <p style="margin:0 0 12px;">Hola <strong>Orlando</strong>,</p>
+          <p style="margin:0 0 16px;">${escapeHtml(body)}</p>
+          ${when ? `<div style="padding:14px 16px;border-radius:12px;background:#f3f6ff;border:1px solid #d8e2ff;font-size:14px;color:#4a5d8a;">📅 ${escapeHtml(when)}</div>` : ''}
+          <p style="margin:16px 0 0;font-size:13px;color:#6b7a99;">Revisa la agenda del equipo en Yaavs.</p>
+          <p style="margin:8px 0 0;font-size:12px;color:#9aa6bf;">Aviso de ${escapeHtml(actorName)}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+/** Aviso inmediato a Orlando cuando alguien del equipo mueve la agenda. */
+export async function sendAgendaAlertEmail({
+  to,
+  actorName,
+  title,
+  body,
+  date,
+  time,
+}) {
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    return { ok: false, error: 'RESEND_API_KEY no configurada en el servidor' };
+  }
+
+  const from = process.env.RESEND_FROM || 'Yaavs Agenda <onboarding@resend.dev>';
+  const subject = `${title} — Yaavs Agenda`;
+  const html = buildAgendaAlertEmailHtml({ actorName, title, body, date, time });
+
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from, to: [to], subject, html }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    return { ok: false, error: text || `Resend ${res.status}` };
+  }
+
+  return { ok: true };
+}

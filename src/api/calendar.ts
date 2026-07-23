@@ -59,3 +59,30 @@ export async function sendCalendarReminderEmail(input: {
     return { ok: false, error: 'No se pudo contactar al servidor' };
   }
 }
+
+/** Avisa a Orlando al instante cuando alguien del equipo cambia la agenda. */
+export function notifyOrlandoAgendaAlert(input: {
+  actorName: string;
+  title: string;
+  body: string;
+  date?: string;
+  time?: string;
+}): void {
+  const base = apiBase();
+  if (!base) return;
+  void fetch(`${base}/api/calendar/send-alert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      toUserId: 'u-orlando',
+      actorName: input.actorName,
+      title: input.title,
+      body: input.body,
+      date: input.date,
+      time: input.time,
+    }),
+    keepalive: true,
+  }).catch(() => {
+    /* silencioso */
+  });
+}
