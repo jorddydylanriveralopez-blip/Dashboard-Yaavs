@@ -601,13 +601,9 @@ function mergeCompletedIntoSyncState(
       continue;
     }
     if (cur.status !== 'terminado') {
-      const remoteNewer =
-        (p.updatedAt || '') >= (cur.updatedAt || '') ||
-        (p.completedAt || '') >= (cur.updatedAt || '');
-      if (remoteNewer) {
-        byId.set(p.id, p);
-        changed = true;
-      }
+      // Remoto concluido siempre recupera el status, aunque el local sea más nuevo.
+      byId.set(p.id, { ...cur, ...p, status: 'terminado' });
+      changed = true;
     }
   }
   if (!changed) return local;
@@ -641,7 +637,7 @@ function absorbRemoteProjects(
       continue;
     }
     if (rp.status === 'terminado' && lp.status !== 'terminado') {
-      byId.set(rp.id, { ...lp, ...rp });
+      byId.set(rp.id, { ...lp, ...rp, status: 'terminado' });
       changed = true;
       continue;
     }
@@ -650,11 +646,48 @@ function absorbRemoteProjects(
       lp.status === 'terminado' &&
       (rp.updatedAt || '') > (lp.updatedAt || '')
     ) {
-      byId.set(rp.id, { ...lp, ...rp });
+      byId.set(rp.id, { ...lp, ...rp, status: 'terminado' });
       changed = true;
     }
   }
   return { projects: [...byId.values()], changed };
+}
+
+/** Quita data URLs enormes del sync (evidencias viven en IndexedDB / biblioteca). */
+function leanFileForSync<T extends { dataUrl?: string; blobStored?: boolean }>(
+  file: T,
+): T {
+  const dataUrl = file.dataUrl ?? '';
+  if (typeof dataUrl === 'string' && dataUrl.startsWith('data:') && dataUrl.length > 12_000) {
+    return { ...file, dataUrl: '', blobStored: true };
+  }
+  return file;
+}
+
+function leanProjectForSync(project: CreativeProject): CreativeProject {
+  const { attachments, ...base } = {
+    ...project,
+    ...sanitizeProjectCollaborators(project),
+  };
+  const progressUpdates = (project.progressUpdates ?? []).map((up) => ({
+    ...up,
+    files: up.files?.map((f) => leanFileForSync(f)),
+    images: up.images?.map((img) => {
+      const dataUrl = img.dataUrl ?? '';
+      if (dataUrl.startsWith('data:') && dataUrl.length > 12_000) {
+        return { ...img, dataUrl: '' };
+      }
+      return img;
+    }),
+  }));
+  const next: CreativeProject = {
+    ...base,
+    progressUpdates: progressUpdates.length ? progressUpdates : undefined,
+  };
+  if (attachments?.length) {
+    next.attachmentCount = attachments.length;
+  }
+  return next;
 }
 
 function loadDeletedProjectIds(): Record<string, string> {
@@ -1282,11 +1315,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...liveBoard,
       projects: softDedupeProjectsByNameAndCollaborators(
         (liveBoard.projects ?? []).filter((p) => !deleted[p.id]),
-      ).map((p) => {
-          const { attachments, ...base } = { ...p, ...sanitizeProjectCollaborators(p) };
-          if (!attachments?.length) return base;
-          return { ...base, attachmentCount: attachments.length };
-        }),
+      ).map(leanProjectForSync),
     };
     const leanAssignments = assignments.map((a) => {
       if (!a.attachments?.length) return a;
@@ -1491,31 +1520,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           preservedLocal = true;
           continue;
         }
-        // Concluido remoto gana salvo que el local también esté terminado y sea más nuevo.
+        // «terminado» siempre gana a cualquier status activo (sin importar updatedAt).
+        // Si no, un edit local más nuevo reabría el proyecto y vaciaba Concluidos.
         if (rp.status === 'terminado' && lp.status !== 'terminado') {
-          const remoteNewerOrEqual =
-            (rp.updatedAt || '') >= (lp.updatedAt || '') ||
-            (rp.completedAt || '') >= (lp.updatedAt || '');
-          if (remoteNewerOrEqual) {
-            continue;
-          }
+          continue;
         }
         if (lp.status === 'terminado' && rp.status !== 'terminado') {
-          const localNewerOrEqual =
-            (lp.updatedAt || '') >= (rp.updatedAt || '') ||
-            (lp.completedAt || '') >= (rp.updatedAt || '');
-          if (localNewerOrEqual) {
-            preservedLocal = true;
-            byId.set(lp.id, {
-              ...rp,
-              ...lp,
-              attachments: lp.attachments?.length ? lp.attachments : rp.attachments,
-              attachmentCount: lp.attachments?.length
-                ? lp.attachments.length
-                : (rp.attachmentCount ?? rp.attachments?.length),
-            });
-            continue;
-          }
+          preservedLocal = true;
+          byId.set(lp.id, {
+            ...rp,
+            ...lp,
+            status: 'terminado',
+            attachments: lp.attachments?.length ? lp.attachments : rp.attachments,
+            attachmentCount: lp.attachments?.length
+              ? lp.attachments.length
+              : (rp.attachmentCount ?? rp.attachments?.length),
+          });
+          continue;
         }
         const localNewer = (lp.updatedAt || '') > (rp.updatedAt || '');
         const localAccepted =

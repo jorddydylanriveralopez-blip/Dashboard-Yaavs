@@ -1,6 +1,7 @@
 import type { AppSyncState } from '../types';
 
-const FETCH_TIMEOUT_MS = 30000;
+/** El estado puede traer evidencias grandes; 30s abortaba el pull y vaciaba Concluidos. */
+const FETCH_TIMEOUT_MS = 180_000;
 
 function apiBase(): string {
   const fromEnv = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '');

@@ -151,7 +151,7 @@ function mergeKeepExistingProjects(incoming, existing, deletedProjectIds) {
       continue;
     }
     if (p.status === 'terminado' && cur.status !== 'terminado') {
-      byId.set(p.id, { ...cur, ...p });
+      byId.set(p.id, { ...cur, ...p, status: 'terminado' });
       continue;
     }
     if (cur.status === 'terminado' && p.status !== 'terminado') {
