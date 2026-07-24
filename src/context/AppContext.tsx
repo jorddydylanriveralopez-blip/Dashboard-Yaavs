@@ -786,6 +786,72 @@ function calendarsFingerprint(store: CalendarStore | undefined): string {
   }
 }
 
+/** Une agendas remotas con locales: no borrar importaciones más ricas (p. ej. Outlook de Orlando). */
+function mergeCalendarStores(
+  local: CalendarStore,
+  remote: CalendarStore | undefined,
+): { next: CalendarStore; preservedLocal: boolean } {
+  if (!remote) return { next: local, preservedLocal: false };
+  if (calendarsFingerprint(local) === calendarsFingerprint(remote)) {
+    return { next: local, preservedLocal: false };
+  }
+
+  const userIds = new Set([...Object.keys(local), ...Object.keys(remote)]);
+  const next: CalendarStore = {};
+  let preservedLocal = false;
+
+  for (const uid of userIds) {
+    const localState = local[uid];
+    const remoteState = remote[uid];
+    if (!localState && remoteState) {
+      next[uid] = remoteState;
+      continue;
+    }
+    if (localState && !remoteState) {
+      next[uid] = localState;
+      preservedLocal = true;
+      continue;
+    }
+    if (!localState || !remoteState) continue;
+
+    const byId = new Map<string, CalendarEvent>();
+    for (const ev of remoteState.events ?? []) byId.set(ev.id, ev);
+    for (const ev of localState.events ?? []) {
+      const remoteEv = byId.get(ev.id);
+      if (!remoteEv) {
+        byId.set(ev.id, ev);
+        preservedLocal = true;
+        continue;
+      }
+      // Preferir el que tenga más datos (externalId / notes / source).
+      const localScore =
+        (ev.externalId ? 2 : 0) + (ev.notes?.length ?? 0) + (ev.source ? 1 : 0);
+      const remoteScore =
+        (remoteEv.externalId ? 2 : 0) +
+        (remoteEv.notes?.length ?? 0) +
+        (remoteEv.source ? 1 : 0);
+      if (localScore > remoteScore) {
+        byId.set(ev.id, ev);
+        preservedLocal = true;
+      }
+    }
+
+    // Si local tiene más eventos (import Outlook), conservar todos.
+    const localCount = localState.events?.length ?? 0;
+    const remoteCount = remoteState.events?.length ?? 0;
+    if (localCount > remoteCount) preservedLocal = true;
+
+    next[uid] = {
+      activeTimer: remoteState.activeTimer ?? localState.activeTimer ?? null,
+      events: [...byId.values()].sort((a, b) =>
+        `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
+      ),
+    };
+  }
+
+  return { next, preservedLocal };
+}
+
 function loadDeletedProjectIds(): Record<string, string> {
   try {
     const raw = localStorage.getItem(DELETED_PROJECTS_KEY);
@@ -1758,11 +1824,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return [...byId.values()].filter((a) => !removedEmpIds.has(a.employeeId));
     });
     setCalendarStore((prev) => {
-      if (!remote.calendars) return prev;
-      if (calendarsFingerprint(prev) === calendarsFingerprint(remote.calendars)) {
-        return prev;
-      }
-      return remote.calendars;
+      const { next, preservedLocal: keptCal } = mergeCalendarStores(prev, remote.calendars);
+      if (keptCal) preservedLocal = true;
+      if (calendarsFingerprint(prev) === calendarsFingerprint(next)) return prev;
+      localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(next));
+      return next;
     });
     // No borrar contraseñas locales si el remoto viene vacío (fallo de sync previo).
     setPasswordOverrides((prev) => {
@@ -3603,6 +3669,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(updated));
         return updated;
       });
+      // Empujar al server de inmediato para que el equipo vea la agenda.
+      schedulePushRef.current({ immediate: true });
 
       logActivity(
         'project_progress',

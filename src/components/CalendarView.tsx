@@ -322,7 +322,9 @@ export function CalendarView() {
               const key = toDateKey(cell);
               const ownCount = eventsByDate.get(key)?.length ?? 0;
               const teamCount = teamByDate.get(key)?.length ?? 0;
-              const orlandoCount = orlandoByDate.get(key)?.length ?? 0;
+              const orlandoDay = orlandoByDate.get(key) ?? [];
+              const orlandoCount = orlandoDay.length;
+              const orlandoPreview = orlandoDay.slice(0, 2);
               const isSelected = key === selectedDate;
               const isToday = key === toDateKey(new Date());
               return (
@@ -331,8 +333,26 @@ export function CalendarView() {
                   type="button"
                   className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${orlandoCount > 0 ? 'has-orlando' : ''}`}
                   onClick={() => setSelectedDate(key)}
+                  title={
+                    orlandoCount > 0
+                      ? orlandoDay.map((e) => `${e.time} ${e.title}`).join('\n')
+                      : undefined
+                  }
                 >
                   <span className="day-num">{cell.getDate()}</span>
+                  {orlandoPreview.length > 0 && (
+                    <span className="day-orlando-events">
+                      {orlandoPreview.map((ev) => (
+                        <span key={ev.id} className="day-orlando-chip">
+                          <span className="day-orlando-time">{ev.time}</span>
+                          <span className="day-orlando-name">{ev.title}</span>
+                        </span>
+                      ))}
+                      {orlandoCount > 2 && (
+                        <span className="day-orlando-more">+{orlandoCount - 2} más</span>
+                      )}
+                    </span>
+                  )}
                   {(ownCount > 0 || teamCount > 0 || orlandoCount > 0) && (
                     <span className="day-dots-row" aria-hidden>
                       {ownCount > 0 && <span className="day-dot day-dot--own" />}
