@@ -351,6 +351,7 @@ interface AppContextValue {
     projectId: string,
     input: {
       text: string;
+      linksNote?: string;
       images?: { name: string; dataUrl: string }[];
       files?: FileAttachment[];
     },
@@ -4115,6 +4116,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       projectId: string,
       input: {
         text: string;
+        linksNote?: string;
         images?: { name: string; dataUrl: string }[];
         files?: FileAttachment[];
       },
@@ -4123,7 +4125,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const current = board.projects?.find((p) => p.id === projectId);
       if (!current) return false;
       const clean = input.text.trim();
-      if (!clean && !input.images?.length && !input.files?.length) return false;
+      const linksNote = (input.linksNote ?? '').trim().slice(0, 2000) || undefined;
+      if (!clean && !linksNote && !input.images?.length && !input.files?.length) return false;
 
       const files = input.files?.length
         ? input.files.slice(0, MAX_PROGRESS_FILES)
@@ -4136,6 +4139,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         authorId: user.id,
         authorName: user.name,
         text: clean.slice(0, 1200),
+        linksNote,
         images,
         files,
         createdAt: new Date().toISOString(),
@@ -4155,9 +4159,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         fileCount > 0
           ? ` · ${fileCount} evidencia${fileCount === 1 ? '' : 's'}`
           : '';
+      const linksLabel = linksNote ? ' · con links' : '';
       logActivity(
         'project_progress',
-        `Avance en «${current.projectName || 'proyecto'}»: ${clean.slice(0, 80) || 'evidencia subida'}${evidenceLabel}`,
+        `Avance en «${current.projectName || 'proyecto'}»: ${clean.slice(0, 80) || linksNote?.slice(0, 80) || 'evidencia subida'}${evidenceLabel}${linksLabel}`,
         user.name,
       );
       // Avisa a Orlando (y Carlos) del avance + evidencias.
@@ -4166,7 +4171,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         employeeIds: ['emp-orlando', 'emp-juancarlos'],
         excludeUserId: user.id,
         title: `${user.name} subió un avance`,
-        body: `${current.projectName || 'Proyecto'}: ${clean.slice(0, 100) || 'evidencia'}${evidenceLabel}`,
+        body: `${current.projectName || 'Proyecto'}: ${clean.slice(0, 100) || linksNote?.slice(0, 100) || 'evidencia'}${evidenceLabel}`,
         url: '/avances',
         tag: `progress-${projectId}`,
       });

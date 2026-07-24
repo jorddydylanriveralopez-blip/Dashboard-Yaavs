@@ -585,6 +585,54 @@
   word-break: break-word;
 }
 
+.project-progress-links-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.project-progress-links-field textarea {
+  font-weight: 400;
+}
+
+.project-progress-optional {
+  font-weight: 500;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.project-progress-links {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-muted, rgba(0, 0, 0, 0.03));
+}
+
+.project-progress-links-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.project-progress-links-body {
+  margin: 0;
+}
+
+.project-progress-links-body a {
+  color: var(--accent);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
 .project-completion-bar {
   flex-shrink: 0;
   margin: 0;

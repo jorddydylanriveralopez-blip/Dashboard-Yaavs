@@ -225,6 +225,10 @@ export interface ProjectProgressUpdate {
   authorId: string;
   authorName: string;
   text: string;
+  /**
+   * Apartado opcional (solo colaboradores): links de páginas, referencias, etc.
+   */
+  linksNote?: string;
   /** Compatibilidad con evidencias antiguas guardadas como imágenes. */
   images?: { name: string; dataUrl: string }[];
   /** Evidencias actuales: imágenes, videos, PDF, documentos u otros archivos. */

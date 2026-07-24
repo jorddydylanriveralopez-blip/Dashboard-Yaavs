@@ -67,6 +67,7 @@ export function AvancesView() {
     myProjects.find((p) => p.id === selectedId) ?? myProjects[0] ?? null;
 
   const [text, setText] = useState('');
+  const [linksNote, setLinksNote] = useState('');
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
@@ -140,19 +141,21 @@ export function AvancesView() {
       toast.info('Elige un proyecto primero.');
       return;
     }
-    if (!text.trim() && files.length === 0) {
-      toast.info('Escribe el avance o sube al menos una evidencia.');
+    if (!text.trim() && !linksNote.trim() && files.length === 0) {
+      toast.info('Escribe el avance, pega un link o sube al menos una evidencia.');
       return;
     }
     setBusy(true);
     try {
       const ok = addProjectProgress(selected.id, {
         text,
+        linksNote: linksNote.trim() || undefined,
         files: files.length ? files.slice(0, MAX_PROGRESS_FILES) : undefined,
       });
       if (ok) {
         const n = files.length;
         setText('');
+        setLinksNote('');
         setFiles([]);
         toast.success(
           n > 0
@@ -317,6 +320,18 @@ export function AvancesView() {
                 />
               </label>
 
+              <label className="avances-field">
+                Links de páginas web{' '}
+                <span className="avances-optional">(opcional)</span>
+                <SpellCheckTextarea
+                  value={linksNote}
+                  onChange={(e) => setLinksNote(e.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                  placeholder="Pega aquí los links de las páginas web, Figma, Drive, etc. Uno por línea o separados por espacio."
+                />
+              </label>
+
               <div className="avances-files">
                 <span className="avances-files-label">Evidencias</span>
                 <p className="avances-files-hint">
@@ -395,6 +410,12 @@ function FeedCard({
       ) : (
         <p className="avances-feed-text avances-feed-text--muted">Sin observación escrita.</p>
       )}
+      {item.update.linksNote?.trim() && (
+        <div className="avances-links-note">
+          <span className="avances-links-label">Links de páginas</span>
+          <LinksNoteText text={item.update.linksNote} />
+        </div>
+      )}
       {(item.update.files?.length ?? 0) > 0 && (
         <FileAttachmentsList attachments={item.update.files!} compact />
       )}
@@ -440,6 +461,12 @@ function ProgressList({
             <span>{formatProgressDate(up.createdAt)}</span>
           </div>
           {up.text && <p className="avances-feed-text">{up.text}</p>}
+          {up.linksNote?.trim() && (
+            <div className="avances-links-note">
+              <span className="avances-links-label">Links de páginas</span>
+              <LinksNoteText text={up.linksNote} />
+            </div>
+          )}
           {(up.files?.length ?? 0) > 0 && (
             <FileAttachmentsList attachments={up.files!} compact />
           )}
@@ -455,5 +482,29 @@ function ProgressList({
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Renderiza texto con URLs clicables. */
+function LinksNoteText({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s<>"']+)/gi);
+  return (
+    <p className="avances-feed-text avances-links-body">
+      {parts.map((part, i) =>
+        /^https?:\/\//i.test(part) ? (
+          <a
+            key={`link-${i}`}
+            href={part}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="avances-link"
+          >
+            {part}
+          </a>
+        ) : (
+          <span key={`txt-${i}`}>{part}</span>
+        ),
+      )}
+    </p>
   );
 }

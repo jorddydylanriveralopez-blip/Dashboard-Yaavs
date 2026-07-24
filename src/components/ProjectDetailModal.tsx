@@ -136,6 +136,7 @@ export function ProjectDetailModal({
   const proofInputRef = useRef<HTMLInputElement>(null);
   const completionSectionRef = useRef<HTMLElement>(null);
   const [progressText, setProgressText] = useState('');
+  const [progressLinksNote, setProgressLinksNote] = useState('');
   const [progressFiles, setProgressFiles] = useState<FileAttachment[]>([]);
   const [progressBusy, setProgressBusy] = useState(false);
   const [declineBusy, setDeclineBusy] = useState(false);
@@ -347,8 +348,8 @@ export function ProjectDetailModal({
     }
   };
   const handleSubmitProgress = () => {
-    if (!progressText.trim() && progressFiles.length === 0) {
-      toast.info('Escribe qué hiciste o sube una evidencia.');
+    if (!progressText.trim() && !progressLinksNote.trim() && progressFiles.length === 0) {
+      toast.info('Escribe qué hiciste, pega un link o sube una evidencia.');
       return;
     }
     if (progressFiles.length > MAX_PROGRESS_FILES) {
@@ -359,10 +360,12 @@ export function ProjectDetailModal({
     try {
       const ok = addProjectProgress(projectId, {
         text: progressText,
+        linksNote: !canEditAll ? progressLinksNote.trim() || undefined : undefined,
         files: progressFiles.length ? progressFiles : undefined,
       });
       if (ok) {
         setProgressText('');
+        setProgressLinksNote('');
         setProgressFiles([]);
         toast.success('Avance registrado. Orlando recibirá la notificación.');
       } else {
@@ -962,6 +965,21 @@ export function ProjectDetailModal({
                 rows={3}
                 maxLength={1200}
               />
+              {!canEditAll && (
+                <label className="project-progress-links-field">
+                  <span>
+                    Links de páginas web{' '}
+                    <span className="project-progress-optional">(opcional)</span>
+                  </span>
+                  <SpellCheckTextarea
+                    value={progressLinksNote}
+                    onChange={(e) => setProgressLinksNote(e.target.value)}
+                    placeholder="Pega aquí links de páginas web, Figma, Drive…"
+                    rows={2}
+                    maxLength={2000}
+                  />
+                </label>
+              )}
               <FileAttachmentsEditor
                 attachments={progressFiles}
                 onChange={(next) => setProgressFiles(next.slice(0, MAX_PROGRESS_FILES))}
@@ -1006,6 +1024,27 @@ export function ProjectDetailModal({
                     )}
                   </div>
                   {up.text && <p className="project-progress-text">{up.text}</p>}
+                  {up.linksNote?.trim() && (
+                    <div className="project-progress-links">
+                      <span className="project-progress-links-label">Links de páginas</span>
+                      <p className="project-progress-text project-progress-links-body">
+                        {up.linksNote.split(/(https?:\/\/[^\s<>"']+)/gi).map((part, i) =>
+                          /^https?:\/\//i.test(part) ? (
+                            <a
+                              key={`pl-${up.id}-${i}`}
+                              href={part}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              {part}
+                            </a>
+                          ) : (
+                            <span key={`pt-${up.id}-${i}`}>{part}</span>
+                          ),
+                        )}
+                      </p>
+                    </div>
+                  )}
                   {(up.images?.length ?? 0) > 0 && (
                     <div className="project-progress-thumbs">
                       {up.images!.map((img, i) => (
