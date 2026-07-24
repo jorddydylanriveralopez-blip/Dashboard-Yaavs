@@ -1,6 +1,6 @@
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { useSharedNow } from '../hooks/useSharedNow';
+import { useSharedNow, useSharedNowSlow } from '../hooks/useSharedNow';
 import {
   canUseOfficeOvertime,
   formatOvertimeClock,
@@ -26,7 +26,13 @@ export function OfficeOvertimePanel({ mode, compact }: Props) {
     stopOfficeOvertime,
   } = useApp();
   const toast = useToast();
-  const now = useSharedNow(true);
+  const anyRunning =
+    mode === 'self'
+      ? isOvertimeRunning(user?.employeeId ? officeOvertime[user.employeeId] : undefined)
+      : Object.values(officeOvertime).some((entry) => isOvertimeRunning(entry));
+  const nowFast = useSharedNow(anyRunning);
+  const nowSlow = useSharedNowSlow(!anyRunning);
+  const now = anyRunning ? nowFast : nowSlow;
 
   if (mode === 'self') {
     const employeeId = user?.employeeId;

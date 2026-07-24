@@ -10,7 +10,7 @@ import { assignmentTaskLine } from '../utils/assignmentBrief';
 import { isActiveProject } from '../utils/activeItems';
 import { formatShortDate } from '../utils/formatDate';
 import { formatDeadlineClock, getProjectTimelineInfo, projectDueDate } from '../utils/projectTimeline';
-import { useSharedNow } from '../hooks/useSharedNow';
+import { useSharedNowSlow } from '../hooks/useSharedNow';
 import {
   findProjectForTask,
   sortProjectsByUrgency,
@@ -385,7 +385,7 @@ function MyDayProjectCard({
   onOpenProject: (p: CreativeProject) => void;
   onCompleteProject: (p: CreativeProject) => void;
 }) {
-  const now = useSharedNow();
+  const now = useSharedNowSlow();
   const deadline = getProjectTimelineInfo(p, now);
   const due = projectDueDate(p);
   const clock = formatDeadlineClock(deadline);

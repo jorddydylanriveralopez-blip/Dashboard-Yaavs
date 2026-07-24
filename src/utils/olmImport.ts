@@ -1,5 +1,5 @@
-import JSZip from 'jszip';
 import type { CalendarEventKind } from '../types';
+import type JSZipType from 'jszip';
 
 export interface OlmImportEvent {
   title: string;
@@ -119,7 +119,7 @@ export function parseOlmCalendarXml(xml: string): OlmImportEvent[] {
   );
 }
 
-async function findCalendarXmlInZip(zip: JSZip): Promise<string | null> {
+async function findCalendarXmlInZip(zip: JSZipType): Promise<string | null> {
   const names = Object.keys(zip.files);
   const preferred =
     names.find((n) => /\/Calendario\/Calendar\.xml$/i.test(n)) ||
@@ -139,6 +139,8 @@ export async function parseOlmFile(file: File): Promise<OlmImportEvent[]> {
     return parseOlmCalendarXml(text);
   }
 
+  // Carga diferida: no meter JSZip (~1MB) en el chunk inicial de Agenda.
+  const { default: JSZip } = await import('jszip');
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const xml = await findCalendarXmlInZip(zip);
   if (!xml) {

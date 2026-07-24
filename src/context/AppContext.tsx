@@ -735,15 +735,32 @@ function absorbRemoteExtras(
 }
 
 /** Quita adjuntos inline del sync; las evidencias de avance las externaliza el server. */
+function stripInlineDataUrl<T extends { dataUrl?: string }>(item: T): T {
+  const url = item.dataUrl ?? '';
+  if (!url.startsWith('data:')) return item;
+  return { ...item, dataUrl: '' };
+}
+
+function leanProgressForSync(
+  updates: CreativeProject['progressUpdates'],
+): CreativeProject['progressUpdates'] {
+  if (!updates?.length) return updates;
+  return updates.map((up) => ({
+    ...up,
+    images: up.images?.map(stripInlineDataUrl),
+    files: up.files?.map(stripInlineDataUrl),
+  }));
+}
+
 function leanProjectForSync(project: CreativeProject): CreativeProject {
   const { attachments, ...base } = {
     ...project,
     ...sanitizeProjectCollaborators(project),
   };
-  // Mantener progressUpdates (texto + files/images). El server externaliza dataUrls.
+  // No enviar base64 en el sync: el server ya externaliza; si aún hay data: se vacían.
   const next: CreativeProject = {
     ...base,
-    progressUpdates: project.progressUpdates,
+    progressUpdates: leanProgressForSync(project.progressUpdates),
   };
   if (attachments?.length) {
     next.attachmentCount = attachments.length;
@@ -751,6 +768,22 @@ function leanProjectForSync(project: CreativeProject): CreativeProject {
     next.attachmentCount = project.attachmentCount;
   }
   return next;
+}
+
+function calendarsFingerprint(store: CalendarStore | undefined): string {
+  if (!store) return '';
+  try {
+    const parts: string[] = [];
+    for (const uid of Object.keys(store).sort()) {
+      const events = store[uid]?.events ?? [];
+      parts.push(
+        `${uid}:${events.length}:${events.map((e) => `${e.id}|${e.date}|${e.time}|${e.done ? 1 : 0}`).join(',')}`,
+      );
+    }
+    return parts.join('#');
+  } catch {
+    return String(Object.keys(store).length);
+  }
 }
 
 function loadDeletedProjectIds(): Record<string, string> {
@@ -1427,7 +1460,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
         pushInFlight.current = true;
         try {
           const localState = buildSyncState();
-          const remote = await fetchSyncState();
+          // Evitar un GET completo antes de cada PUT si el remoto es reciente.
+          const remoteAgeMs = lastRemoteAt.current
+            ? Date.now() - new Date(lastRemoteAt.current).getTime()
+            : Number.POSITIVE_INFINITY;
+          let remote =
+            Number.isFinite(remoteAgeMs) && remoteAgeMs < 12_000
+              ? null
+              : await fetchSyncState();
+          if (!remote && lastRemoteAt.current) {
+            // Usar el estado local como base; el server mergea al recibir.
+            const result = await pushSyncState(localState);
+            if (result.ok && result.updatedAt) {
+              lastRemoteAt.current = result.updatedAt;
+              if (localEditAt.current <= localState.updatedAt) {
+                localEditAt.current = result.updatedAt;
+              }
+            } else if (!result.ok) {
+              window.setTimeout(() => schedulePushRef.current(), 4000);
+            }
+            return;
+          }
+          if (!remote) {
+            remote = await fetchSyncState();
+          }
           // Si el pull falló/timeout, no empujar a ciegas (puede borrar Extras/Concluidos).
           if (!remote) {
             window.setTimeout(() => schedulePushRef.current(), 4000);
@@ -1701,7 +1757,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return [...byId.values()].filter((a) => !removedEmpIds.has(a.employeeId));
     });
-    setCalendarStore(remote.calendars);
+    setCalendarStore((prev) => {
+      if (!remote.calendars) return prev;
+      if (calendarsFingerprint(prev) === calendarsFingerprint(remote.calendars)) {
+        return prev;
+      }
+      return remote.calendars;
+    });
     // No borrar contraseñas locales si el remoto viene vacío (fallo de sync previo).
     setPasswordOverrides((prev) => {
       const remotePo = remote.passwordOverrides ?? {};
@@ -1859,12 +1921,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const pull = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      const online = await checkApiHealth();
-      if (cancelled) return;
-      setSyncOnline((prev) => (prev === online ? prev : online));
-      if (!online) return;
       const remote = await fetchSyncState();
       if (cancelled) return;
+      const online = Boolean(remote);
+      setSyncOnline((prev) => (prev === online ? prev : online));
+      if (!online) return;
       // Un servidor sin datos no debe pisar el estado local.
       const remoteHasBoard =
         (remote?.board?.tasks?.length ?? 0) > 0 ||
@@ -1876,7 +1937,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (intervalId != null) return;
       intervalId = window.setInterval(() => {
         void pull();
-      }, 5_000);
+      }, 20_000);
     };
 
     const stop = () => {
@@ -3689,20 +3750,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const calendarSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCalendarSyncFp = useRef<string>('');
   useEffect(() => {
     if (!user?.id || !CALENDAR_EMAIL_BY_USER[user.id]) return;
     const state = calendarStore[user.id];
     if (!state) return;
+    const fp = `${user.id}:${state.events.map((e) => `${e.id}|${e.date}|${e.time}|${e.reminderMinutes}|${e.emailRemindedAt ?? ''}`).join(';')}`;
+    if (fp === lastCalendarSyncFp.current) return;
 
     if (calendarSyncTimer.current) clearTimeout(calendarSyncTimer.current);
     calendarSyncTimer.current = setTimeout(() => {
+      lastCalendarSyncFp.current = fp;
       void syncCalendarForReminders({
         userId: user.id,
         userName: user.name,
         email: user.email,
         events: state.events,
       });
-    }, 600);
+    }, 1200);
 
     return () => {
       if (calendarSyncTimer.current) clearTimeout(calendarSyncTimer.current);

@@ -5,7 +5,7 @@ import {
   getProjectTimelineInfo,
   type ProjectTimelineInfo,
 } from '../utils/projectTimeline';
-import { useSharedNow } from '../hooks/useSharedNow';
+import { useSharedNowSlow } from '../hooks/useSharedNow';
 import type { CreativeProject } from '../types';
 import './ProjectTimelineCountdown.css';
 
@@ -27,7 +27,7 @@ export function ProjectTimelineCountdown({
   showDates = true,
   className = '',
 }: Props) {
-  const now = useSharedNow();
+  const now = useSharedNowSlow();
   const timeline = useMemo(
     () => getProjectTimelineInfo(project, now),
     [project, now],
@@ -94,7 +94,7 @@ export const LiveDeadlineChip = memo(function LiveDeadlineChip({
   project: ProjectPick;
   className?: string;
 }) {
-  const now = useSharedNow();
+  const now = useSharedNowSlow();
   const timeline = useMemo(() => getProjectTimelineInfo(project, now), [project, now]);
   const clock = formatDeadlineClock(timeline);
   if (!clock) return null;
@@ -111,6 +111,6 @@ export const LiveDeadlineChip = memo(function LiveDeadlineChip({
 });
 
 export function useProjectTimeline(project: ProjectPick): ProjectTimelineInfo {
-  const now = useSharedNow();
+  const now = useSharedNowSlow();
   return useMemo(() => getProjectTimelineInfo(project, now), [project, now]);
 }

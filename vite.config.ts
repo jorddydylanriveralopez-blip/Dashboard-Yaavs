@@ -63,21 +63,14 @@ export default defineConfig({
         // y vite-plugin-pwa falla el build si exceden maximumFileSizeToCacheInBytes.
         globPatterns: ['**/*.{js,css,html,ico,svg,woff2}', 'icons/*.png'],
         globIgnores: ['**/evidence/**', 'evidence/**'],
-        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+        maximumFileSizeToCacheInBytes: 2 * 1024 * 1024,
         navigateFallback: 'index.html',
         importScripts: ['/push-sw.js'],
         runtimeCaching: [
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/evidence/'),
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'yaavs-evidence',
-              expiration: {
-                maxEntries: 80,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-              cacheableResponse: { statuses: [0, 200] },
-            },
+            handler: 'NetworkOnly',
+            options: { cacheName: 'yaavs-evidence-network' },
           },
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
