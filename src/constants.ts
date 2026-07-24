@@ -47,6 +47,9 @@ export const STORAGE_KEY = 'empresa-board-v1';
 export const DELETED_PROJECTS_KEY = 'empresa-board-deleted-projects-v1';
 export const VERSION_KEY = 'empresa-board-schema-version';
 export const SESSION_KEY = 'empresa-board-session';
+export const SESSION_EXPIRY_KEY = 'empresa-board-session-expiry';
+/** '1' = sesión en localStorage (sobrevive al cerrar el navegador). */
+export const SESSION_PERSIST_KEY = 'empresa-board-session-persist';
 export const CALENDAR_STORAGE_KEY = 'empresa-board-calendar-v1';
 /** Correos de recordatorio de agenda por userId. */
 export const CALENDAR_EMAIL_BY_USER: Record<string, string> = {
@@ -54,7 +57,6 @@ export const CALENDAR_EMAIL_BY_USER: Record<string, string> = {
 };
 export const ASSIGNMENTS_STORAGE_KEY = 'empresa-board-assignments-v1';
 export const PASSWORD_OVERRIDES_KEY = 'empresa-board-passwords';
-export const SESSION_EXPIRY_KEY = 'empresa-board-session-expiry';
 export const ONBOARDING_KEY = 'empresa-board-onboarding-done';
 export const LAST_ASSIGNMENT_CHECK_KEY = 'empresa-board-last-asg-check';
 export const EMPLOYEE_NOTIFICATIONS_SEEN_KEY = 'empresa-board-notifications-seen';
@@ -100,6 +102,8 @@ export const DEFAULT_WORKLOAD_MAX = 5;
 export const MAX_PROFILE_AVATAR_BYTES = 2 * 1024 * 1024;
 
 export const SESSION_HOURS = 8;
+/** Si el usuario elige “mantener sesión activa”, dura este número de días. */
+export const SESSION_PERSIST_DAYS = 30;
 
 export const RATING_LABELS = {
   positive: 'Aprobado',

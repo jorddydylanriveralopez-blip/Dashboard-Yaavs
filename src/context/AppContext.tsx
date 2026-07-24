@@ -58,12 +58,15 @@ import {
   PERFORMANCE_HISTORY_KEY,
   MANAGER_OBSERVATIONS_KEY,
   TEAM_CHAT_STORAGE_KEY,
-  SESSION_EXPIRY_KEY,
-  SESSION_HOURS,
-  SESSION_KEY,
   STORAGE_KEY,
   VERSION_KEY,
 } from '../constants';
+import {
+  clearAuthSession,
+  loadAuthSessionId,
+  saveAuthSession,
+  touchAuthSessionExpiry,
+} from '../utils/authSession';
 import {
   applyMonthClose,
   buildMonthlyRecord,
@@ -185,7 +188,7 @@ interface AppContextValue {
   calendar: UserCalendarState;
   /** Agendas de todos los usuarios (para vista de equipo). */
   calendarStore: CalendarStore;
-  login: (username: string, password: string) => boolean;
+  login: (username: string, password: string, options?: { keepSession?: boolean }) => boolean;
   logout: () => void;
   spyMode: boolean;
   enterSpyMode: () => boolean;
@@ -950,17 +953,13 @@ function getPasswordForUser(
 
 function loadSession(roster: TeamRosterState): User | null {
   try {
-    const exp = sessionStorage.getItem(SESSION_EXPIRY_KEY);
-    if (exp && Date.now() > Number(exp)) {
-      sessionStorage.removeItem(SESSION_KEY);
-      sessionStorage.removeItem(SESSION_EXPIRY_KEY);
+    const session = loadAuthSessionId();
+    if (!session) return null;
+    const base = findUserById(session.userId, roster);
+    if (!base) {
+      clearAuthSession();
       return null;
     }
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const id = JSON.parse(raw) as string;
-    const base = findUserById(id, roster);
-    if (!base) return null;
     const profiles = loadUserProfiles(localStorage.getItem(USER_PROFILES_KEY));
     return withUserProfile(base, profiles);
   } catch {
@@ -1036,14 +1035,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Modo espejo oculto: solo la cuenta de Dylan puede observar la vista de Orlando.
   const [spyMode, setSpyMode] = useState(false);
   const realSessionUserId = useRef<string | null>(
-    (() => {
-      try {
-        const raw = sessionStorage.getItem(SESSION_KEY);
-        return raw ? (JSON.parse(raw) as string) : null;
-      } catch {
-        return null;
-      }
-    })(),
+    (() => loadAuthSessionId()?.userId ?? null)(),
   );
 
   const userKey = user?.id ?? '';
@@ -2003,7 +1995,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const login = useCallback(
-    (username: string, password: string) => {
+    (username: string, password: string, options?: { keepSession?: boolean }) => {
       const loginName = username.trim();
       const loginPassword = password.trim();
       const rosterUsers = getActiveUsers(teamRoster);
@@ -2016,11 +2008,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       realSessionUserId.current = found.id;
       setSpyMode(false);
       void subscribeToPush(resolved);
-      sessionStorage.setItem(SESSION_KEY, JSON.stringify(found.id));
-      sessionStorage.setItem(
-        SESSION_EXPIRY_KEY,
-        String(Date.now() + SESSION_HOURS * 60 * 60 * 1000),
-      );
+      saveAuthSession(found.id, Boolean(options?.keepSession));
       return true;
     },
     [passwordOverrides, teamRoster, userProfiles],
@@ -2030,9 +2018,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setUser(null);
     realSessionUserId.current = null;
     setSpyMode(false);
-    sessionStorage.removeItem(SESSION_KEY);
-    sessionStorage.removeItem(SESSION_EXPIRY_KEY);
+    clearAuthSession();
   }, []);
+
+  // Renueva la caducidad mientras usan el tablero (sesión mantenida o normal).
+  useEffect(() => {
+    if (!user) return;
+    touchAuthSessionExpiry();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') touchAuthSessionExpiry();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    const id = window.setInterval(() => touchAuthSessionExpiry(), 30 * 60_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.clearInterval(id);
+    };
+  }, [user?.id]);
 
   // Pide permiso y activa las notificaciones push en este dispositivo.
   const enablePushNotifications = useCallback(async () => {
@@ -2348,8 +2350,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (user.id === targetUser.id) {
         setUser(null);
-        sessionStorage.removeItem(SESSION_KEY);
-        sessionStorage.removeItem(SESSION_EXPIRY_KEY);
+        clearAuthSession();
       }
 
       logActivity(

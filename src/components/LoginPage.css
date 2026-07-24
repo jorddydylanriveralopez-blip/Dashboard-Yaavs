@@ -231,6 +231,46 @@
   font-size: 0.875rem;
 }
 
+.login-keep-session {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-weight: 400;
+  color: var(--text-primary, #e8eefc);
+}
+
+.login-keep-session input {
+  margin-top: 3px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  accent-color: var(--accent, #4f6fe8);
+  cursor: pointer;
+}
+
+.login-keep-session span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  line-height: 1.35;
+}
+
+.login-keep-session strong {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.login-keep-session small {
+  font-size: 0.75rem;
+  color: var(--text-secondary, #9aa6bf);
+}
+
 .login-fresh-notice {
   margin: 0 0 16px;
   padding: 12px 14px;

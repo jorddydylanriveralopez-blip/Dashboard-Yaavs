@@ -16,6 +16,7 @@ export function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [keepSession, setKeepSession] = useState(true);
   const [error, setError] = useState('');
   const [freshStart] = useState(() => sessionStorage.getItem(FRESH_START_KEY) === '1');
 
@@ -26,7 +27,7 @@ export function LoginPage() {
     e.preventDefault();
     setError('');
     sessionStorage.removeItem(FRESH_START_KEY);
-    if (!login(username, password)) {
+    if (!login(username, password, { keepSession })) {
       setError('Usuario o contraseña incorrectos');
     }
   };
@@ -121,6 +122,20 @@ export function LoginPage() {
             </span>
           </label>
           {error && <p className="login-error">{error}</p>}
+          <label className="login-keep-session">
+            <input
+              type="checkbox"
+              checked={keepSession}
+              onChange={(e) => setKeepSession(e.target.checked)}
+            />
+            <span>
+              <strong>¿Deseas mantener tu sesión activa?</strong>
+              <small>
+                Si lo marcas, no tendrás que volver a entrar al cerrar el navegador (hasta 30 días
+                o hasta que cierres sesión).
+              </small>
+            </span>
+          </label>
           <button type="submit" className="btn-primary">
             Entrar a {COMPANY_NAME}
           </button>
