@@ -273,6 +273,10 @@ export interface CalendarEvent {
   shared?: boolean;
   /** Nombre del dueño para la vista de equipo. */
   ownerName?: string;
+  /** Origen del evento (Outlook / ICS / local). */
+  source?: 'local' | 'outlook' | 'ics';
+  /** ID externo para reimportar sin duplicar (UUID Outlook, UID ICS…). */
+  externalId?: string;
 }
 
 export interface ActiveTimer {

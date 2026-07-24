@@ -114,6 +114,71 @@
   background: #00c875;
 }
 
+.day-dot--orlando {
+  background: #e2445c;
+}
+
+.calendar-day.has-orlando {
+  box-shadow: inset 0 -2px 0 rgba(226, 68, 92, 0.45);
+}
+
+.calendar-orlando {
+  margin-bottom: 18px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.calendar-orlando.busy {
+  border-color: rgba(226, 68, 92, 0.4);
+  background: rgba(226, 68, 92, 0.06);
+}
+
+.calendar-orlando.free {
+  border-color: rgba(0, 200, 117, 0.35);
+  background: rgba(0, 200, 117, 0.06);
+}
+
+.calendar-orlando h3 {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+}
+
+.calendar-orlando-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.calendar-orlando-status--busy {
+  color: #e2445c;
+}
+
+.calendar-orlando-status--free {
+  color: #0a9f5c;
+}
+
+.calendar-orlando-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calendar-orlando-list li {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  font-size: 0.8125rem;
+}
+
+.calendar-orlando-list strong {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
 .calendar-legend {
   display: flex;
   align-items: center;

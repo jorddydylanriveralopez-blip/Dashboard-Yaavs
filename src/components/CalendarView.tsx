@@ -11,12 +11,14 @@ import {
   toDateKey,
 } from '../utils/calendarDates';
 import { parseIcsFile } from '../utils/icsImport';
+import { parseOlmFile } from '../utils/olmImport';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
 import { useSharedNow } from '../hooks/useSharedNow';
 import type { CalendarEvent } from '../types';
 import './CalendarView.css';
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+const ORLANDO_USER_ID = 'u-orlando';
 
 export function CalendarView() {
   const {
@@ -27,6 +29,7 @@ export function CalendarView() {
     activeUsers,
     enablePushNotifications,
     addCalendarEvent,
+    importExternalCalendarEvents,
     updateCalendarEvent,
     deleteCalendarEvent,
     toggleCalendarDone,
@@ -40,6 +43,9 @@ export function CalendarView() {
   const icsInputRef = useRef<HTMLInputElement>(null);
   const [icsStatus, setIcsStatus] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<string | null>(null);
+  const canImportOrlandoAgenda =
+    Boolean(user) &&
+    (canEditAll || user?.employeeId === 'emp-orlando' || user?.id === ORLANDO_USER_ID);
 
   const initialNow = new Date();
   const [year, setYear] = useState(initialNow.getFullYear());
@@ -81,6 +87,8 @@ export function CalendarView() {
     const list: CalendarEvent[] = [];
     for (const [uid, state] of Object.entries(calendarStore)) {
       if (uid === user.id) continue;
+      // Orlando tiene su propio bloque de disponibilidad.
+      if (uid === ORLANDO_USER_ID) continue;
       for (const ev of state.events) {
         if (ev.done) continue;
         // shared !== false: incluye eventos nuevos (true) y legacy (undefined)
@@ -108,6 +116,32 @@ export function CalendarView() {
 
   const dayEvents = eventsByDate.get(selectedDate) ?? [];
   const dayTeamEvents = teamByDate.get(selectedDate) ?? [];
+
+  /** Agenda compartida de Orlando (para que el equipo vea si está disponible). */
+  const orlandoEvents = useMemo(() => {
+    const state = calendarStore[ORLANDO_USER_ID];
+    if (!state) return [] as CalendarEvent[];
+    return state.events
+      .filter((e) => !e.done && e.shared !== false)
+      .map((e) => ({
+        ...e,
+        ownerName: e.ownerName ?? 'Orlando Villagómez',
+      }))
+      .sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
+  }, [calendarStore]);
+
+  const orlandoByDate = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>();
+    for (const ev of orlandoEvents) {
+      const list = map.get(ev.date) ?? [];
+      list.push(ev);
+      map.set(ev.date, list);
+    }
+    return map;
+  }, [orlandoEvents]);
+
+  const orlandoDayEvents = orlandoByDate.get(selectedDate) ?? [];
+  const orlandoBusyToday = orlandoDayEvents.length > 0;
 
   const activeEvent = calendar.activeTimer
     ? calendar.events.find((e) => e.id === calendar.activeTimer?.eventId)
@@ -167,32 +201,74 @@ export function CalendarView() {
     setNotes('');
   };
 
-  const handleIcsImport = async (file: File | null) => {
+  const handleCalendarFileImport = async (file: File | null) => {
     if (!file) return;
-    setIcsStatus('Importando…');
+    if (!canImportOrlandoAgenda) {
+      setIcsStatus('Solo Orlando o un líder pueden importar la agenda de Outlook.');
+      return;
+    }
+    setIcsStatus('Importando agenda…');
     try {
-      const imported = await parseIcsFile(file);
-      if (imported.length === 0) {
-        setIcsStatus('No se encontraron eventos en el archivo.');
-        return;
-      }
+      const lower = file.name.toLowerCase();
       let count = 0;
-      for (const item of imported) {
-        addCalendarEvent({
-          title: item.title,
-          date: item.date,
-          time: item.time,
-          reminderMinutes: 30,
-          estimatedMinutes: 60,
-          notes: item.notes ? `${item.notes}\n(Importado desde correo)` : 'Importado desde correo',
-          kind: 'event',
-          shared: true,
-        });
-        count += 1;
+      if (lower.endsWith('.olm') || lower.endsWith('.xml')) {
+        const imported = await parseOlmFile(file);
+        if (imported.length === 0) {
+          setIcsStatus('No se encontraron citas en el archivo Outlook.');
+          return;
+        }
+        count = importExternalCalendarEvents(
+          ORLANDO_USER_ID,
+          imported.map((item) => ({
+            title: item.title,
+            date: item.date,
+            time: item.time,
+            reminderMinutes: 15,
+            estimatedMinutes: item.estimatedMinutes,
+            notes: item.notes,
+            kind: item.kind === 'event' ? 'busy' : item.kind, // citas Outlook = ocupado para el equipo
+            shared: true,
+            ownerName: 'Orlando Villagómez',
+            source: 'outlook' as const,
+            externalId: item.externalId,
+          })),
+          'outlook',
+        );
+        setIcsStatus(
+          `Listo: ${count} evento(s) de Outlook en la agenda de Orlando. El equipo ya puede ver su disponibilidad.`,
+        );
+      } else {
+        const imported = await parseIcsFile(file);
+        if (imported.length === 0) {
+          setIcsStatus('No se encontraron eventos en el archivo.');
+          return;
+        }
+        count = importExternalCalendarEvents(
+          ORLANDO_USER_ID,
+          imported.map((item) => ({
+            title: item.title,
+            date: item.date,
+            time: item.time,
+            reminderMinutes: 30,
+            estimatedMinutes: 60,
+            notes: item.notes
+              ? `${item.notes}\n(Importado desde correo)`
+              : 'Importado desde correo',
+            kind: 'busy' as const,
+            shared: true,
+            ownerName: 'Orlando Villagómez',
+            source: 'ics' as const,
+          })),
+          'ics',
+        );
+        setIcsStatus(`Se importaron ${count} evento(s) a la agenda de Orlando.`);
       }
-      setIcsStatus(`Se importaron ${count} evento${count === 1 ? '' : 's'}.`);
-    } catch {
-      setIcsStatus('No se pudo leer el archivo .ics.');
+    } catch (err) {
+      setIcsStatus(
+        err instanceof Error
+          ? err.message
+          : 'No se pudo leer el archivo. Usa un .olm de Outlook o un .ics.',
+      );
     } finally {
       if (icsInputRef.current) icsInputRef.current.value = '';
     }
@@ -246,19 +322,21 @@ export function CalendarView() {
               const key = toDateKey(cell);
               const ownCount = eventsByDate.get(key)?.length ?? 0;
               const teamCount = teamByDate.get(key)?.length ?? 0;
+              const orlandoCount = orlandoByDate.get(key)?.length ?? 0;
               const isSelected = key === selectedDate;
               const isToday = key === toDateKey(new Date());
               return (
                 <button
                   key={key}
                   type="button"
-                  className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''}`}
+                  className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${orlandoCount > 0 ? 'has-orlando' : ''}`}
                   onClick={() => setSelectedDate(key)}
                 >
                   <span className="day-num">{cell.getDate()}</span>
-                  {(ownCount > 0 || teamCount > 0) && (
+                  {(ownCount > 0 || teamCount > 0 || orlandoCount > 0) && (
                     <span className="day-dots-row" aria-hidden>
                       {ownCount > 0 && <span className="day-dot day-dot--own" />}
+                      {orlandoCount > 0 && <span className="day-dot day-dot--orlando" />}
                       {teamCount > 0 && <span className="day-dot day-dot--team" />}
                     </span>
                   )}
@@ -274,6 +352,7 @@ export function CalendarView() {
             </p>
             <p className="calendar-legend">
               <span className="day-dot day-dot--own" /> Tuyos{' '}
+              <span className="day-dot day-dot--orlando" /> Orlando{' '}
               <span className="day-dot day-dot--team" /> Equipo
             </p>
             <button type="button" className="btn-ghost notify-btn" onClick={() => void requestNotify()}>
@@ -387,23 +466,60 @@ export function CalendarView() {
           </form>
 
           <div className="calendar-ics">
-            <h3>Importar desde correo (.ics)</h3>
-            <p>
-              En Gmail/Outlook exporta el evento o calendario como <code>.ics</code> y
-              súbelo aquí para registrarlo en la agenda del equipo.
-            </p>
-            <input
-              ref={icsInputRef}
-              type="file"
-              accept=".ics,text/calendar"
-              className="calendar-ics-input"
-              onChange={(e) => void handleIcsImport(e.target.files?.[0] ?? null)}
-            />
-            {icsStatus && <p className="calendar-ics-status">{icsStatus}</p>}
-            {(canEditAll || user?.employeeId === 'emp-orlando') && (
-              <p className="calendar-hint">
-                Los eventos importados se comparten con el equipo y generan notificación.
+            <h3>Importar agenda de Orlando (Outlook)</h3>
+            {canImportOrlandoAgenda ? (
+              <>
+                <p>
+                  Sube el archivo <code>.olm</code> de Outlook para Mac (o un{' '}
+                  <code>.ics</code>) para sincronizar la agenda de Orlando. El equipo verá si
+                  está ocupado o disponible.
+                </p>
+                <input
+                  ref={icsInputRef}
+                  type="file"
+                  accept=".olm,.ics,.xml,text/calendar,application/zip"
+                  className="calendar-ics-input"
+                  onChange={(e) => void handleCalendarFileImport(e.target.files?.[0] ?? null)}
+                />
+                {icsStatus && <p className="calendar-ics-status">{icsStatus}</p>}
+              </>
+            ) : (
+              <p>
+                La agenda de Outlook la carga Orlando o un líder. Tú puedes ver abajo si Orlando
+                está disponible el día seleccionado.
               </p>
+            )}
+          </div>
+
+          <div
+            className={`calendar-orlando ${orlandoBusyToday ? 'busy' : 'free'}`}
+            aria-label="Disponibilidad de Orlando"
+          >
+            <h3>Disponibilidad de Orlando</h3>
+            {orlandoDayEvents.length === 0 ? (
+              <p className="calendar-orlando-status calendar-orlando-status--free">
+                Sin eventos este día — parece disponible.
+              </p>
+            ) : (
+              <>
+                <p className="calendar-orlando-status calendar-orlando-status--busy">
+                  Ocupado · {orlandoDayEvents.length} evento
+                  {orlandoDayEvents.length === 1 ? '' : 's'}
+                </p>
+                <ul className="calendar-orlando-list">
+                  {orlandoDayEvents.map((ev) => (
+                    <li key={ev.id}>
+                      <strong>{ev.time}</strong>
+                      <span>
+                        {ev.title}
+                        {ev.estimatedMinutes > 0
+                          ? ` · ${formatDuration(ev.estimatedMinutes)}`
+                          : ''}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
           </div>
 

@@ -218,6 +218,15 @@ interface AppContextValue {
   filter: string;
   setFilter: (f: string) => void;
   addCalendarEvent: (input: Omit<CalendarEvent, 'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt'>) => void;
+  /** Importa/reemplaza eventos externos (Outlook/ICS) en la agenda de un usuario (p. ej. Orlando). */
+  importExternalCalendarEvents: (
+    targetUserId: string,
+    events: Omit<
+      CalendarEvent,
+      'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt' | 'emailRemindedAt'
+    >[],
+    source: 'outlook' | 'ics',
+  ) => number;
   updateCalendarEvent: (id: string, patch: Partial<CalendarEvent>) => void;
   deleteCalendarEvent: (id: string) => void;
   toggleCalendarDone: (id: string) => void;
@@ -3486,6 +3495,74 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [userKey, user, calendar, persistCalendar, canEditAll],
   );
 
+  const importExternalCalendarEvents = useCallback(
+    (
+      targetUserId: string,
+      events: Omit<
+        CalendarEvent,
+        'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt' | 'emailRemindedAt'
+      >[],
+      source: 'outlook' | 'ics',
+    ): number => {
+      if (!user) return 0;
+      const canImportOrlando =
+        targetUserId === 'u-orlando' &&
+        (canEditAll || user.employeeId === 'emp-orlando' || user.id === 'u-orlando');
+      const canImportSelf = targetUserId === user.id;
+      if (!canImportOrlando && !canImportSelf) return 0;
+      if (!events.length) return 0;
+
+      const owner =
+        findUserById(targetUserId, teamRoster) ??
+        activeUsers.find((u) => u.id === targetUserId);
+      const ownerName = owner?.name ?? (targetUserId === 'u-orlando' ? 'Orlando Villagómez' : user.name);
+      const stamp = Date.now();
+
+      setCalendarStore((prev) => {
+        const existing = prev[targetUserId] ?? emptyCalendar();
+        const kept = existing.events.filter((e) => e.source !== source);
+        const imported: CalendarEvent[] = events.map((input, i) => ({
+          ...input,
+          id: `cal-${source}-${stamp}-${i}`,
+          userId: targetUserId,
+          trackedMinutes: 0,
+          done: false,
+          shared: true,
+          ownerName: input.ownerName ?? ownerName,
+          source,
+          kind: input.kind ?? 'busy',
+        }));
+        const next: UserCalendarState = {
+          ...existing,
+          events: [...kept, ...imported].sort((a, b) =>
+            `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
+          ),
+        };
+        const updated = { ...prev, [targetUserId]: next };
+        localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      });
+
+      logActivity(
+        'project_progress',
+        `Agenda ${source === 'outlook' ? 'Outlook' : 'ICS'} de ${ownerName}: ${events.length} evento(s) importados`,
+        user.name,
+      );
+      if (targetUserId === 'u-orlando') {
+        notifyPush({
+          audience: 'employees',
+          excludeUserId: user.id,
+          title: 'Agenda de Orlando actualizada',
+          body: `Se sincronizaron ${events.length} evento(s) desde Outlook. Revisa disponibilidad en Agenda.`,
+          url: '/agenda',
+          tag: 'agenda-orlando-import',
+        });
+      }
+      return events.length;
+    },
+    [user, canEditAll, teamRoster, activeUsers, logActivity],
+  );
+
   const updateCalendarEvent = useCallback(
     (id: string, patch: Partial<CalendarEvent>) => {
       persistCalendar({
@@ -4369,6 +4446,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       filter,
       setFilter,
       addCalendarEvent,
+      importExternalCalendarEvents,
       updateCalendarEvent,
       deleteCalendarEvent,
       toggleCalendarDone,
@@ -4476,6 +4554,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCompanyName,
       filter,
       addCalendarEvent,
+      importExternalCalendarEvents,
       updateCalendarEvent,
       deleteCalendarEvent,
       toggleCalendarDone,
