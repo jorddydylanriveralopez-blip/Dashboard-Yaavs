@@ -7,7 +7,7 @@ import { formatHoursMinutes } from '../utils/projectHours';
 import { assignableMarketingTasks } from '../utils/assignmentBrief';
 import { EmployeeMultiSelect } from './EmployeeMultiSelect';
 import { SpellCheckTextarea } from './SpellCheckField';
-import type { ExtraProjectEntry, ExtraProjectStatus } from '../types';
+import type { ExtraProjectEntry, ExtraProjectStatus, ExtraProjectTemplate } from '../types';
 import './ExtraProjectsView.css';
 
 function todayIso(): string {
@@ -40,11 +40,13 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
     canEditAll,
     visibleExtraProjects,
     pendingExtraProjects,
+    myDailyExtraTemplates,
     addExtraProject,
     updateExtraProject,
     deleteExtraProject,
     approveExtraProject,
     rejectExtraProject,
+    deactivateDailyExtraTemplate,
   } = useApp();
   const { confirm } = useConfirm();
   const toast = useToast();
@@ -56,6 +58,8 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
   const [hours, setHours] = useState('');
   const [doneDate, setDoneDate] = useState(todayIso);
   const [notes, setNotes] = useState('');
+  const [saveAsDaily, setSaveAsDaily] = useState(false);
+  const [fromTemplateId, setFromTemplateId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -102,11 +106,79 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
     setHours('');
     setDoneDate(todayIso());
     setNotes('');
+    setSaveAsDaily(false);
+    setFromTemplateId(null);
     setEditingId(null);
+  };
+
+  const fillFromDaily = (t: ExtraProjectTemplate) => {
+    setEditingId(null);
+    setFromTemplateId(t.id);
+    setSaveAsDaily(true);
+    setName(t.projectName);
+    setEmployeeIds(
+      t.employeeIds.length
+        ? t.employeeIds
+        : user?.employeeId
+          ? [user.employeeId]
+          : [],
+    );
+    setHours(
+      t.defaultMinutes
+        ? String(Math.round((t.defaultMinutes / 60) * 100) / 100)
+        : '',
+    );
+    setDoneDate(todayIso());
+    setNotes(t.notes ?? '');
+    toast.info('Daily cargado. Revisa horas/fecha y envía el de hoy.');
+  };
+
+  const handleUseDailyToday = (t: ExtraProjectTemplate) => {
+    const created = addExtraProject({
+      projectName: t.projectName,
+      employeeIds: t.employeeIds.length
+        ? t.employeeIds
+        : user?.employeeId
+          ? [user.employeeId]
+          : [],
+      minutes: t.defaultMinutes,
+      doneDate: todayIso(),
+      notes: t.notes,
+      fromTemplateId: t.id,
+      saveAsDaily: true,
+    });
+    if (!created) {
+      toast.error('No se pudo registrar el Daily de hoy.');
+      return;
+    }
+    toast.success(
+      canEditAll
+        ? `Daily «${t.projectName}» registrado hoy.`
+        : `Daily «${t.projectName}» enviado a Orlando (hoy).`,
+    );
+  };
+
+  const handleRemoveDaily = async (t: ExtraProjectTemplate) => {
+    const ok = await confirm({
+      title: 'Quitar Daily',
+      message: `¿Dejar de guardar «${t.projectName}» como trabajo diario? Los extras ya enviados no se borran.`,
+      confirmLabel: 'Quitar Daily',
+      danger: true,
+    });
+    if (!ok) return;
+    if (deactivateDailyExtraTemplate(t.id)) {
+      toast.success('Daily desactivado.');
+      if (fromTemplateId === t.id) {
+        setFromTemplateId(null);
+        setSaveAsDaily(false);
+      }
+    }
   };
 
   const startEdit = (e: ExtraProjectEntry) => {
     setEditingId(e.id);
+    setFromTemplateId(null);
+    setSaveAsDaily(false);
     setName(e.projectName);
     setEmployeeIds(e.employeeIds?.length ? e.employeeIds : [e.employeeId]);
     setHours(
@@ -156,18 +228,25 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
       }
       return;
     }
+    const asDaily = saveAsDaily || Boolean(fromTemplateId);
     const created = addExtraProject({
       projectName: name.trim(),
       employeeIds,
       minutes: minutes ?? undefined,
       doneDate,
       notes: notes.trim() || undefined,
+      saveAsDaily: asDaily,
+      fromTemplateId: fromTemplateId ?? undefined,
     });
     if (created) {
       toast.success(
         canEditAll
-          ? 'Proyecto extra aprobado y agregado a Activos.'
-          : 'Enviado a Orlando para aprobación.',
+          ? asDaily
+            ? 'Extra registrado y guardado como Daily.'
+            : 'Proyecto extra aprobado y agregado a Activos.'
+          : asDaily
+            ? 'Enviado a Orlando. Quedó guardado como Daily para no reescribirlo.'
+            : 'Enviado a Orlando para aprobación.',
       );
       resetForm();
     } else {
@@ -228,14 +307,65 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
           <h2>Proyectos extra</h2>
           <p>
             {canEditAll
-              ? 'Aprueba o rechaza lo que el equipo envía. Al aprobar, el proyecto pasa a Activos.'
-              : 'Registra trabajos adicionales y envíalos a Orlando. Cuando los apruebe aparecerán en Activos.'}
+              ? 'Aprueba o rechaza lo que el equipo envía. Al aprobar, el proyecto pasa a Activos. Los Daily son trabajos repetitivos guardados.'
+              : 'Registra trabajos adicionales y envíalos a Orlando. Si es un trabajo de todos los días, márcalo como Daily para no volver a escribirlo.'}
           </p>
         </div>
         <div className="extra-projects-summary" aria-live="polite">
           <strong>{filtered.length}</strong>
           <span>registro{filtered.length === 1 ? '' : 's'}</span>
-          {canEditAll && pendingExtraProjects.length > 0 && (
+          {myDailyExtraTemplates.length > 0 && (
+        <section className="extra-daily" aria-label="Trabajos Daily">
+          <div className="extra-daily-head">
+            <h3>Daily · trabajos repetitivos</h3>
+            <p>Un toque registra el de hoy con el nombre, notas y horas guardados.</p>
+          </div>
+          <ul className="extra-daily-list">
+            {myDailyExtraTemplates.map((t) => (
+              <li key={t.id} className="extra-daily-card">
+                <div className="extra-daily-card-main">
+                  <strong>{t.projectName}</strong>
+                  <span className="extra-daily-meta">
+                    {t.defaultMinutes
+                      ? formatHoursMinutes(t.defaultMinutes)
+                      : 'Sin horas fijas'}
+                    {t.employeeNames.length > 1
+                      ? ` · ${t.employeeNames.join(', ')}`
+                      : ''}
+                    {canEditAll && t.ownerName ? ` · ${t.ownerName}` : ''}
+                  </span>
+                  {t.notes && <p className="extra-daily-notes">{t.notes}</p>}
+                </div>
+                <div className="extra-daily-actions">
+                  <button
+                    type="button"
+                    className="btn-primary btn-sm"
+                    onClick={() => handleUseDailyToday(t)}
+                  >
+                    Registrar hoy
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm"
+                    onClick={() => fillFromDaily(t)}
+                  >
+                    Editar y enviar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm extra-projects-delete"
+                    onClick={() => void handleRemoveDaily(t)}
+                  >
+                    Quitar
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {canEditAll && pendingExtraProjects.length > 0 && (
             <>
               <strong>{pendingExtraProjects.length}</strong>
               <span>por aprobar</span>
@@ -344,6 +474,23 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
             />
           </label>
         </div>
+        {!editingId && (
+          <label className="extra-daily-toggle">
+            <input
+              type="checkbox"
+              checked={saveAsDaily}
+              onChange={(e) => setSaveAsDaily(e.target.checked)}
+            />
+            <span>
+              <strong>Es un Daily</strong>
+              <small>
+                Trabajo repetitivo: se guarda el nombre, notas y horas para no volver a
+                escribirlos cada día.
+              </small>
+            </span>
+          </label>
+        )}
+
         <div className="extra-projects-form-actions">
           {editingId && (
             <button type="button" className="btn-ghost" onClick={resetForm}>
@@ -356,8 +503,12 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
                 ? 'Guardar cambios'
                 : 'Guardar y reenviar'
               : canEditAll
-                ? '+ Agregar a Activos'
-                : 'Enviar a aprobación'}
+                ? saveAsDaily
+                  ? '+ Registrar y guardar Daily'
+                  : '+ Agregar a Activos'
+                : saveAsDaily
+                  ? 'Enviar y guardar como Daily'
+                  : 'Enviar a aprobación'}
           </button>
         </div>
       </form>
