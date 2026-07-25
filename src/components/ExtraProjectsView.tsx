@@ -314,7 +314,22 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
         <div className="extra-projects-summary" aria-live="polite">
           <strong>{filtered.length}</strong>
           <span>registro{filtered.length === 1 ? '' : 's'}</span>
-          {myDailyExtraTemplates.length > 0 && (
+          {canEditAll && pendingExtraProjects.length > 0 && (
+            <>
+              <strong>{pendingExtraProjects.length}</strong>
+              <span>por aprobar</span>
+            </>
+          )}
+          {totalMinutes > 0 && (
+            <>
+              <strong>{formatHoursMinutes(totalMinutes)}</strong>
+              <span>registradas</span>
+            </>
+          )}
+        </div>
+      </header>
+
+      {myDailyExtraTemplates.length > 0 && (
         <section className="extra-daily" aria-label="Trabajos Daily">
           <div className="extra-daily-head">
             <h3>Daily · trabajos repetitivos</h3>
@@ -364,21 +379,6 @@ export function ExtraProjectsView({ filter = '' }: { filter?: string }) {
           </ul>
         </section>
       )}
-
-      {canEditAll && pendingExtraProjects.length > 0 && (
-            <>
-              <strong>{pendingExtraProjects.length}</strong>
-              <span>por aprobar</span>
-            </>
-          )}
-          {totalMinutes > 0 && (
-            <>
-              <strong>{formatHoursMinutes(totalMinutes)}</strong>
-              <span>registradas</span>
-            </>
-          )}
-        </div>
-      </header>
 
       {canEditAll && pendingExtraProjects.length > 0 && (
         <section className="extra-projects-approval" aria-label="Por aprobar">

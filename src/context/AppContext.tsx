@@ -48,6 +48,7 @@ import {
   SOCIAL_METRICS_KEY,
   SOCIAL_ACCOUNTS_KEY,
   EXTRA_PROJECTS_KEY,
+  EXTRA_TEMPLATES_KEY,
   OFFICE_OVERTIME_KEY,
   USER_PROFILES_KEY,
   WORKLOAD_LIMITS_KEY,
@@ -167,6 +168,7 @@ import type {
   SocialMetricsStore,
   SocialAccountsStore,
   ExtraProjectEntry,
+  ExtraProjectTemplate,
   OfficeOvertimeEntry,
   OfficeOvertimeStore,
   KpiObjectiveAssignment,
@@ -323,13 +325,27 @@ interface AppContextValue {
   ) => void;
   extraProjects: ExtraProjectEntry[];
   visibleExtraProjects: ExtraProjectEntry[];
+  /** Plantillas Daily del usuario (o todas si es líder). */
+  extraProjectTemplates: ExtraProjectTemplate[];
+  myDailyExtraTemplates: ExtraProjectTemplate[];
   addExtraProject: (input: {
     projectName: string;
     employeeIds: string[];
     minutes?: number;
     doneDate: string;
     notes?: string;
+    /** Guardar/actualizar plantilla Daily con estos datos. */
+    saveAsDaily?: boolean;
+    fromTemplateId?: string;
   }) => ExtraProjectEntry | null;
+  upsertDailyExtraTemplate: (input: {
+    projectName: string;
+    employeeIds: string[];
+    minutes?: number;
+    notes?: string;
+    templateId?: string;
+  }) => ExtraProjectTemplate | null;
+  deactivateDailyExtraTemplate: (id: string) => boolean;
   updateExtraProject: (
     id: string,
     patch: Partial<
@@ -955,6 +971,29 @@ function loadExtraProjects(): ExtraProjectEntry[] {
   return [];
 }
 
+function loadExtraTemplates(): ExtraProjectTemplate[] {
+  try {
+    const raw = localStorage.getItem(EXTRA_TEMPLATES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as ExtraProjectTemplate[];
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter(
+            (t) =>
+              t &&
+              typeof t.id === 'string' &&
+              typeof t.ownerEmployeeId === 'string' &&
+              typeof t.projectName === 'string',
+          )
+          .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
 function loadDailyKpiStore(): DailyKpiStore {
   try {
     const raw = localStorage.getItem(DAILY_KPI_SNAPSHOTS_KEY);
@@ -1106,6 +1145,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [socialMetrics, setSocialMetrics] = useState<SocialMetricsStore>(loadSocialMetrics);
   const [socialAccounts, setSocialAccounts] = useState<SocialAccountsStore>(loadSocialAccounts);
   const [extraProjects, setExtraProjects] = useState<ExtraProjectEntry[]>(loadExtraProjects);
+  const [extraProjectTemplates, setExtraProjectTemplates] =
+    useState<ExtraProjectTemplate[]>(loadExtraTemplates);
   const [officeOvertime, setOfficeOvertime] = useState<OfficeOvertimeStore>(loadOfficeOvertime);
   const [workloadLimits, setWorkloadLimits] = useState<WorkloadLimitsStore>(loadWorkloadLimits);
   const [userProfiles, setUserProfiles] = useState<UserProfilesStore>(() =>
@@ -1290,6 +1331,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem(EXTRA_PROJECTS_KEY, JSON.stringify(extraProjects));
   }, [extraProjects]);
+
+  useEffect(() => {
+    localStorage.setItem(EXTRA_TEMPLATES_KEY, JSON.stringify(extraProjectTemplates));
+  }, [extraProjectTemplates]);
 
   useEffect(() => {
     localStorage.setItem(OFFICE_OVERTIME_KEY, JSON.stringify(officeOvertime));
@@ -1488,6 +1533,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       socialAccounts,
       deletedProjectIds: deleted,
       extraProjects: liveExtras,
+      extraProjectTemplates,
       officeOvertime,
       attendanceStore,
       updatedAt: new Date().toISOString(),
@@ -1501,7 +1547,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     performanceHistory,
     teamRoster,
     socialAccounts,
+    deletedProjectIds,
     extraProjects,
+    extraProjectTemplates,
     officeOvertime,
     attendanceStore,
   ]);
@@ -1891,6 +1939,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
     }
 
+    if (Array.isArray(remote.extraProjectTemplates)) {
+      setExtraProjectTemplates((prev) => {
+        const byId = new Map(remote.extraProjectTemplates!.map((t) => [t.id, t]));
+        for (const local of prev) {
+          const remoteT = byId.get(local.id);
+          if (!remoteT) {
+            byId.set(local.id, local);
+            preservedLocal = true;
+            continue;
+          }
+          if ((local.updatedAt || '') > (remoteT.updatedAt || '')) {
+            byId.set(local.id, local);
+            preservedLocal = true;
+          }
+        }
+        return [...byId.values()].sort((a, b) =>
+          (b.updatedAt || '').localeCompare(a.updatedAt || ''),
+        );
+      });
+    }
+
     if (remote.officeOvertime) {
       setOfficeOvertime((prev) => {
         const next = { ...prev };
@@ -2044,6 +2113,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     socialAccounts,
     deletedProjectIds,
     extraProjects,
+    extraProjectTemplates,
     officeOvertime,
     attendanceStore,
     schedulePush,
@@ -3037,6 +3107,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       minutes?: number;
       doneDate: string;
       notes?: string;
+      saveAsDaily?: boolean;
+      fromTemplateId?: string;
     }): ExtraProjectEntry | null => {
       if (!user) return null;
       const fallbackId = user.employeeId || user.id;
@@ -3063,9 +3135,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const nameKey = normalizeExtraProjectName(projectName);
       const collabKey = collaboratorKey(collaborators);
-      // Evitar duplicados: mismo nombre + mismos colaboradores (pendiente o aprobado).
+      const doneDate = input.doneDate || now.slice(0, 10);
+      // Dedupe solo el mismo día (permite Daily repetir con otra fecha).
       const existingDup = extraProjects.find((e) => {
         if ((e.status ?? 'approved') === 'rejected') return false;
+        if ((e.doneDate || '') !== doneDate) return false;
         if (normalizeExtraProjectName(e.projectName) !== nameKey) return false;
         const eCollab = (e.employeeIds ?? [e.employeeId])
           .map(collaboratorForEmployeeId)
@@ -3086,7 +3160,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         employeeNames,
         projectName,
         minutes,
-        doneDate: input.doneDate || now.slice(0, 10),
+        doneDate,
         notes: input.notes?.trim() || undefined,
         status: autoApprove ? 'approved' : 'pending',
         reviewedAt: autoApprove ? now : undefined,
@@ -3099,6 +3173,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       setExtraProjects((prev) => [entry, ...prev]);
       extraProjectsRef.current = [entry, ...(extraProjectsRef.current ?? [])];
+
+      if (input.saveAsDaily || input.fromTemplateId) {
+        const ownerEmployeeId = user.employeeId || user.id;
+        setExtraProjectTemplates((prev) => {
+          const existing =
+            (input.fromTemplateId
+              ? prev.find((t) => t.id === input.fromTemplateId)
+              : undefined) ??
+            prev.find(
+              (t) =>
+                t.active &&
+                t.ownerEmployeeId === ownerEmployeeId &&
+                normalizeExtraProjectName(t.projectName) === nameKey,
+            );
+          const template: ExtraProjectTemplate = {
+            id: existing?.id ?? `extra-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            ownerEmployeeId,
+            ownerName: user.name,
+            projectName,
+            employeeIds,
+            employeeNames,
+            defaultMinutes: minutes,
+            notes: input.notes?.trim() || undefined,
+            active: true,
+            createdAt: existing?.createdAt ?? now,
+            updatedAt: now,
+          };
+          const without = prev.filter((t) => t.id !== template.id);
+          return [template, ...without];
+        });
+      }
+
       // Empujar al instante para que un pull de otro dispositivo no lo borre.
       window.setTimeout(() => schedulePushRef.current({ immediate: true }), 0);
 
@@ -3159,6 +3265,90 @@ export function AppProvider({ children }: { children: ReactNode }) {
       buildExtraActiveProject,
     ],
   );
+
+  const upsertDailyExtraTemplate = useCallback(
+    (input: {
+      projectName: string;
+      employeeIds: string[];
+      minutes?: number;
+      notes?: string;
+      templateId?: string;
+    }): ExtraProjectTemplate | null => {
+      if (!user) return null;
+      const ownerEmployeeId = user.employeeId || user.id;
+      const projectName = input.projectName.trim();
+      if (!projectName) return null;
+      const employeeIds = [...new Set(input.employeeIds.filter(Boolean))];
+      if (!employeeIds.length) employeeIds.push(ownerEmployeeId);
+      const employeeNames = employeeIds.map(
+        (id) =>
+          board.tasks.find((task) => task.employeeId === id)?.employeeName ??
+          activeUsers.find((activeUser) => activeUser.employeeId === id)?.name ??
+          id,
+      );
+      const now = new Date().toISOString();
+      const nameKey = normalizeExtraProjectName(projectName);
+      let saved: ExtraProjectTemplate | null = null;
+      setExtraProjectTemplates((prev) => {
+        const existing =
+          (input.templateId ? prev.find((t) => t.id === input.templateId) : undefined) ??
+          prev.find(
+            (t) =>
+              t.ownerEmployeeId === ownerEmployeeId &&
+              normalizeExtraProjectName(t.projectName) === nameKey,
+          );
+        saved = {
+          id: existing?.id ?? `extra-tpl-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          ownerEmployeeId,
+          ownerName: user.name,
+          projectName,
+          employeeIds,
+          employeeNames,
+          defaultMinutes:
+            input.minutes !== undefined
+              ? Math.max(1, Math.round(input.minutes))
+              : existing?.defaultMinutes,
+          notes: input.notes?.trim() || undefined,
+          active: true,
+          createdAt: existing?.createdAt ?? now,
+          updatedAt: now,
+        };
+        return [saved!, ...prev.filter((t) => t.id !== saved!.id)];
+      });
+      window.setTimeout(() => schedulePushRef.current({ immediate: true }), 0);
+      return saved;
+    },
+    [user, board.tasks, activeUsers],
+  );
+
+  const deactivateDailyExtraTemplate = useCallback(
+    (id: string): boolean => {
+      if (!user) return false;
+      const myId = user.employeeId || user.id;
+      const current = extraProjectTemplates.find((t) => t.id === id);
+      if (!current) return false;
+      if (!canEditAll && current.ownerEmployeeId !== myId) return false;
+      setExtraProjectTemplates((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? { ...t, active: false, updatedAt: new Date().toISOString() }
+            : t,
+        ),
+      );
+      window.setTimeout(() => schedulePushRef.current({ immediate: true }), 0);
+      return true;
+    },
+    [user, canEditAll, extraProjectTemplates],
+  );
+
+  const myDailyExtraTemplates = useMemo(() => {
+    if (!user) return [];
+    const myId = user.employeeId || user.id;
+    const list = canEditAll
+      ? extraProjectTemplates.filter((t) => t.active)
+      : extraProjectTemplates.filter((t) => t.active && t.ownerEmployeeId === myId);
+    return list.sort((a, b) => a.projectName.localeCompare(b.projectName, 'es'));
+  }, [user, canEditAll, extraProjectTemplates]);
 
   const updateExtraProject = useCallback(
     (
@@ -4634,7 +4824,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       extraProjects,
       visibleExtraProjects,
       pendingExtraProjects,
+      extraProjectTemplates,
+      myDailyExtraTemplates,
       addExtraProject,
+      upsertDailyExtraTemplate,
+      deactivateDailyExtraTemplate,
       updateExtraProject,
       deleteExtraProject,
       approveExtraProject,
@@ -4741,7 +4935,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       extraProjects,
       visibleExtraProjects,
       pendingExtraProjects,
+      extraProjectTemplates,
+      myDailyExtraTemplates,
       addExtraProject,
+      upsertDailyExtraTemplate,
+      deactivateDailyExtraTemplate,
       updateExtraProject,
       deleteExtraProject,
       approveExtraProject,

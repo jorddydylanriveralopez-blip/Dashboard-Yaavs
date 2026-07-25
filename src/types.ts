@@ -607,6 +607,24 @@ export interface ExtraProjectEntry {
 
 export type ExtraProjectStatus = 'pending' | 'approved' | 'rejected';
 
+/**
+ * Plantilla de Extra diario: el colaborador reutiliza nombre/notas/horas
+ * sin volver a escribirlas; cada día crea un Extra normal.
+ */
+export interface ExtraProjectTemplate {
+  id: string;
+  ownerEmployeeId: string;
+  ownerName: string;
+  projectName: string;
+  employeeIds: string[];
+  employeeNames: string[];
+  defaultMinutes?: number;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** Cronómetro de tiempo extra en oficina (por colaborador, día actual). */
 export interface OfficeOvertimeEntry {
   employeeId: string;
@@ -637,6 +655,8 @@ export interface AppSyncState {
   deletedProjectIds?: Record<string, string>;
   /** Bitácora de proyectos extra por colaborador. */
   extraProjects?: ExtraProjectEntry[];
+  /** Plantillas de extras diarios (trabajos repetitivos). */
+  extraProjectTemplates?: ExtraProjectTemplate[];
   /** Tiempo extra en oficina por empleado. */
   officeOvertime?: OfficeOvertimeStore;
   /** Asistencias del área (sincronizadas celular ↔ web). */
