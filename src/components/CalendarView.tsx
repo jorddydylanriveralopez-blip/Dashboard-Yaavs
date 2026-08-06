@@ -57,6 +57,10 @@ export function CalendarView() {
   const [googleClientId, setGoogleClientId] = useState('');
   const [googleClientSecret, setGoogleClientSecret] = useState('');
   const [googleSaving, setGoogleSaving] = useState(false);
+  const [googleConnectOpen, setGoogleConnectOpen] = useState(false);
+  const [googleConnectBusy, setGoogleConnectBusy] = useState(false);
+  const [googleConnectError, setGoogleConnectError] = useState<string | null>(null);
+  const googlePopupRef = useRef<Window | null>(null);
   const canImportOrlandoAgenda =
     Boolean(user) &&
     (canEditAll || user?.employeeId === 'emp-orlando' || user?.id === ORLANDO_USER_ID);
@@ -66,27 +70,88 @@ export function CalendarView() {
       ? `${window.location.origin}/api/google/callback`
       : 'https://darkred-wasp-801635.hostingersite.com/api/google/callback';
 
+  const refreshGoogleStatus = async () => {
+    const status = await fetchGoogleCalendarStatus(ORLANDO_USER_ID);
+    setGoogleStatus(status);
+    return status;
+  };
+
   useEffect(() => {
     if (!canImportOrlandoAgenda || !isApiEnabled()) return;
-    void fetchGoogleCalendarStatus(ORLANDO_USER_ID).then(setGoogleStatus);
+    void refreshGoogleStatus();
     const id = window.setInterval(() => {
-      void fetchGoogleCalendarStatus(ORLANDO_USER_ID).then(setGoogleStatus);
+      void refreshGoogleStatus();
     }, 60_000);
     return () => window.clearInterval(id);
   }, [canImportOrlandoAgenda]);
 
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; ok?: boolean } | null;
+      if (!data || data.type !== 'yaavs-google-oauth') return;
+      setGoogleConnectBusy(false);
+      void refreshGoogleStatus().then((status) => {
+        if (status?.connected) {
+          setGoogleMessage('Google Calendar conectado.');
+          setGoogleConnectOpen(false);
+        } else if (data.ok === false) {
+          setGoogleConnectError('No se pudo completar el acceso con Google.');
+        }
+      });
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  const openGooglePopup = (url: string) => {
+    const width = 520;
+    const height = 720;
+    const left = Math.max(0, Math.round(window.screenX + (window.outerWidth - width) / 2));
+    const top = Math.max(0, Math.round(window.screenY + (window.outerHeight - height) / 2));
+    const features = `popup=yes,width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`;
+    const popup = window.open(url, 'yaavs_google_oauth', features);
+    googlePopupRef.current = popup;
+    return popup;
+  };
+
   const connectGoogleCalendar = async () => {
     setGoogleMessage(null);
+    setGoogleConnectError(null);
+    setGoogleConnectOpen(true);
+    setGoogleConnectBusy(true);
+
     const result = await fetchGoogleAuthUrl(ORLANDO_USER_ID);
     if (!result.ok || !result.url) {
-      setGoogleMessage(result.error || 'No se pudo abrir Google. Revisa las credenciales.');
+      setGoogleConnectBusy(false);
+      setGoogleConnectError(result.error || 'No se pudo preparar el acceso a Google.');
       return;
     }
-    const popup = window.open(result.url, '_blank', 'noopener,noreferrer,width=520,height=720');
+
+    const popup = openGooglePopup(result.url);
     if (!popup) {
-      // Si el navegador bloquea popups, navegar en la misma pestaña.
-      window.location.assign(result.url);
+      setGoogleConnectBusy(false);
+      setGoogleConnectError(
+        'El navegador bloqueó la ventana de Google. Permite ventanas emergentes para este sitio e inténtalo de nuevo.',
+      );
+      return;
     }
+
+    const poll = window.setInterval(() => {
+      if (popup.closed) {
+        window.clearInterval(poll);
+        setGoogleConnectBusy(false);
+        void refreshGoogleStatus().then((status) => {
+          if (status?.connected) {
+            setGoogleMessage('Google Calendar conectado.');
+            setGoogleConnectOpen(false);
+          } else {
+            setGoogleConnectError(
+              'Cerraste la ventana sin completar el acceso. Vuelve a intentarlo con la cuenta de Orlando.',
+            );
+          }
+        });
+      }
+    }, 700);
   };
 
   const syncGoogleNow = async () => {
@@ -764,6 +829,62 @@ export function CalendarView() {
           </div>
         </section>
       </div>
+
+      {googleConnectOpen && (
+        <div
+          className="google-connect-modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            if (!googleConnectBusy) setGoogleConnectOpen(false);
+          }}
+        >
+          <div
+            className="google-connect-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="google-connect-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="google-connect-title">Conectar Google Calendar</h3>
+            <p>
+              Se abre una ventana pequeña de Google para que Orlando inicie sesión. Esta agenda se
+              queda abierta; no te saca del dashboard.
+            </p>
+            {googleConnectBusy ? (
+              <p className="google-connect-modal-status">Esperando acceso en la ventana de Google…</p>
+            ) : googleConnectError ? (
+              <p className="google-connect-modal-error">{googleConnectError}</p>
+            ) : (
+              <p className="google-connect-modal-status">Listo para conectar.</p>
+            )}
+            <div className="google-connect-modal-actions">
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => {
+                  try {
+                    googlePopupRef.current?.close();
+                  } catch {
+                    /* ignore */
+                  }
+                  setGoogleConnectOpen(false);
+                  setGoogleConnectBusy(false);
+                }}
+              >
+                Cerrar
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={googleConnectBusy}
+                onClick={() => void connectGoogleCalendar()}
+              >
+                {googleConnectBusy ? 'Conectando…' : 'Reintentar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

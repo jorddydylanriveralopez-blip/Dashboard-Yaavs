@@ -54,8 +54,15 @@ export default async function handler(req, res) {
       200,
       `<html><body style="font-family:system-ui;padding:2rem">
         <h1>Google Calendar conectado</h1>
-        <p>Ya puedes cerrar esta ventana y volver al dashboard.</p>
-        <script>setTimeout(function(){ window.close(); }, 1500);</script>
+        <p>Puedes cerrar esta ventana. El dashboard se actualizará solo.</p>
+        <script>
+          try {
+            if (window.opener) {
+              window.opener.postMessage({ type: 'yaavs-google-oauth', ok: true }, '*');
+            }
+          } catch (e) {}
+          setTimeout(function(){ window.close(); }, 800);
+        </script>
       </body></html>`,
     );
   } catch (err) {
