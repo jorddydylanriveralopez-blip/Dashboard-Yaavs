@@ -7,6 +7,31 @@ import {
 } from '../../server/googleCalendarSync.mjs';
 import { loadAppState, saveAppState } from '../../server/appStateStore.mjs';
 
+function resultHtml({ ok, message }) {
+  const safe = String(message || '').replace(/</g, '&lt;');
+  return `<!doctype html><html><body style="font-family:system-ui;padding:2rem;background:#0b1220;color:#e8eefc">
+    <h1>${ok ? 'Google Calendar conectado' : 'No se pudo conectar'}</h1>
+    <p>${safe}</p>
+    <p>Si esta ventana no se cierra sola, vuelve al dashboard → Agenda.</p>
+    <script>
+      (function () {
+        var payload = { type: 'yaavs-google-oauth', ok: ${ok ? 'true' : 'false'} };
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage(payload, '*');
+            setTimeout(function () { window.close(); }, 600);
+            return;
+          }
+        } catch (e) {}
+        try {
+          localStorage.setItem('yaavs-google-oauth-result', JSON.stringify(payload));
+        } catch (e) {}
+        location.replace('/agenda?google=${ok ? 'connected' : 'error'}');
+      })();
+    </script>
+  </body></html>`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     res.status(405).send('Método no permitido');
@@ -30,12 +55,12 @@ export default async function handler(req, res) {
   if (error) {
     sendHtml(
       400,
-      `<html><body><h1>No se pudo conectar Google Calendar</h1><p>${errorDescription || error}</p></body></html>`,
+      resultHtml({ ok: false, message: errorDescription || error }),
     );
     return;
   }
   if (!code) {
-    sendHtml(400, '<html><body><h1>Falta código OAuth</h1></body></html>');
+    sendHtml(400, resultHtml({ ok: false, message: 'Falta código OAuth' }));
     return;
   }
 
@@ -47,28 +72,23 @@ export default async function handler(req, res) {
     try {
       await syncGoogleCalendar(loadAppState, saveAppState, userId);
     } catch (syncErr) {
-      recordGoogleSyncError(userId, syncErr);
+      await recordGoogleSyncError(userId, syncErr);
       console.error('Google sync post-callback:', syncErr);
     }
     sendHtml(
       200,
-      `<html><body style="font-family:system-ui;padding:2rem">
-        <h1>Google Calendar conectado</h1>
-        <p>Puedes cerrar esta ventana. El dashboard se actualizará solo.</p>
-        <script>
-          try {
-            if (window.opener) {
-              window.opener.postMessage({ type: 'yaavs-google-oauth', ok: true }, '*');
-            }
-          } catch (e) {}
-          setTimeout(function(){ window.close(); }, 800);
-        </script>
-      </body></html>`,
+      resultHtml({
+        ok: true,
+        message: 'Puedes cerrar esta ventana. El dashboard cargará la agenda de Orlando.',
+      }),
     );
   } catch (err) {
     sendHtml(
       500,
-      `<html><body><h1>Error OAuth</h1><p>${err instanceof Error ? err.message : String(err)}</p></body></html>`,
+      resultHtml({
+        ok: false,
+        message: err instanceof Error ? err.message : String(err),
+      }),
     );
   }
 }

@@ -7,6 +7,7 @@ const DATA_DIR = path.join(__dirname, 'data');
 const TOKENS_PATH = path.join(DATA_DIR, 'google-tokens.json');
 const OAUTH_FILE = path.join(DATA_DIR, 'google-oauth.json');
 const OAUTH_DB_KEY = 'yaavs-google-oauth';
+const TOKENS_DB_KEY = 'yaavs-google-tokens';
 
 export const GOOGLE_CAL_USER_ID = 'u-orlando';
 const SCOPES = [
@@ -17,6 +18,8 @@ const SYNC_LOOKBACK_DAYS = 7;
 const SYNC_LOOKAHEAD_DAYS = 30;
 
 let credsLoadPromise = null;
+let tokensMemory = null;
+let tokensLoadPromise = null;
 
 function env(name, fallback = '') {
   return (process.env[name] ?? fallback).trim();
@@ -29,11 +32,8 @@ function applyCreds(cfg = {}) {
 }
 
 export function googleConfigured() {
-  return Boolean(
-    env('GOOGLE_CLIENT_ID') &&
-      env('GOOGLE_CLIENT_SECRET') &&
-      env('GOOGLE_REDIRECT_URI'),
-  );
+  // redirect_uri puede venir del host de la petición; basta con client id/secret.
+  return Boolean(env('GOOGLE_CLIENT_ID') && env('GOOGLE_CLIENT_SECRET'));
 }
 
 /** Carga credenciales desde env, archivo local o Neon (sobrevive redeploys de Hostinger). */
@@ -111,14 +111,17 @@ export async function saveGoogleOAuthConfig({ clientId, clientSecret, redirectUr
 }
 
 function redirectUri() {
-  return env('GOOGLE_REDIRECT_URI', 'http://localhost:3001/api/google/callback');
+  return env(
+    'GOOGLE_REDIRECT_URI',
+    'https://darkred-wasp-801635.hostingersite.com/api/google/callback',
+  );
 }
 
 function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-function readTokens() {
+function readTokensFromFile() {
   try {
     if (fs.existsSync(TOKENS_PATH)) {
       return JSON.parse(fs.readFileSync(TOKENS_PATH, 'utf8'));
@@ -129,13 +132,88 @@ function readTokens() {
   return {};
 }
 
-function writeTokens(all) {
-  ensureDataDir();
-  fs.writeFileSync(TOKENS_PATH, JSON.stringify(all, null, 2));
+/** Tokens en archivo + Neon (Hostinger borra el disco del contenedor en cada deploy). */
+export async function loadGoogleTokens() {
+  if (tokensMemory) return tokensMemory;
+  if (!tokensLoadPromise) {
+    tokensLoadPromise = (async () => {
+      let all = readTokensFromFile();
+      try {
+        const { databaseUrl, sql } = await import('./db.mjs');
+        if (databaseUrl()) {
+          const rows = await sql`
+            SELECT state FROM app_state WHERE key = ${TOKENS_DB_KEY} LIMIT 1
+          `;
+          const state = rows[0]?.state;
+          if (state && typeof state === 'object') {
+            all = { ...all, ...state };
+          }
+        }
+      } catch (err) {
+        console.warn('No se pudieron cargar tokens Google desde DB:', err?.message ?? err);
+      }
+      tokensMemory = all;
+      return all;
+    })().finally(() => {
+      if (!tokensMemory) tokensLoadPromise = null;
+    });
+  }
+  return tokensLoadPromise;
+}
+
+async function persistGoogleTokens(all) {
+  tokensMemory = all;
+  try {
+    ensureDataDir();
+    fs.writeFileSync(TOKENS_PATH, JSON.stringify(all, null, 2));
+  } catch (err) {
+    console.warn('No se pudo escribir google-tokens.json:', err?.message ?? err);
+  }
+  try {
+    const { databaseUrl, sql } = await import('./db.mjs');
+    if (databaseUrl()) {
+      const json = JSON.stringify(all);
+      await sql`
+        INSERT INTO app_state (key, state, updated_at)
+        VALUES (${TOKENS_DB_KEY}, ${json}::jsonb, now())
+        ON CONFLICT (key) DO UPDATE SET state = ${json}::jsonb, updated_at = now()
+      `;
+    }
+  } catch (err) {
+    console.warn('Tokens Google no persistieron en DB:', err?.message ?? err);
+  }
+}
+
+export function encodeGoogleOAuthState(userId, oauthRedirectUri) {
+  const payload = JSON.stringify({
+    u: userId || GOOGLE_CAL_USER_ID,
+    r: oauthRedirectUri || redirectUri(),
+  });
+  return Buffer.from(payload, 'utf8').toString('base64url');
+}
+
+export function decodeGoogleOAuthState(state) {
+  const raw = String(state || '').trim();
+  if (!raw) {
+    return { userId: GOOGLE_CAL_USER_ID, redirectUri: redirectUri() };
+  }
+  try {
+    const json = Buffer.from(raw, 'base64url').toString('utf8');
+    const parsed = JSON.parse(json);
+    if (parsed?.u) {
+      return {
+        userId: String(parsed.u),
+        redirectUri: parsed.r ? String(parsed.r) : redirectUri(),
+      };
+    }
+  } catch {
+    /* legacy: state era solo el userId */
+  }
+  return { userId: raw, redirectUri: redirectUri() };
 }
 
 export function getGoogleStatus(userId = GOOGLE_CAL_USER_ID) {
-  const entry = readTokens()[userId];
+  const entry = (tokensMemory || readTokensFromFile())[userId];
   return {
     configured: googleConfigured(),
     connected: Boolean(entry?.refresh_token || entry?.access_token),
@@ -149,32 +227,35 @@ export function getGoogleStatus(userId = GOOGLE_CAL_USER_ID) {
 
 export async function getGoogleStatusAsync(userId = GOOGLE_CAL_USER_ID) {
   await ensureGoogleCredsLoaded();
+  await loadGoogleTokens();
   return getGoogleStatus(userId);
 }
 
-export function getGoogleAuthUrl(userId = GOOGLE_CAL_USER_ID) {
+export function getGoogleAuthUrl(userId = GOOGLE_CAL_USER_ID, oauthRedirectUri) {
   if (!googleConfigured()) {
     throw new Error('Google Calendar no configurado: faltan variables GOOGLE_*');
   }
+  const redir = String(oauthRedirectUri || redirectUri()).trim();
+  if (oauthRedirectUri) applyCreds({ redirectUri: redir });
   const params = new URLSearchParams({
     client_id: env('GOOGLE_CLIENT_ID'),
-    redirect_uri: redirectUri(),
+    redirect_uri: redir,
     response_type: 'code',
     scope: SCOPES,
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: 'true',
-    state: userId,
+    state: encodeGoogleOAuthState(userId, redir),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
 
-async function exchangeCode(code) {
+async function exchangeCode(code, oauthRedirectUri) {
   const body = new URLSearchParams({
     code,
     client_id: env('GOOGLE_CLIENT_ID'),
     client_secret: env('GOOGLE_CLIENT_SECRET'),
-    redirect_uri: redirectUri(),
+    redirect_uri: String(oauthRedirectUri || redirectUri()).trim(),
     grant_type: 'authorization_code',
   });
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -220,7 +301,7 @@ async function googleGet(accessToken, url) {
 }
 
 async function getValidAccessToken(userId) {
-  const all = readTokens();
+  const all = await loadGoogleTokens();
   const entry = all[userId];
   if (!entry) throw new Error('Google Calendar no conectado para este usuario');
 
@@ -241,13 +322,33 @@ async function getValidAccessToken(userId) {
   };
   if (refreshed.refresh_token) next.refresh_token = refreshed.refresh_token;
   all[userId] = next;
-  writeTokens(all);
+  await persistGoogleTokens(all);
   return next.access_token;
 }
 
-export async function handleGoogleOAuthCallback(code, stateUserId) {
-  const userId = stateUserId || GOOGLE_CAL_USER_ID;
-  const tokens = await exchangeCode(code);
+export async function handleGoogleOAuthCallback(code, stateRaw, redirectOverride) {
+  const { userId, redirectUri: fromState } = decodeGoogleOAuthState(stateRaw);
+  const candidates = [
+    ...new Set(
+      [redirectOverride, fromState, redirectUri()]
+        .map((v) => String(v || '').trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  let tokens = null;
+  let lastError = null;
+  for (const redir of candidates) {
+    try {
+      tokens = await exchangeCode(code, redir);
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  if (!tokens) {
+    throw lastError || new Error('Error al canjear código OAuth');
+  }
   const accessToken = tokens.access_token;
 
   let email = null;
@@ -258,7 +359,7 @@ export async function handleGoogleOAuthCallback(code, stateUserId) {
     /* optional */
   }
 
-  const all = readTokens();
+  const all = await loadGoogleTokens();
   all[userId] = {
     ...(all[userId] ?? {}),
     access_token: accessToken,
@@ -268,7 +369,7 @@ export async function handleGoogleOAuthCallback(code, stateUserId) {
     connectedAt: new Date().toISOString(),
     lastError: null,
   };
-  writeTokens(all);
+  await persistGoogleTokens(all);
   return { userId, email };
 }
 
@@ -434,7 +535,7 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
   };
   await writeState(nextState);
 
-  const all = readTokens();
+  const all = await loadGoogleTokens();
   if (all[userId]) {
     all[userId] = {
       ...all[userId],
@@ -442,7 +543,7 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
       lastError: null,
       eventCount: googleEvents.length,
     };
-    writeTokens(all);
+    await persistGoogleTokens(all);
   }
 
   return {
@@ -453,14 +554,14 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
   };
 }
 
-export function recordGoogleSyncError(userId, error) {
-  const all = readTokens();
+export async function recordGoogleSyncError(userId, error) {
+  const all = await loadGoogleTokens();
   if (!all[userId]) return;
   all[userId] = {
     ...all[userId],
     lastError: error instanceof Error ? error.message : String(error),
   };
-  writeTokens(all);
+  await persistGoogleTokens(all);
 }
 
 const EXTERNAL_SOURCES = new Set(['google', 'outlook']);

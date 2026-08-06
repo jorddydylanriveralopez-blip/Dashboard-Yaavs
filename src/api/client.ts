@@ -183,6 +183,41 @@ export async function fetchGoogleCalendarStatus(
   }
 }
 
+export async function exchangeGoogleOAuthCode(input: {
+  code: string;
+  state?: string | null;
+  redirectUri?: string | null;
+}): Promise<{ ok: boolean; error?: string; eventCount?: number; email?: string | null }> {
+  if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/google/exchange`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: input.code,
+          state: input.state || CALENDAR_SYNC_USER_ID,
+          redirectUri: input.redirectUri || undefined,
+        }),
+      },
+      STATE_TIMEOUT_MS,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      eventCount?: number;
+      email?: string | null;
+    };
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || 'No se pudo completar el acceso con Google' };
+    }
+    return { ok: true, eventCount: data.eventCount, email: data.email };
+  } catch {
+    return { ok: false, error: 'No se pudo completar el acceso con Google' };
+  }
+}
+
 export async function triggerGoogleCalendarSync(
   userId: string = CALENDAR_SYNC_USER_ID,
 ): Promise<{ ok: boolean; error?: string; eventCount?: number }> {

@@ -133,6 +133,43 @@ export function CalendarView() {
       })();
     };
     window.addEventListener('message', onMessage);
+
+    // Popup cerró / callback redirigió a /agenda?google=connected
+    const params = new URLSearchParams(window.location.search);
+    const googleFlag = params.get('google');
+    if (googleFlag === 'connected' || googleFlag === 'error') {
+      void (async () => {
+        if (googleFlag === 'connected') {
+          await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+          await pullGoogleAgendaIntoDashboard();
+          const status = await refreshGoogleStatus();
+          if (status?.connected) {
+            setGoogleMessage(
+              `Google Calendar conectado${
+                status.eventCount != null ? ` · ${status.eventCount} eventos` : ''
+              }.`,
+            );
+          }
+        } else {
+          setGoogleConnectError('No se pudo completar el acceso con Google.');
+        }
+        window.history.replaceState({}, '', '/agenda');
+      })();
+    }
+
+    try {
+      const raw = localStorage.getItem('yaavs-google-oauth-result');
+      if (raw) {
+        localStorage.removeItem('yaavs-google-oauth-result');
+        const parsed = JSON.parse(raw) as { type?: string; ok?: boolean };
+        if (parsed?.type === 'yaavs-google-oauth') {
+          window.postMessage(parsed, window.location.origin);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     return () => window.removeEventListener('message', onMessage);
   }, []);
 

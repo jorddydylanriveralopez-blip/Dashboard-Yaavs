@@ -2,6 +2,7 @@ import { AppProvider, useApp } from './context/AppContext';
 import { ConfirmProvider } from './context/ConfirmContext';
 import { ToastProvider } from './context/ToastContext';
 import { Dashboard } from './components/Dashboard';
+import { GoogleOAuthReturnHandler } from './components/GoogleOAuthReturnHandler';
 import { InstallPwaBanner } from './components/InstallPwaBanner';
 import { LoginPage } from './components/LoginPage';
 import { MediaCdnPage } from './components/MediaCdnPage';
@@ -20,6 +21,7 @@ function AppContent() {
   }
   return (
     <div className={`app-shell${user ? ' app-shell--dashboard' : ' app-shell--login'}`}>
+      <GoogleOAuthReturnHandler />
       {user && <InstallPwaBanner />}
       {user ? <Dashboard /> : <LoginPage />}
     </div>
