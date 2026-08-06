@@ -1,4 +1,8 @@
-import { getGoogleAuthUrl, GOOGLE_CAL_USER_ID } from '../../server/googleCalendarSync.mjs';
+import {
+  ensureGoogleCredsLoaded,
+  getGoogleAuthUrl,
+  GOOGLE_CAL_USER_ID,
+} from '../../server/googleCalendarSync.mjs';
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -17,6 +21,7 @@ export default async function handler(req, res) {
     return;
   }
   try {
+    await ensureGoogleCredsLoaded();
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const userId = url.searchParams.get('userId') || GOOGLE_CAL_USER_ID;
     const authUrl = getGoogleAuthUrl(userId);

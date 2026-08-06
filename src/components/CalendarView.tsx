@@ -6,6 +6,7 @@ import {
   fetchGoogleCalendarStatus,
   getGoogleAuthUrl,
   isApiEnabled,
+  saveGoogleOAuthConfig,
   triggerGoogleCalendarSync,
   type ExternalCalendarStatus,
 } from '../api/client';
@@ -53,9 +54,17 @@ export function CalendarView() {
   const [googleStatus, setGoogleStatus] = useState<ExternalCalendarStatus | null>(null);
   const [googleSyncing, setGoogleSyncing] = useState(false);
   const [googleMessage, setGoogleMessage] = useState<string | null>(null);
+  const [googleClientId, setGoogleClientId] = useState('');
+  const [googleClientSecret, setGoogleClientSecret] = useState('');
+  const [googleSaving, setGoogleSaving] = useState(false);
   const canImportOrlandoAgenda =
     Boolean(user) &&
     (canEditAll || user?.employeeId === 'emp-orlando' || user?.id === ORLANDO_USER_ID);
+
+  const defaultRedirectUri =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}/api/google/callback`
+      : 'https://darkred-wasp-801635.hostingersite.com/api/google/callback';
 
   useEffect(() => {
     if (!canImportOrlandoAgenda || !isApiEnabled()) return;
@@ -87,6 +96,25 @@ export function CalendarView() {
         ? `Google Calendar sincronizado${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''}`
         : result.error || 'No se pudo sincronizar',
     );
+  };
+
+  const saveGoogleConfig = async () => {
+    setGoogleSaving(true);
+    setGoogleMessage(null);
+    const result = await saveGoogleOAuthConfig({
+      clientId: googleClientId.trim(),
+      clientSecret: googleClientSecret.trim(),
+      redirectUri: defaultRedirectUri,
+    });
+    const status = await fetchGoogleCalendarStatus(ORLANDO_USER_ID);
+    setGoogleStatus(status);
+    setGoogleSaving(false);
+    if (result.ok) {
+      setGoogleClientSecret('');
+      setGoogleMessage('Credenciales guardadas. Ya puedes conectar Google Calendar.');
+    } else {
+      setGoogleMessage(result.error || 'No se pudieron guardar');
+    }
   };
 
   const initialNow = new Date();
@@ -543,11 +571,45 @@ export function CalendarView() {
                     <code>/api/google/status</code>.
                   </p>
                 ) : !googleStatus.configured ? (
-                  <p className="calendar-ics-status">
-                    Faltan variables en Hostinger:{' '}
-                    <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code> y{' '}
-                    <code>GOOGLE_REDIRECT_URI</code>. Agrégalas en el panel y reinicia el sitio.
-                  </p>
+                  <div className="calendar-google-setup">
+                    <p className="calendar-ics-status">
+                      Hostinger borra las variables del panel. Pega aquí el Client ID y Secret una
+                      vez; se guardan en la base de datos.
+                    </p>
+                    <label>
+                      Client ID
+                      <input
+                        value={googleClientId}
+                        onChange={(e) => setGoogleClientId(e.target.value)}
+                        placeholder="xxxxx.apps.googleusercontent.com"
+                        autoComplete="off"
+                      />
+                    </label>
+                    <label>
+                      Client Secret
+                      <input
+                        type="password"
+                        value={googleClientSecret}
+                        onChange={(e) => setGoogleClientSecret(e.target.value)}
+                        placeholder="GOCSPX-..."
+                        autoComplete="off"
+                      />
+                    </label>
+                    <p className="calendar-ics-status">
+                      Redirect URI (agrégalo también en Google Cloud):{' '}
+                      <code>{defaultRedirectUri}</code>
+                    </p>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={
+                        googleSaving || !googleClientId.trim() || !googleClientSecret.trim()
+                      }
+                      onClick={() => void saveGoogleConfig()}
+                    >
+                      {googleSaving ? 'Guardando…' : 'Guardar credenciales'}
+                    </button>
+                  </div>
                 ) : googleStatus.connected ? (
                   <>
                     <p className="calendar-ics-status">

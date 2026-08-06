@@ -277,6 +277,29 @@
   color: var(--accent);
 }
 
+.calendar-google-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.calendar-google-setup label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.calendar-google-setup input {
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 0.875rem;
+  background: var(--bg-input);
+}
+
 .calendar-team {
   margin-top: 18px;
   padding-top: 18px;

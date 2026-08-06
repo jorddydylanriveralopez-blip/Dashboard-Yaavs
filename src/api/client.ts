@@ -183,3 +183,27 @@ export async function triggerGoogleCalendarSync(
     return { ok: false, error: 'No se pudo sincronizar Google Calendar' };
   }
 }
+
+export async function saveGoogleOAuthConfig(input: {
+  clientId: string;
+  clientSecret: string;
+  redirectUri?: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/google/configure`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      HEALTH_TIMEOUT_MS,
+    );
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok) return { ok: false, error: data.error || 'No se pudo guardar' };
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'No se pudo guardar la configuración' };
+  }
+}

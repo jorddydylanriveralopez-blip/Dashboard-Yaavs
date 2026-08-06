@@ -1,4 +1,9 @@
-import { getGoogleStatus, GOOGLE_CAL_USER_ID } from '../../server/googleCalendarSync.mjs';
+import {
+  ensureGoogleCredsLoaded,
+  getGoogleStatusAsync,
+  GOOGLE_CAL_USER_ID,
+  saveGoogleOAuthConfig,
+} from '../../server/googleCalendarSync.mjs';
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,8 +21,9 @@ export default async function handler(req, res) {
     res.status(405).json({ error: 'Método no permitido' });
     return;
   }
+  await ensureGoogleCredsLoaded();
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const userId = url.searchParams.get('userId') || GOOGLE_CAL_USER_ID;
   res.setHeader('Cache-Control', 'no-store');
-  res.status(200).json(getGoogleStatus(userId));
+  res.status(200).json(await getGoogleStatusAsync(userId));
 }

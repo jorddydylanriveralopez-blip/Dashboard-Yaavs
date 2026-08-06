@@ -22,12 +22,14 @@ import {
 } from './calendarReminders.mjs';
 import { removeSubscription, saveSubscription, sendPush } from './pushStore.mjs';
 import {
+  ensureGoogleCredsLoaded,
   getGoogleAuthUrl,
-  getGoogleStatus,
+  getGoogleStatusAsync,
   googleConfigured,
   GOOGLE_CAL_USER_ID,
   handleGoogleOAuthCallback,
   recordGoogleSyncError,
+  saveGoogleOAuthConfig,
   syncGoogleCalendar,
 } from './googleCalendarSync.mjs';
 
@@ -112,13 +114,36 @@ app.put('/api/state', async (req, res) => {
   }
 });
 
-app.get('/api/google/status', (req, res) => {
+app.get('/api/google/status', async (req, res) => {
+  await ensureGoogleCredsLoaded();
   const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
-  res.json(getGoogleStatus(userId));
+  res.json(await getGoogleStatusAsync(userId));
 });
 
-app.get('/api/google/auth', (req, res) => {
+app.post('/api/google/configure', async (req, res) => {
   try {
+    const saved = await saveGoogleOAuthConfig({
+      clientId: req.body?.clientId || req.body?.GOOGLE_CLIENT_ID,
+      clientSecret: req.body?.clientSecret || req.body?.GOOGLE_CLIENT_SECRET,
+      redirectUri: req.body?.redirectUri || req.body?.GOOGLE_REDIRECT_URI,
+    });
+    res.json({
+      ok: true,
+      configured: true,
+      redirectUri: saved.redirectUri,
+      clientId: saved.clientId,
+    });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get('/api/google/auth', async (req, res) => {
+  try {
+    await ensureGoogleCredsLoaded();
     const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
     res.redirect(getGoogleAuthUrl(userId));
   } catch (error) {
@@ -127,6 +152,7 @@ app.get('/api/google/auth', (req, res) => {
 });
 
 app.get('/api/google/callback', async (req, res) => {
+  await ensureGoogleCredsLoaded();
   const { code, state, error, error_description: errorDescription } = req.query;
   if (error) {
     res
@@ -168,6 +194,7 @@ app.get('/api/google/callback', async (req, res) => {
 });
 
 app.post('/api/google/sync', async (req, res) => {
+  await ensureGoogleCredsLoaded();
   const userId = String(req.body?.userId || req.query.userId || GOOGLE_CAL_USER_ID);
   try {
     const result = await syncGoogleCalendar(loadAppState, saveAppState, userId);
@@ -545,10 +572,11 @@ app.listen(PORT, '0.0.0.0', async () => {
       'DATABASE_URL no está configurada. Configúrala en Hostinger/Render con la misma Neon para no perder proyectos.',
     );
   }
-  if (googleConfigured()) {
+  if (googleConfigured() || (await ensureGoogleCredsLoaded())) {
     console.log('Google Calendar OAuth configurado');
     const tick = async () => {
-      const status = getGoogleStatus(GOOGLE_CAL_USER_ID);
+      await ensureGoogleCredsLoaded();
+      const status = await getGoogleStatusAsync(GOOGLE_CAL_USER_ID);
       if (!status.connected) return;
       try {
         await syncGoogleCalendar(loadAppState, saveAppState, GOOGLE_CAL_USER_ID);

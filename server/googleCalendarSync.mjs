@@ -5,6 +5,8 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const TOKENS_PATH = path.join(DATA_DIR, 'google-tokens.json');
+const OAUTH_FILE = path.join(DATA_DIR, 'google-oauth.json');
+const OAUTH_DB_KEY = 'yaavs-google-oauth';
 
 export const GOOGLE_CAL_USER_ID = 'u-orlando';
 const SCOPES = [
@@ -14,8 +16,16 @@ const SCOPES = [
 const SYNC_LOOKBACK_DAYS = 7;
 const SYNC_LOOKAHEAD_DAYS = 30;
 
+let credsLoadPromise = null;
+
 function env(name, fallback = '') {
   return (process.env[name] ?? fallback).trim();
+}
+
+function applyCreds(cfg = {}) {
+  if (cfg.clientId) process.env.GOOGLE_CLIENT_ID = String(cfg.clientId).trim();
+  if (cfg.clientSecret) process.env.GOOGLE_CLIENT_SECRET = String(cfg.clientSecret).trim();
+  if (cfg.redirectUri) process.env.GOOGLE_REDIRECT_URI = String(cfg.redirectUri).trim();
 }
 
 export function googleConfigured() {
@@ -24,6 +34,80 @@ export function googleConfigured() {
       env('GOOGLE_CLIENT_SECRET') &&
       env('GOOGLE_REDIRECT_URI'),
   );
+}
+
+/** Carga credenciales desde env, archivo local o Neon (sobrevive redeploys de Hostinger). */
+export async function ensureGoogleCredsLoaded() {
+  if (googleConfigured()) return true;
+  if (!credsLoadPromise) {
+    credsLoadPromise = (async () => {
+      try {
+        if (fs.existsSync(OAUTH_FILE)) {
+          const raw = JSON.parse(fs.readFileSync(OAUTH_FILE, 'utf8'));
+          applyCreds({
+            clientId: raw.clientId || raw.GOOGLE_CLIENT_ID,
+            clientSecret: raw.clientSecret || raw.GOOGLE_CLIENT_SECRET,
+            redirectUri: raw.redirectUri || raw.GOOGLE_REDIRECT_URI,
+          });
+          if (googleConfigured()) return true;
+        }
+      } catch {
+        /* ignore */
+      }
+
+      try {
+        const { databaseUrl, sql } = await import('./db.mjs');
+        if (!databaseUrl()) return googleConfigured();
+        const rows = await sql`SELECT state FROM app_state WHERE key = ${OAUTH_DB_KEY} LIMIT 1`;
+        const state = rows[0]?.state;
+        if (state && typeof state === 'object') {
+          applyCreds(state);
+        }
+      } catch (err) {
+        console.warn('No se pudieron cargar credenciales Google desde DB:', err?.message ?? err);
+      }
+      return googleConfigured();
+    })().finally(() => {
+      // Permitir reintento si aún no hay creds
+      if (!googleConfigured()) credsLoadPromise = null;
+    });
+  }
+  return credsLoadPromise;
+}
+
+/** Guarda credenciales en archivo + Neon para que no se pierdan en Hostinger. */
+export async function saveGoogleOAuthConfig({ clientId, clientSecret, redirectUri }) {
+  const cfg = {
+    clientId: String(clientId || '').trim(),
+    clientSecret: String(clientSecret || '').trim(),
+    redirectUri: String(
+      redirectUri ||
+        env('GOOGLE_REDIRECT_URI') ||
+        'https://darkred-wasp-801635.hostingersite.com/api/google/callback',
+    ).trim(),
+  };
+  if (!cfg.clientId || !cfg.clientSecret || !cfg.redirectUri) {
+    throw new Error('Faltan clientId, clientSecret o redirectUri');
+  }
+  applyCreds(cfg);
+  ensureDataDir();
+  fs.writeFileSync(OAUTH_FILE, JSON.stringify(cfg, null, 2));
+
+  try {
+    const { databaseUrl, sql } = await import('./db.mjs');
+    if (databaseUrl()) {
+      const json = JSON.stringify(cfg);
+      await sql`
+        INSERT INTO app_state (key, state, updated_at)
+        VALUES (${OAUTH_DB_KEY}, ${json}::jsonb, now())
+        ON CONFLICT (key) DO UPDATE SET state = ${json}::jsonb, updated_at = now()
+      `;
+    }
+  } catch (err) {
+    console.warn('Credenciales guardadas en archivo; DB falló:', err?.message ?? err);
+  }
+  credsLoadPromise = Promise.resolve(true);
+  return cfg;
 }
 
 function redirectUri() {
@@ -60,6 +144,11 @@ export function getGoogleStatus(userId = GOOGLE_CAL_USER_ID) {
     lastSyncAt: entry?.lastSyncAt ?? null,
     lastError: entry?.lastError ?? null,
   };
+}
+
+export async function getGoogleStatusAsync(userId = GOOGLE_CAL_USER_ID) {
+  await ensureGoogleCredsLoaded();
+  return getGoogleStatus(userId);
 }
 
 export function getGoogleAuthUrl(userId = GOOGLE_CAL_USER_ID) {

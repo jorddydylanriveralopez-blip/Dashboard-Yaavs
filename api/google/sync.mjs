@@ -1,4 +1,5 @@
 import {
+  ensureGoogleCredsLoaded,
   GOOGLE_CAL_USER_ID,
   recordGoogleSyncError,
   syncGoogleCalendar,
@@ -21,6 +22,8 @@ export default async function handler(req, res) {
     res.status(405).json({ error: 'Método no permitido' });
     return;
   }
+
+  await ensureGoogleCredsLoaded();
 
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const userId = String(

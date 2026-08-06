@@ -1,4 +1,5 @@
 import {
+  ensureGoogleCredsLoaded,
   GOOGLE_CAL_USER_ID,
   handleGoogleOAuthCallback,
   recordGoogleSyncError,
@@ -11,6 +12,8 @@ export default async function handler(req, res) {
     res.status(405).send('Método no permitido');
     return;
   }
+
+  await ensureGoogleCredsLoaded();
 
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const code = url.searchParams.get('code');
