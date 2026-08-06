@@ -5,10 +5,14 @@ import { reminderEmailForUser } from '../api/calendar';
 import {
   fetchGoogleAuthUrl,
   fetchGoogleCalendarStatus,
+  fetchOutlookIcsStatus,
   isApiEnabled,
   saveGoogleOAuthConfig,
+  saveOutlookIcsConfig,
   triggerGoogleCalendarSync,
+  triggerOutlookIcsSync,
   type ExternalCalendarStatus,
+  type OutlookIcsStatus,
 } from '../api/client';
 import { useEventReminders } from '../hooks/useEventReminders';
 import {
@@ -63,6 +67,10 @@ export function CalendarView() {
   const [googleConnectBusy, setGoogleConnectBusy] = useState(false);
   const [googleConnectError, setGoogleConnectError] = useState<string | null>(null);
   const googlePopupRef = useRef<Window | null>(null);
+  const [outlookStatus, setOutlookStatus] = useState<OutlookIcsStatus | null>(null);
+  const [outlookUrl, setOutlookUrl] = useState('');
+  const [outlookBusy, setOutlookBusy] = useState(false);
+  const [outlookMessage, setOutlookMessage] = useState<string | null>(null);
   const [year, setYear] = useState(() => new Date().getFullYear());
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()));
@@ -319,6 +327,81 @@ export function CalendarView() {
     } else {
       setGoogleMessage(result.error || 'No se pudieron guardar');
     }
+  };
+
+  useEffect(() => {
+    if (!canImportOrlandoAgenda || !isApiEnabled()) return;
+    let cancelled = false;
+    void (async () => {
+      const status = await fetchOutlookIcsStatus(ORLANDO_USER_ID);
+      if (!cancelled) setOutlookStatus(status);
+      if (status?.configured && !cancelled) {
+        const sync = await triggerOutlookIcsSync(ORLANDO_USER_ID);
+        if (sync.ok) {
+          await pullGoogleAgendaIntoDashboard();
+          const next = await fetchOutlookIcsStatus(ORLANDO_USER_ID);
+          if (!cancelled) {
+            setOutlookStatus(next);
+            setOutlookMessage(
+              `Outlook al día${sync.eventCount != null ? ` · ${sync.eventCount} eventos` : ''}`,
+            );
+          }
+        }
+      }
+    })();
+    const id = window.setInterval(() => {
+      void (async () => {
+        const status = await fetchOutlookIcsStatus(ORLANDO_USER_ID);
+        if (cancelled || !status?.configured) return;
+        const sync = await triggerOutlookIcsSync(ORLANDO_USER_ID);
+        if (cancelled || !sync.ok) return;
+        await pullGoogleAgendaIntoDashboard();
+        if (!cancelled) setOutlookStatus(await fetchOutlookIcsStatus(ORLANDO_USER_ID));
+      })();
+    }, 5 * 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [canImportOrlandoAgenda]);
+
+  const saveOutlookLink = async () => {
+    if (!outlookUrl.trim()) {
+      setOutlookMessage('Pega el enlace ICS publicado de Outlook / Hotmail.');
+      return;
+    }
+    setOutlookBusy(true);
+    setOutlookMessage(null);
+    const result = await saveOutlookIcsConfig({
+      url: outlookUrl.trim(),
+      userId: ORLANDO_USER_ID,
+    });
+    const status = await fetchOutlookIcsStatus(ORLANDO_USER_ID);
+    setOutlookStatus(status);
+    if (result.ok) {
+      await pullGoogleAgendaIntoDashboard();
+      setOutlookUrl('');
+      setOutlookMessage(
+        `Outlook conectado${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''}. Se actualiza solo.`,
+      );
+    } else {
+      setOutlookMessage(result.error || 'No se pudo guardar el enlace');
+    }
+    setOutlookBusy(false);
+  };
+
+  const syncOutlookNow = async () => {
+    setOutlookBusy(true);
+    setOutlookMessage(null);
+    const result = await triggerOutlookIcsSync(ORLANDO_USER_ID);
+    if (result.ok) await pullGoogleAgendaIntoDashboard();
+    setOutlookStatus(await fetchOutlookIcsStatus(ORLANDO_USER_ID));
+    setOutlookBusy(false);
+    setOutlookMessage(
+      result.ok
+        ? `Outlook sincronizado${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''}`
+        : result.error || 'No se pudo sincronizar Outlook',
+    );
   };
 
   const [title, setTitle] = useState('');
@@ -736,11 +819,11 @@ export function CalendarView() {
             {canConnectGoogle ? (
               <>
                 <p>
-                  Vincula tu Gmail ({user?.name ?? 'tú'}) para traer eventos de ~2 años atrás y
-                  ~1 año adelante. Se sincroniza sola.
+                  Vincula tu Gmail ({user?.name ?? 'tú'}) solo para eventos que estén en Google.
                   {isOrlandoViewer
-                    ? ' El equipo puede ver tu ocupación por día.'
-                    : ' Tu agenda personal es privada; sí verás si Orlando está ocupado.'}
+                    ? ' Lo de Hotmail/Outlook no sale aquí: usa la sección Outlook abajo.'
+                    : ' Tu agenda personal es privada; sí verás si Orlando está ocupado.'}{' '}
+                  Se sincroniza sola.
                 </p>
                 {!isApiEnabled() ? (
                   <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>
@@ -839,10 +922,65 @@ export function CalendarView() {
 
           {canImportOrlandoAgenda && (
             <div className="calendar-ics">
-              <h3>Importar agenda de Orlando (Outlook)</h3>
+              <h3>Agenda de Orlando (Outlook / Hotmail)</h3>
               <p>
-                Sube el archivo <code>.olm</code> de Outlook para Mac (o un <code>.ics</code>).
-                El equipo verá si Orlando está ocupado ese día.
+                Los pendientes reales de Orlando están en <strong>Outlook/Hotmail</strong>, no en
+                Gmail. Por eso en Google Calendar casi no se ven. Publica el calendario en Outlook y
+                pega aquí el enlace <code>.ics</code> para traer agosto y el resto al dashboard
+                (el equipo verá si está ocupado).
+              </p>
+              <ol className="calendar-orlando-week-hint" style={{ paddingLeft: '1.2rem' }}>
+                <li>Outlook en la web → Calendario → Configuración → Calendarios compartidos</li>
+                <li>Publicar calendario → copiar el enlace ICS</li>
+                <li>Pegarlo abajo y guardar</li>
+              </ol>
+              {outlookStatus?.configured ? (
+                <>
+                  <p className="calendar-ics-status">
+                    Conectado{outlookStatus.urlHost ? ` · ${outlookStatus.urlHost}` : ''}
+                    {outlookStatus.lastSyncAt
+                      ? ` · Última sync ${new Date(outlookStatus.lastSyncAt).toLocaleString('es-MX')}`
+                      : ''}
+                    {outlookStatus.eventCount != null
+                      ? ` · ${outlookStatus.eventCount} eventos`
+                      : ''}
+                  </p>
+                  {outlookStatus.lastError && (
+                    <p className="calendar-ics-status">{outlookStatus.lastError}</p>
+                  )}
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    disabled={outlookBusy}
+                    onClick={() => void syncOutlookNow()}
+                  >
+                    {outlookBusy ? 'Actualizando Outlook…' : 'Actualizar Outlook ahora'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <label>
+                    Enlace ICS de Outlook
+                    <input
+                      value={outlookUrl}
+                      onChange={(e) => setOutlookUrl(e.target.value)}
+                      placeholder="https://outlook.live.com/owa/calendar/..../calendar.ics"
+                      autoComplete="off"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={outlookBusy || !outlookUrl.trim()}
+                    onClick={() => void saveOutlookLink()}
+                  >
+                    {outlookBusy ? 'Guardando…' : 'Guardar y sincronizar Outlook'}
+                  </button>
+                </>
+              )}
+              {outlookMessage && <p className="calendar-ics-status">{outlookMessage}</p>}
+              <p className="calendar-ics-status">
+                También puedes subir un archivo <code>.olm</code> / <code>.ics</code> exportado:
               </p>
               <input
                 ref={icsInputRef}

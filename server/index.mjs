@@ -22,6 +22,12 @@ import {
 } from './calendarReminders.mjs';
 import { ensureVapidConfigured, getVapidPublicKey, removeSubscription, saveSubscription, sendPush } from './pushStore.mjs';
 import {
+  getOutlookIcsStatus,
+  recordOutlookIcsError,
+  saveOutlookIcsUrl,
+  syncOutlookIcsCalendar,
+} from './outlookIcsSync.mjs';
+import {
   diagnoseGoogleCalendars,
   ensureGoogleCredsLoaded,
   getGoogleAuthUrl,
@@ -323,6 +329,57 @@ app.post('/api/google/sync', async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (error) {
     recordGoogleSyncError(userId, error);
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.get('/api/outlook/status', async (req, res) => {
+  const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
+  try {
+    res.json({ ok: true, ...(await getOutlookIcsStatus(userId)) });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'No se pudo leer Outlook',
+    });
+  }
+});
+
+app.post('/api/outlook/configure', async (req, res) => {
+  try {
+    const userId = String(req.body?.userId || GOOGLE_CAL_USER_ID);
+    const status = await saveOutlookIcsUrl(req.body?.url, userId);
+    let sync = null;
+    try {
+      sync = await syncOutlookIcsCalendar(loadAppState, saveAppState, userId);
+    } catch (syncErr) {
+      await recordOutlookIcsError(syncErr);
+      console.error('Outlook ICS sync post-configure:', syncErr);
+    }
+    res.json({
+      ok: true,
+      ...status,
+      eventCount: sync?.eventCount ?? status.eventCount,
+      syncedAt: sync?.syncedAt ?? status.lastSyncAt,
+    });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post('/api/outlook/sync', async (req, res) => {
+  const userId = String(req.body?.userId || req.query.userId || GOOGLE_CAL_USER_ID);
+  try {
+    const result = await syncOutlookIcsCalendar(loadAppState, saveAppState, userId);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    await recordOutlookIcsError(error);
     res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : String(error),
@@ -727,16 +784,37 @@ app.listen(PORT, '0.0.0.0', async () => {
     const tick = async () => {
       await ensureGoogleCredsLoaded();
       const userIds = await listConnectedGoogleUserIds();
-      if (!userIds.length) return;
+      if (userIds.length) {
+        try {
+          await syncAllGoogleCalendars(loadAppState, saveAppState);
+        } catch (err) {
+          console.error('Google sync periódico:', err?.message ?? err);
+        }
+      }
       try {
-        await syncAllGoogleCalendars(loadAppState, saveAppState);
+        const outlook = await getOutlookIcsStatus();
+        if (outlook.configured) {
+          await syncOutlookIcsCalendar(loadAppState, saveAppState);
+        }
       } catch (err) {
-        console.error('Google sync periódico:', err?.message ?? err);
+        console.error('Outlook ICS sync periódico:', err?.message ?? err);
       }
     };
     void tick();
     setInterval(tick, 3 * 60 * 1000);
   } else {
     console.log('Google Calendar no configurado (GOOGLE_CLIENT_ID / SECRET / REDIRECT_URI)');
+    const outlookTick = async () => {
+      try {
+        const outlook = await getOutlookIcsStatus();
+        if (outlook.configured) {
+          await syncOutlookIcsCalendar(loadAppState, saveAppState);
+        }
+      } catch (err) {
+        console.error('Outlook ICS sync periódico:', err?.message ?? err);
+      }
+    };
+    void outlookTick();
+    setInterval(outlookTick, 3 * 60 * 1000);
   }
 });

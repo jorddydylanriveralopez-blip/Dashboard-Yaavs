@@ -275,3 +275,89 @@ export async function saveGoogleOAuthConfig(input: {
     return { ok: false, error: 'No se pudo guardar la configuración' };
   }
 }
+
+export type OutlookIcsStatus = {
+  configured: boolean;
+  userId?: string;
+  urlHost?: string | null;
+  lastSyncAt?: string | null;
+  lastError?: string | null;
+  eventCount?: number | null;
+};
+
+export async function fetchOutlookIcsStatus(
+  userId: string = CALENDAR_SYNC_USER_ID,
+): Promise<OutlookIcsStatus | null> {
+  if (!isApiEnabled()) return null;
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/outlook/status?userId=${encodeURIComponent(userId)}`,
+      { cache: 'no-store' },
+      HEALTH_TIMEOUT_MS,
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as OutlookIcsStatus;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveOutlookIcsConfig(input: {
+  url: string;
+  userId?: string;
+}): Promise<{ ok: boolean; error?: string; eventCount?: number }> {
+  if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/outlook/configure`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: input.url,
+          userId: input.userId || CALENDAR_SYNC_USER_ID,
+        }),
+      },
+      STATE_TIMEOUT_MS,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      eventCount?: number;
+    };
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || 'No se pudo guardar el enlace' };
+    }
+    return { ok: true, eventCount: data.eventCount };
+  } catch {
+    return { ok: false, error: 'No se pudo guardar el enlace de Outlook' };
+  }
+}
+
+export async function triggerOutlookIcsSync(
+  userId: string = CALENDAR_SYNC_USER_ID,
+): Promise<{ ok: boolean; error?: string; eventCount?: number }> {
+  if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/outlook/sync`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      },
+      STATE_TIMEOUT_MS,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      eventCount?: number;
+    };
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || 'Error al sincronizar Outlook' };
+    }
+    return { ok: true, eventCount: data.eventCount };
+  } catch {
+    return { ok: false, error: 'No se pudo sincronizar Outlook' };
+  }
+}
