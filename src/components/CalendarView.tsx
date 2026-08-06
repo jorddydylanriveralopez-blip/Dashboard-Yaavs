@@ -895,45 +895,37 @@ export function CalendarView() {
             )}
           </div>
 
-          <div className="calendar-ics">
-            <h3>Importar agenda de Orlando (Outlook)</h3>
-            {canImportOrlandoAgenda ? (
-              <>
-                <p>
-                  Sube el archivo <code>.olm</code> de Outlook para Mac (o un{' '}
-                  <code>.ics</code>) para sincronizar la agenda de Orlando. El equipo verá si
-                  está ocupado o disponible.
-                </p>
-                <input
-                  ref={icsInputRef}
-                  type="file"
-                  accept=".olm,.ics,.xml,text/calendar,application/zip"
-                  className="calendar-ics-input"
-                  onChange={(e) => void handleCalendarFileImport(e.target.files?.[0] ?? null)}
-                />
-                {icsStatus && <p className="calendar-ics-status">{icsStatus}</p>}
-              </>
-            ) : (
+          {canImportOrlandoAgenda && (
+            <div className="calendar-ics">
+              <h3>Importar agenda de Orlando (Outlook)</h3>
               <p>
-                La agenda de Outlook la carga Orlando o un líder. Tú puedes ver abajo si Orlando
-                está disponible el día seleccionado.
+                Sube el archivo <code>.olm</code> de Outlook para Mac (o un <code>.ics</code>) para
+                sincronizar la agenda de Orlando. El equipo verá si está ocupado o disponible.
               </p>
-            )}
-          </div>
+              <input
+                ref={icsInputRef}
+                type="file"
+                accept=".olm,.ics,.xml,text/calendar,application/zip"
+                className="calendar-ics-input"
+                onChange={(e) => void handleCalendarFileImport(e.target.files?.[0] ?? null)}
+              />
+              {icsStatus && <p className="calendar-ics-status">{icsStatus}</p>}
+            </div>
+          )}
 
           <div
             className={`calendar-orlando ${orlandoBusyToday ? 'busy' : 'free'}`}
             aria-label="Disponibilidad de Orlando"
           >
-            <h3>Disponibilidad de Orlando</h3>
+            <h3>Orlando · {orlandoBusyToday ? 'Ocupado' : 'Disponible'}</h3>
             {orlandoDayEvents.length === 0 ? (
               <p className="calendar-orlando-status calendar-orlando-status--free">
-                Sin eventos este día — parece disponible.
+                Sin eventos este día — Orlando parece disponible.
               </p>
             ) : (
               <>
                 <p className="calendar-orlando-status calendar-orlando-status--busy">
-                  Ocupado · {orlandoDayEvents.length} evento
+                  Orlando Villagómez · {orlandoDayEvents.length} evento
                   {orlandoDayEvents.length === 1 ? '' : 's'}
                 </p>
                 <ul className="calendar-orlando-list">
