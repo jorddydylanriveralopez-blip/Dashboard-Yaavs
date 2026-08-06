@@ -143,6 +143,7 @@ export function getGoogleStatus(userId = GOOGLE_CAL_USER_ID) {
     email: entry?.email ?? null,
     lastSyncAt: entry?.lastSyncAt ?? null,
     lastError: entry?.lastError ?? null,
+    eventCount: entry?.eventCount ?? null,
   };
 }
 
@@ -271,14 +272,25 @@ export async function handleGoogleOAuthCallback(code, stateUserId) {
   return { userId, email };
 }
 
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
+const DISPLAY_TZ = 'America/Mexico_City';
 
+/** Fecha/hora locales en zona de la empresa (Hostinger suele ser UTC). */
 function localPartsFromDate(d) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DISPLAY_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = Object.fromEntries(
+    fmt.formatToParts(d).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]),
+  );
   return {
-    date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
-    time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
     ms: d.getTime(),
   };
 }

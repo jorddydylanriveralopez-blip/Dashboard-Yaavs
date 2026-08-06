@@ -131,6 +131,7 @@ export interface ExternalCalendarStatus {
   email: string | null;
   lastSyncAt: string | null;
   lastError: string | null;
+  eventCount?: number | null;
 }
 
 /** @deprecated usar ExternalCalendarStatus */
