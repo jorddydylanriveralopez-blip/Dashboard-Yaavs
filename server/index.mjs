@@ -90,9 +90,26 @@ app.get('/api/evidence/:filename', (req, res) => {
   res.send(file.buffer);
 });
 
-app.get('/api/state', async (_req, res) => {
+app.get('/api/state', async (req, res) => {
   try {
-    res.json(await loadAppState());
+    const state = await loadAppState();
+    // Agendas privadas: cada colaborador solo recibe la suya (no la de Orlando u otros).
+    const viewerId = String(req.query.userId || '').trim();
+    const calendars = state.calendars || {};
+    const busySlots = state.busySlots || {};
+    if (viewerId) {
+      res.json({
+        ...state,
+        calendars: calendars[viewerId] ? { [viewerId]: calendars[viewerId] } : {},
+        busySlots: busySlots[viewerId] ? { [viewerId]: busySlots[viewerId] } : {},
+      });
+      return;
+    }
+    res.json({
+      ...state,
+      calendars: {},
+      busySlots: {},
+    });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'No se pudo leer el estado',
@@ -682,7 +699,7 @@ app.listen(PORT, '0.0.0.0', async () => {
       }
     };
     void tick();
-    setInterval(tick, 5 * 60 * 1000);
+    setInterval(tick, 3 * 60 * 1000);
   } else {
     console.log('Google Calendar no configurado (GOOGLE_CLIENT_ID / SECRET / REDIRECT_URI)');
   }

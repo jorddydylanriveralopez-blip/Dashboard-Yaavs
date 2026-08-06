@@ -30,9 +30,11 @@ import {
 } from '../utils/teamRoster';
 import {
   checkApiHealth,
+  fetchGoogleCalendarStatus,
   fetchSyncState,
   isApiEnabled,
   pushSyncState,
+  triggerGoogleCalendarSync,
 } from '../api/client';
 import { saveAssignmentAttachments } from '../utils/attachmentStore';
 import { syncCalendarForReminders, notifyOrlandoAgendaAlert } from '../api/calendar';
@@ -806,6 +808,16 @@ function calendarsFingerprint(store: CalendarStore | undefined): string {
 
 const EXTERNAL_CAL_SOURCES = new Set(['google', 'outlook']);
 
+/** Cada colaborador solo conserva su propia agenda en el cliente (privacidad). */
+function onlyOwnCalendarStore(
+  store: CalendarStore,
+  viewerId: string | null | undefined,
+): CalendarStore {
+  if (!viewerId) return {};
+  const own = store[viewerId];
+  return own ? { [viewerId]: own } : {};
+}
+
 /** Une agendas remotas con locales: no borrar importaciones más ricas (p. ej. Outlook de Orlando). */
 function mergeCalendarStores(
   local: CalendarStore,
@@ -1202,6 +1214,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const userKey = user?.id ?? '';
+  const userKeyRef = useRef(userKey);
+  userKeyRef.current = userKey;
 
   const logActivity = useCallback(
     (kind: ActivityEvent['kind'], message: string, actorName?: string) => {
@@ -1540,7 +1554,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       board: leanBoard,
       assignments: leanAssignments,
       chatMessages: chatMessages.slice(-200),
-      calendars: calendarStore,
+      calendars: userKey
+        ? onlyOwnCalendarStore(calendarStore, userKey)
+        : {},
       passwordOverrides,
       performanceHistory,
       teamRoster,
@@ -1557,6 +1573,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     assignments,
     chatMessages,
     calendarStore,
+    userKey,
     passwordOverrides,
     performanceHistory,
     teamRoster,
@@ -1595,7 +1612,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           let remote =
             Number.isFinite(remoteAgeMs) && remoteAgeMs < 12_000
               ? null
-              : await fetchSyncState();
+              : await fetchSyncState(userKeyRef.current);
           if (!remote && lastRemoteAt.current) {
             // Usar el estado local como base; el server mergea al recibir.
             const result = await pushSyncState(localState);
@@ -1610,7 +1627,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             return;
           }
           if (!remote) {
-            remote = await fetchSyncState();
+            remote = await fetchSyncState(userKeyRef.current);
           }
           // Si el pull falló/timeout, no empujar a ciegas (puede borrar Extras/Concluidos).
           if (!remote) {
@@ -1718,9 +1735,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           remote.calendars,
         );
         if (keptCal) needsRepushAfterRemote.current = true;
-        if (calendarsFingerprint(prev) === calendarsFingerprint(next)) return prev;
-        localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(next));
-        return next;
+        const privateNext = onlyOwnCalendarStore(next, userKeyRef.current);
+        const viewer = userKeyRef.current;
+        const mergedPrivate =
+          viewer && prev[viewer] && !privateNext[viewer]
+            ? { ...privateNext, [viewer]: prev[viewer] }
+            : privateNext;
+        if (calendarsFingerprint(prev) === calendarsFingerprint(mergedPrivate)) {
+          return prev;
+        }
+        localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(mergedPrivate));
+        return mergedPrivate;
       });
     };
 
@@ -1904,9 +1929,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCalendarStore((prev) => {
       const { next, preservedLocal: keptCal } = mergeCalendarStores(prev, remote.calendars);
       if (keptCal) preservedLocal = true;
-      if (calendarsFingerprint(prev) === calendarsFingerprint(next)) return prev;
-      localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(next));
-      return next;
+      const privateNext = onlyOwnCalendarStore(next, userKeyRef.current);
+      // Conservar también la agenda propia local si el remoto aún no la trae.
+      const viewer = userKeyRef.current;
+      const mergedPrivate =
+        viewer && prev[viewer] && !privateNext[viewer]
+          ? { ...privateNext, [viewer]: prev[viewer] }
+          : privateNext;
+      if (calendarsFingerprint(prev) === calendarsFingerprint(mergedPrivate)) return prev;
+      localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(mergedPrivate));
+      return mergedPrivate;
     });
     // No borrar contraseñas locales si el remoto viene vacío (fallo de sync previo).
     setPasswordOverrides((prev) => {
@@ -2048,7 +2080,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshSyncState = useCallback(async () => {
     if (!isApiEnabled()) return;
     try {
-      const remote = await fetchSyncState();
+      const remote = await fetchSyncState(userKeyRef.current);
       if (!remote) return;
       setSyncOnline(true);
       // Forzar merge de agendas aunque el board local esté más nuevo.
@@ -2069,7 +2101,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const online = await checkApiHealth();
         setSyncOnline((prev) => (prev === online ? prev : online));
         if (!online) return;
-        const remote = await fetchSyncState();
+        const remote = await fetchSyncState(userKeyRef.current);
         const remoteHasBoard =
           (remote?.board?.tasks?.length ?? 0) > 0 ||
           (remote?.board?.projects?.length ?? 0) > 0;
@@ -2099,7 +2131,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const pull = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-      const remote = await fetchSyncState();
+      const remote = await fetchSyncState(userKeyRef.current);
       if (cancelled) return;
       const online = Boolean(remote);
       setSyncOnline((prev) => (prev === online ? prev : online));
@@ -2112,6 +2144,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         (cal) => (cal?.events?.length ?? 0) > 0,
       );
       if (remoteHasBoard || remoteHasCalendars) applyRemoteRef.current?.(remote!);
+    };
+
+    /** Trae eventos nuevos de Gmail sin depender del botón «Sincronizar». */
+    const syncGoogleInBackground = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const uid = userKeyRef.current;
+      if (!uid) return;
+      try {
+        const status = await fetchGoogleCalendarStatus(uid);
+        if (cancelled || !status?.connected) return;
+        const sync = await triggerGoogleCalendarSync(uid);
+        if (cancelled || !sync.ok) return;
+        await pull();
+      } catch {
+        /* ignore */
+      }
     };
 
     const start = () => {
@@ -2133,16 +2181,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return;
       }
       void pull();
+      void syncGoogleInBackground();
       start();
     };
 
     void pull();
+    void syncGoogleInBackground();
     if (document.visibilityState !== 'hidden') start();
+    const googleId = window.setInterval(() => {
+      void syncGoogleInBackground();
+    }, 5 * 60_000);
     document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       cancelled = true;
       stop();
+      window.clearInterval(googleId);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [user]);
@@ -2340,45 +2394,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // Orlando: aviso local al instante cuando el sync trae eventos nuevos del equipo.
+  // Agenda privada: no avisar a Orlando de eventos de otros colaboradores.
   const knownTeamEventIdsRef = useRef<Set<string> | null>(null);
   useEffect(() => {
-    if (!user || (user.employeeId !== 'emp-orlando' && user.id !== 'u-orlando')) return;
-
-    const ids = new Set<string>();
-    const fresh: { title: string; owner: string; date: string; time: string; id: string }[] =
-      [];
-    for (const [uid, state] of Object.entries(calendarStore)) {
-      if (uid === user.id) continue;
-      for (const ev of state.events ?? []) {
-        if (ev.done || ev.shared === false) continue;
-        const key = `${uid}:${ev.id}`;
-        ids.add(key);
-        if (knownTeamEventIdsRef.current && !knownTeamEventIdsRef.current.has(key)) {
-          fresh.push({
-            id: ev.id,
-            title: ev.title,
-            owner: ev.ownerName ?? uid,
-            date: ev.date,
-            time: ev.time,
-          });
-        }
-      }
-    }
-
-    if (knownTeamEventIdsRef.current === null) {
-      knownTeamEventIdsRef.current = ids;
-      return;
-    }
-
-    for (const ev of fresh.slice(0, 5)) {
-      void showLocalNotification(`Agenda — ${ev.owner}`, {
-        body: `${ev.title} · ${ev.date} ${ev.time}`,
-        tag: `team-agenda-${ev.id}`,
-      });
-    }
-    knownTeamEventIdsRef.current = ids;
-  }, [calendarStore, user]);
+    knownTeamEventIdsRef.current = null;
+  }, [user?.id]);
 
   const changePassword = useCallback(
     (current: string, next: string) => {
@@ -3796,8 +3816,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (input: Omit<CalendarEvent, 'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt'>) => {
       if (!userKey || !user) return;
       const kind = input.kind ?? 'event';
-      const shared =
-        input.shared ?? (kind === 'busy' || canEditAll || user.employeeId === 'emp-orlando');
+      // Agenda personal: nunca compartir con otros colaboradores.
+      const shared = input.shared ?? false;
       const ev: CalendarEvent = {
         ...input,
         kind,
@@ -3814,46 +3834,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
         ),
       });
-
-      const isManager = canEditAll || user.employeeId === 'emp-orlando';
-      const busyLabel = kind === 'busy';
-      if (isManager) {
-        notifyPush({
-          audience: 'employees',
-          excludeUserId: user.id,
-          title: busyLabel
-            ? `Día ocupado — ${user.name}`
-            : `Agenda de ${user.name}`,
-          body: busyLabel
-            ? `${user.name} marcó ocupado el ${ev.date}${ev.time ? ` (${ev.time})` : ''}`
-            : `${ev.title} · ${ev.date} ${ev.time}`,
-          url: '/agenda',
-          tag: 'agenda',
-        });
-      } else {
-        const title = busyLabel
-          ? `${user.name} marcó ocupado`
-          : `${user.name} agregó a su agenda`;
-        const body = busyLabel
-          ? `${ev.date}${ev.time ? ` · ${ev.time}` : ''}`
-          : `${ev.title} · ${ev.date} ${ev.time}`;
-        notifyPush({
-          employeeIds: ['emp-orlando'],
-          userIds: ['u-orlando'],
-          excludeUserId: user.id,
-          title,
-          body,
-          url: '/agenda',
-          tag: `agenda-${ev.id}`,
-        });
-        notifyOrlandoAgendaAlert({
-          actorName: user.name,
-          title,
-          body,
-          date: ev.date,
-          time: ev.time,
-        });
-      }
+      // Sin avisos al equipo: la agenda es privada.
     },
     [userKey, user, calendar, persistCalendar, canEditAll],
   );
@@ -3890,7 +3871,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           userId: targetUserId,
           trackedMinutes: 0,
           done: false,
-          shared: true,
+          shared: false,
           ownerName: input.ownerName ?? ownerName,
           source,
           kind: input.kind ?? 'busy',
@@ -3905,7 +3886,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(updated));
         return updated;
       });
-      // Empujar al server de inmediato para que el equipo vea la agenda.
+      // Solo afecta la agenda del dueño; no se comparte con el equipo.
       schedulePushRef.current({ immediate: true });
 
       logActivity(

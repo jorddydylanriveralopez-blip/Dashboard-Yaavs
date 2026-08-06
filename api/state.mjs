@@ -17,8 +17,22 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     try {
       const state = await loadAppState();
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+      const viewerId = String(
+        url.searchParams.get('userId') || req.query?.userId || '',
+      ).trim();
+      const calendars = state.calendars || {};
+      const busySlots = state.busySlots || {};
+      // Agendas privadas: cada colaborador solo recibe la suya.
+      const filtered = viewerId
+        ? {
+            ...state,
+            calendars: calendars[viewerId] ? { [viewerId]: calendars[viewerId] } : {},
+            busySlots: busySlots[viewerId] ? { [viewerId]: busySlots[viewerId] } : {},
+          }
+        : { ...state, calendars: {}, busySlots: {} };
       res.setHeader('Cache-Control', 'no-store');
-      res.status(200).json(state);
+      res.status(200).json(filtered);
     } catch (error) {
       res.status(500).json({
         error: error instanceof Error ? error.message : 'No se pudo leer el estado',

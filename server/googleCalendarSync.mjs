@@ -463,7 +463,7 @@ function mapGoogleEvent(ev, userId, ownerName = '') {
       .slice(0, 500),
     source: 'google',
     externalId,
-    shared: true,
+    shared: false,
     ownerName: ownerName || 'Colaborador',
     kind: showAsFree ? 'event' : 'busy',
     showAsFree,

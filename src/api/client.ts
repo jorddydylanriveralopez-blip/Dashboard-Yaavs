@@ -67,12 +67,17 @@ async function withRetry<T>(
   return last;
 }
 
-export async function fetchSyncState(): Promise<AppSyncState | null> {
+export async function fetchSyncState(
+  viewerUserId?: string | null,
+): Promise<AppSyncState | null> {
   if (!isApiEnabled()) return null;
   return withRetry(async () => {
     try {
+      const qs = viewerUserId
+        ? `?userId=${encodeURIComponent(viewerUserId)}`
+        : '';
       const res = await fetchWithTimeout(
-        `${API_URL}/api/state`,
+        `${API_URL}/api/state${qs}`,
         { cache: 'no-store' },
         STATE_TIMEOUT_MS,
       );
