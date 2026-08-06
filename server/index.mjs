@@ -22,6 +22,7 @@ import {
 } from './calendarReminders.mjs';
 import { ensureVapidConfigured, getVapidPublicKey, removeSubscription, saveSubscription, sendPush } from './pushStore.mjs';
 import {
+  diagnoseGoogleCalendars,
   ensureGoogleCredsLoaded,
   getGoogleAuthUrl,
   getGoogleStatusAsync,
@@ -133,6 +134,16 @@ app.put('/api/state', async (req, res) => {
 app.get('/api/google/status', async (req, res) => {
   await ensureGoogleCredsLoaded();
   const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
+  if (String(req.query.diagnose || '') === '1') {
+    try {
+      res.json(await diagnoseGoogleCalendars(userId));
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'No se pudo diagnosticar',
+      });
+    }
+    return;
+  }
   res.json(await getGoogleStatusAsync(userId));
 });
 

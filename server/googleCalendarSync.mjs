@@ -603,6 +603,44 @@ async function fetchGoogleEventsForCalendar(accessToken, calendarId, start, end)
   return items;
 }
 
+/** Diagnóstico: cuántos eventos de agosto trae cada calendario de Google. */
+export async function diagnoseGoogleCalendars(userId = GOOGLE_CAL_USER_ID) {
+  const accessToken = await getValidAccessToken(userId);
+  const calendarList = await listGoogleCalendarIds(accessToken);
+  const start = new Date('2026-08-01T00:00:00-06:00');
+  const end = new Date('2026-08-31T23:59:59-06:00');
+  const calendars = [];
+  for (const cal of calendarList.slice(0, 40)) {
+    try {
+      const items = await fetchGoogleEventsForCalendar(accessToken, cal.id, start, end);
+      calendars.push({
+        id: cal.id,
+        summary: cal.summary,
+        primary: Boolean(cal.primary),
+        selected: Boolean(cal.selected),
+        august2026: items.length,
+        sample: items.slice(0, 8).map((ev) => ({
+          title: (ev.summary || '').trim() || '(Sin título)',
+          start: ev.start?.dateTime || ev.start?.date || null,
+        })),
+      });
+    } catch (err) {
+      calendars.push({
+        id: cal.id,
+        summary: cal.summary,
+        primary: Boolean(cal.primary),
+        selected: Boolean(cal.selected),
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return {
+    userId,
+    august2026Total: calendars.reduce((n, c) => n + (c.august2026 || 0), 0),
+    calendars,
+  };
+}
+
 /**
  * Pull Google Calendar events into app state.
  * @param {() => object | Promise<object>} readState
@@ -623,18 +661,33 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
   const rest = calendarList.filter((c) => !(c.primary || c.id === 'primary'));
   const targets = [...primary, ...rest].slice(0, 40);
 
+  // Pasada extra del mes actual ±45 días para no perder la agenda cercana.
+  const nearStart = new Date(Date.now() - 45 * 24 * 60 * 60_000);
+  const nearEnd = new Date(Date.now() + 45 * 24 * 60 * 60_000);
+
   const items = [];
   const seen = new Set();
+  const skipped = [];
   for (const cal of targets) {
     try {
-      const batch = await fetchGoogleEventsForCalendar(accessToken, cal.id, start, end);
-      for (const ev of batch) {
-        const key = `${cal.id}:${ev.id || ev.iCalUID || Math.random()}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        items.push({ ...ev, _calendarSummary: cal.summary, _calendarId: cal.id });
+      const batches = [
+        await fetchGoogleEventsForCalendar(accessToken, cal.id, start, end),
+        await fetchGoogleEventsForCalendar(accessToken, cal.id, nearStart, nearEnd),
+      ];
+      for (const batch of batches) {
+        for (const ev of batch) {
+          const key = `${cal.id}:${ev.id || ev.iCalUID || Math.random()}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          items.push({ ...ev, _calendarSummary: cal.summary, _calendarId: cal.id });
+        }
       }
     } catch (err) {
+      skipped.push({
+        id: cal.id,
+        summary: cal.summary,
+        error: err instanceof Error ? err.message : String(err),
+      });
       console.warn(
         `Google calendar ${cal.id} sync skip:`,
         err instanceof Error ? err.message : err,
@@ -715,6 +768,8 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
     userId,
     eventCount: googleEvents.length,
     busyCount: busySlots.length,
+    calendarsSynced: targets.length,
+    calendarsSkipped: skipped,
     syncedAt: all[userId]?.lastSyncAt,
   };
 }

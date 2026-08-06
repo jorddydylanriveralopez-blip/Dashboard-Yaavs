@@ -1,8 +1,8 @@
 import {
+  diagnoseGoogleCalendars,
   ensureGoogleCredsLoaded,
   getGoogleStatusAsync,
   GOOGLE_CAL_USER_ID,
-  saveGoogleOAuthConfig,
 } from '../../server/googleCalendarSync.mjs';
 
 function cors(res) {
@@ -25,5 +25,15 @@ export default async function handler(req, res) {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
   const userId = url.searchParams.get('userId') || GOOGLE_CAL_USER_ID;
   res.setHeader('Cache-Control', 'no-store');
+  if (url.searchParams.get('diagnose') === '1') {
+    try {
+      res.status(200).json(await diagnoseGoogleCalendars(userId));
+    } catch (error) {
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'No se pudo diagnosticar',
+      });
+    }
+    return;
+  }
   res.status(200).json(await getGoogleStatusAsync(userId));
 }
