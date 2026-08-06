@@ -28,8 +28,10 @@ import {
   googleConfigured,
   GOOGLE_CAL_USER_ID,
   handleGoogleOAuthCallback,
+  listConnectedGoogleUserIds,
   recordGoogleSyncError,
   saveGoogleOAuthConfig,
+  syncAllGoogleCalendars,
   syncGoogleCalendar,
 } from './googleCalendarSync.mjs';
 
@@ -155,6 +157,7 @@ app.get('/api/google/auth-url', async (req, res) => {
   try {
     await ensureGoogleCredsLoaded();
     const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
+    const ownerName = String(req.query.ownerName || req.query.name || '').trim();
     const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
     const proto = String(
       req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'https'),
@@ -167,7 +170,7 @@ app.get('/api/google/auth-url', async (req, res) => {
         : undefined;
     res.json({
       ok: true,
-      url: getGoogleAuthUrl(userId, redirect),
+      url: getGoogleAuthUrl(userId, redirect, ownerName),
       redirectUri: redirect || undefined,
     });
   } catch (error) {
@@ -670,12 +673,11 @@ app.listen(PORT, '0.0.0.0', async () => {
     console.log('Google Calendar OAuth configurado');
     const tick = async () => {
       await ensureGoogleCredsLoaded();
-      const status = await getGoogleStatusAsync(GOOGLE_CAL_USER_ID);
-      if (!status.connected) return;
+      const userIds = await listConnectedGoogleUserIds();
+      if (!userIds.length) return;
       try {
-        await syncGoogleCalendar(loadAppState, saveAppState, GOOGLE_CAL_USER_ID);
+        await syncAllGoogleCalendars(loadAppState, saveAppState);
       } catch (err) {
-        recordGoogleSyncError(GOOGLE_CAL_USER_ID, err);
         console.error('Google sync periódico:', err?.message ?? err);
       }
     };

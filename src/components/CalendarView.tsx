@@ -13,9 +13,11 @@ import {
 import { useEventReminders } from '../hooks/useEventReminders';
 import {
   elapsedMinutesSince,
+  endOfWeekSunday,
   formatDuration,
   getMonthMatrix,
   monthLabel,
+  startOfWeekMonday,
   toDateKey,
 } from '../utils/calendarDates';
 import { parseIcsFile } from '../utils/icsImport';
@@ -62,6 +64,12 @@ export function CalendarView() {
   const [googleConnectBusy, setGoogleConnectBusy] = useState(false);
   const [googleConnectError, setGoogleConnectError] = useState<string | null>(null);
   const googlePopupRef = useRef<Window | null>(null);
+  const [year, setYear] = useState(() => new Date().getFullYear());
+  const [month, setMonth] = useState(() => new Date().getMonth());
+  const [selectedDate, setSelectedDate] = useState(() => toDateKey(new Date()));
+  const googleUserId = user?.id ?? '';
+  const googleOwnerName = user?.name ?? '';
+  const canConnectGoogle = Boolean(user);
   const canImportOrlandoAgenda =
     Boolean(user) &&
     (canEditAll || user?.employeeId === 'emp-orlando' || user?.id === ORLANDO_USER_ID);
@@ -72,9 +80,17 @@ export function CalendarView() {
       : 'https://darkred-wasp-801635.hostingersite.com/api/google/callback';
 
   const refreshGoogleStatus = async () => {
-    const status = await fetchGoogleCalendarStatus(ORLANDO_USER_ID);
+    if (!googleUserId) return null;
+    const status = await fetchGoogleCalendarStatus(googleUserId);
     setGoogleStatus(status);
     return status;
+  };
+
+  const focusCurrentWeek = () => {
+    const now = new Date();
+    setYear(now.getFullYear());
+    setMonth(now.getMonth());
+    setSelectedDate(toDateKey(now));
   };
 
   const pullGoogleAgendaIntoDashboard = async () => {
@@ -86,17 +102,15 @@ export function CalendarView() {
   };
 
   useEffect(() => {
-    if (!canImportOrlandoAgenda || !isApiEnabled()) return;
+    if (!canConnectGoogle || !googleUserId || !isApiEnabled()) return;
     let cancelled = false;
     void (async () => {
       const status = await refreshGoogleStatus();
       if (cancelled || !status?.connected) return;
-      // Si ya está vinculado pero el dashboard no tiene eventos, re-sync + pull.
       const localGoogle =
-        calendarStore[ORLANDO_USER_ID]?.events?.filter((e) => e.source === 'google')
-          .length ?? 0;
+        calendarStore[googleUserId]?.events?.filter((e) => e.source === 'google').length ?? 0;
       if (localGoogle > 0) return;
-      const sync = await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+      const sync = await triggerGoogleCalendarSync(googleUserId);
       if (cancelled || !sync.ok) return;
       await pullGoogleAgendaIntoDashboard();
       if (!cancelled) await refreshGoogleStatus();
@@ -108,7 +122,7 @@ export function CalendarView() {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [canImportOrlandoAgenda]);
+  }, [canConnectGoogle, googleUserId]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -116,11 +130,12 @@ export function CalendarView() {
       if (!data || data.type !== 'yaavs-google-oauth') return;
       setGoogleConnectBusy(false);
       void (async () => {
-        // Asegurar sync + traer eventos al calendarStore del dashboard.
-        await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+        const uid = googleUserId || ORLANDO_USER_ID;
+        await triggerGoogleCalendarSync(uid);
         await pullGoogleAgendaIntoDashboard();
         const status = await refreshGoogleStatus();
         if (status?.connected) {
+          focusCurrentWeek();
           setGoogleMessage(
             `Google Calendar conectado${
               status.eventCount != null ? ` · ${status.eventCount} eventos` : ''
@@ -134,18 +149,19 @@ export function CalendarView() {
     };
     window.addEventListener('message', onMessage);
 
-    // Popup cerró / callback redirigió a /agenda?google=connected
     const params = new URLSearchParams(window.location.search);
     const googleFlag = params.get('google');
     if (googleFlag === 'connected' || googleFlag === 'error') {
       void (async () => {
         if (googleFlag === 'connected') {
-          await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+          const uid = googleUserId || ORLANDO_USER_ID;
+          await triggerGoogleCalendarSync(uid);
           await pullGoogleAgendaIntoDashboard();
+          focusCurrentWeek();
           const status = await refreshGoogleStatus();
           if (status?.connected) {
             setGoogleMessage(
-              `Google Calendar conectado${
+              `Agenda sincronizada${
                 status.eventCount != null ? ` · ${status.eventCount} eventos` : ''
               }.`,
             );
@@ -171,7 +187,7 @@ export function CalendarView() {
     }
 
     return () => window.removeEventListener('message', onMessage);
-  }, []);
+  }, [googleUserId]);
 
   const openGooglePopup = (url: string) => {
     const width = 520;
@@ -185,12 +201,16 @@ export function CalendarView() {
   };
 
   const connectGoogleCalendar = async () => {
+    if (!googleUserId) {
+      setGoogleConnectError('Inicia sesión para vincular tu Gmail.');
+      return;
+    }
     setGoogleMessage(null);
     setGoogleConnectError(null);
     setGoogleConnectOpen(true);
     setGoogleConnectBusy(true);
 
-    const result = await fetchGoogleAuthUrl(ORLANDO_USER_ID);
+    const result = await fetchGoogleAuthUrl(googleUserId, { ownerName: googleOwnerName });
     if (!result.ok || !result.url) {
       setGoogleConnectBusy(false);
       setGoogleConnectError(result.error || 'No se pudo preparar el acceso a Google.');
@@ -212,7 +232,7 @@ export function CalendarView() {
         setGoogleConnectBusy(false);
         void refreshGoogleStatus().then(async (status) => {
           if (status?.connected) {
-            await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+            await triggerGoogleCalendarSync(googleUserId);
             await pullGoogleAgendaIntoDashboard();
             const synced = await refreshGoogleStatus();
             setGoogleMessage(
@@ -223,7 +243,7 @@ export function CalendarView() {
             setGoogleConnectOpen(false);
           } else {
             setGoogleConnectError(
-              'Cerraste la ventana sin completar el acceso. Vuelve a intentarlo con la cuenta de Orlando.',
+              'Cerraste la ventana sin completar el acceso. Vuelve a intentarlo con tu cuenta de Gmail.',
             );
           }
         });
@@ -232,18 +252,20 @@ export function CalendarView() {
   };
 
   const syncGoogleNow = async () => {
+    if (!googleUserId) return;
     setGoogleSyncing(true);
     setGoogleMessage(null);
-    const result = await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+    const result = await triggerGoogleCalendarSync(googleUserId);
     if (result.ok) {
       await pullGoogleAgendaIntoDashboard();
+      focusCurrentWeek();
     }
-    const status = await fetchGoogleCalendarStatus(ORLANDO_USER_ID);
+    const status = await fetchGoogleCalendarStatus(googleUserId);
     setGoogleStatus(status);
     setGoogleSyncing(false);
     setGoogleMessage(
       result.ok
-        ? `Google Calendar sincronizado${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''}`
+        ? `Agenda sincronizada${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''} (esta semana + ~4 meses)`
         : result.error || 'No se pudo sincronizar',
     );
   };
@@ -256,21 +278,16 @@ export function CalendarView() {
       clientSecret: googleClientSecret.trim(),
       redirectUri: defaultRedirectUri,
     });
-    const status = await fetchGoogleCalendarStatus(ORLANDO_USER_ID);
+    const status = googleUserId ? await fetchGoogleCalendarStatus(googleUserId) : null;
     setGoogleStatus(status);
     setGoogleSaving(false);
     if (result.ok) {
       setGoogleClientSecret('');
-      setGoogleMessage('Credenciales guardadas. Ya puedes conectar Google Calendar.');
+      setGoogleMessage('Credenciales guardadas. Ya puedes conectar tu Google Calendar.');
     } else {
       setGoogleMessage(result.error || 'No se pudieron guardar');
     }
   };
-
-  const initialNow = new Date();
-  const [year, setYear] = useState(initialNow.getFullYear());
-  const [month, setMonth] = useState(initialNow.getMonth());
-  const [selectedDate, setSelectedDate] = useState(toDateKey(initialNow));
 
   const [title, setTitle] = useState('');
   const [time, setTime] = useState('09:00');
@@ -300,18 +317,15 @@ export function CalendarView() {
     return map;
   }, [activeEvents]);
 
-  /** Eventos compartidos de otros usuarios (agenda del equipo). */
+  /** Eventos compartidos de todos los colaboradores (para vista de equipo). */
   const teamEvents = useMemo(() => {
     if (!user) return [] as CalendarEvent[];
     const nameById = new Map(activeUsers.map((u) => [u.id, u.name]));
     const list: CalendarEvent[] = [];
     for (const [uid, state] of Object.entries(calendarStore)) {
       if (uid === user.id) continue;
-      // Orlando tiene su propio bloque de disponibilidad.
-      if (uid === ORLANDO_USER_ID) continue;
       for (const ev of state.events) {
         if (ev.done) continue;
-        // shared !== false: incluye eventos nuevos (true) y legacy (undefined)
         if (ev.shared === false) continue;
         list.push({
           ...ev,
@@ -362,6 +376,78 @@ export function CalendarView() {
 
   const orlandoDayEvents = orlandoByDate.get(selectedDate) ?? [];
   const orlandoBusyToday = orlandoDayEvents.length > 0;
+
+  const weekRange = useMemo(() => {
+    const now = new Date();
+    return {
+      startKey: toDateKey(startOfWeekMonday(now)),
+      endKey: toDateKey(endOfWeekSunday(now)),
+      todayKey: toDateKey(now),
+    };
+  }, [orlandoEvents.length, googleStatus?.lastSyncAt, googleMessage]);
+
+  /** Esta semana + siguientes: agenda compartida de todo el equipo (incl. la tuya). */
+  const teamAgendaEvents = useMemo(() => {
+    const nameById = new Map(activeUsers.map((u) => [u.id, u.name]));
+    const list: CalendarEvent[] = [];
+    for (const [uid, state] of Object.entries(calendarStore)) {
+      for (const ev of state.events) {
+        if (ev.done || ev.shared === false) continue;
+        list.push({
+          ...ev,
+          ownerName: ev.ownerName ?? nameById.get(uid) ?? uid,
+        });
+      }
+    }
+    return list.sort((a, b) =>
+      `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
+    );
+  }, [calendarStore, activeUsers]);
+
+  const teamWeekPendings = useMemo(() => {
+    return teamAgendaEvents.filter(
+      (ev) => ev.date >= weekRange.startKey && ev.date <= weekRange.endKey,
+    );
+  }, [teamAgendaEvents, weekRange.startKey, weekRange.endKey]);
+
+  const teamUpcomingPendings = useMemo(() => {
+    return teamAgendaEvents.filter((ev) => ev.date > weekRange.endKey);
+  }, [teamAgendaEvents, weekRange.endKey]);
+
+  const teamUpcomingByMonth = useMemo(() => {
+    const groups: { monthKey: string; label: string; events: CalendarEvent[] }[] = [];
+    const byMonth = new Map<string, CalendarEvent[]>();
+    for (const ev of teamUpcomingPendings) {
+      const monthKey = ev.date.slice(0, 7);
+      const list = byMonth.get(monthKey) ?? [];
+      list.push(ev);
+      byMonth.set(monthKey, list);
+    }
+    for (const [monthKey, events] of byMonth) {
+      const [y, m] = monthKey.split('-').map(Number);
+      groups.push({
+        monthKey,
+        label: new Date(y, m - 1, 1).toLocaleDateString('es-MX', {
+          month: 'long',
+          year: 'numeric',
+        }),
+        events,
+      });
+    }
+    return groups;
+  }, [teamUpcomingPendings]);
+
+  const teamAgendaCount = teamWeekPendings.length + teamUpcomingPendings.length;
+
+  const isInCurrentWeek = (dateKey: string) =>
+    dateKey >= weekRange.startKey && dateKey <= weekRange.endKey;
+
+  const openTeamPending = (ev: CalendarEvent) => {
+    setSelectedDate(ev.date);
+    const [y, m] = ev.date.split('-').map(Number);
+    setYear(y);
+    setMonth(m - 1);
+  };
 
   const activeEvent = calendar.activeTimer
     ? calendar.events.find((e) => e.id === calendar.activeTimer?.eventId)
@@ -541,43 +627,49 @@ export function CalendarView() {
               }
               const key = toDateKey(cell);
               const ownCount = eventsByDate.get(key)?.length ?? 0;
-              const teamCount = teamByDate.get(key)?.length ?? 0;
+              const teamDay = teamByDate.get(key) ?? [];
+              const teamCount = teamDay.length;
               const orlandoDay = orlandoByDate.get(key) ?? [];
               const orlandoCount = orlandoDay.length;
-              const orlandoPreview = orlandoDay.slice(0, 2);
+              const teamPreview = teamDay.slice(0, 2);
               const isSelected = key === selectedDate;
               const isToday = key === toDateKey(new Date());
               return (
                 <button
                   key={key}
                   type="button"
-                  className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${orlandoCount > 0 ? 'has-orlando' : ''}`}
+                  className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${orlandoCount > 0 ? 'has-orlando' : ''} ${teamCount > 0 && orlandoCount === 0 ? 'has-team' : ''} ${isInCurrentWeek(key) ? 'in-week' : ''}`}
                   onClick={() => setSelectedDate(key)}
                   title={
-                    orlandoCount > 0
-                      ? orlandoDay.map((e) => `${e.time} ${e.title}`).join('\n')
+                    teamCount > 0
+                      ? teamDay
+                          .map((e) => `${e.time} ${e.title} (${e.ownerName ?? ''})`)
+                          .join('\n')
                       : undefined
                   }
                 >
                   <span className="day-num">{cell.getDate()}</span>
-                  {orlandoPreview.length > 0 && (
+                  {teamPreview.length > 0 && (
                     <span className="day-orlando-events">
-                      {orlandoPreview.map((ev) => (
-                        <span key={ev.id} className="day-orlando-chip">
+                      {teamPreview.map((ev) => (
+                        <span key={`${ev.userId}-${ev.id}`} className="day-orlando-chip">
                           <span className="day-orlando-time">{ev.time}</span>
-                          <span className="day-orlando-name">{ev.title}</span>
+                          <span className="day-orlando-name">
+                            {ev.ownerName ? `${ev.ownerName.split(' ')[0]} · ` : ''}
+                            {ev.title}
+                          </span>
                         </span>
                       ))}
-                      {orlandoCount > 2 && (
-                        <span className="day-orlando-more">+{orlandoCount - 2} más</span>
+                      {teamCount > 2 && (
+                        <span className="day-orlando-more">+{teamCount - 2} más</span>
                       )}
                     </span>
                   )}
-                  {(ownCount > 0 || teamCount > 0 || orlandoCount > 0) && (
+                  {(ownCount > 0 || teamCount > 0) && (
                     <span className="day-dots-row" aria-hidden>
                       {ownCount > 0 && <span className="day-dot day-dot--own" />}
                       {orlandoCount > 0 && <span className="day-dot day-dot--orlando" />}
-                      {teamCount > 0 && <span className="day-dot day-dot--team" />}
+                      {teamCount > orlandoCount && <span className="day-dot day-dot--team" />}
                     </span>
                   )}
                 </button>
@@ -706,12 +798,12 @@ export function CalendarView() {
           </form>
 
           <div className="calendar-ics">
-            <h3>Google Calendar de Orlando</h3>
-            {canImportOrlandoAgenda ? (
+            <h3>Mi Google Calendar</h3>
+            {canConnectGoogle ? (
               <>
                 <p>
-                  Conecta el Gmail de Orlando para que su agenda se sincronice sola. El equipo verá
-                  su disponibilidad abajo.
+                  Vincula tu Gmail ({user?.name ?? 'tú'}) para sincronizar esta semana y ~4 meses.
+                  El equipo verá tus pendientes marcados en el calendario.
                 </p>
                 {!isApiEnabled() ? (
                   <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>
@@ -721,45 +813,52 @@ export function CalendarView() {
                     <code>/api/google/status</code>.
                   </p>
                 ) : !googleStatus.configured ? (
-                  <div className="calendar-google-setup">
+                  canEditAll ? (
+                    <div className="calendar-google-setup">
+                      <p className="calendar-ics-status">
+                        Hostinger borra las variables del panel. Pega aquí el Client ID y Secret una
+                        vez; se guardan en la base de datos.
+                      </p>
+                      <label>
+                        Client ID
+                        <input
+                          value={googleClientId}
+                          onChange={(e) => setGoogleClientId(e.target.value)}
+                          placeholder="xxxxx.apps.googleusercontent.com"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label>
+                        Client Secret
+                        <input
+                          type="password"
+                          value={googleClientSecret}
+                          onChange={(e) => setGoogleClientSecret(e.target.value)}
+                          placeholder="GOCSPX-..."
+                          autoComplete="off"
+                        />
+                      </label>
+                      <p className="calendar-ics-status">
+                        Redirect URI (agrégalo también en Google Cloud):{' '}
+                        <code>{defaultRedirectUri}</code>
+                      </p>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={
+                          googleSaving || !googleClientId.trim() || !googleClientSecret.trim()
+                        }
+                        onClick={() => void saveGoogleConfig()}
+                      >
+                        {googleSaving ? 'Guardando…' : 'Guardar credenciales'}
+                      </button>
+                    </div>
+                  ) : (
                     <p className="calendar-ics-status">
-                      Hostinger borra las variables del panel. Pega aquí el Client ID y Secret una
-                      vez; se guardan en la base de datos.
+                      Un líder debe configurar las credenciales de Google una vez. Luego tú podrás
+                      vincular tu Gmail.
                     </p>
-                    <label>
-                      Client ID
-                      <input
-                        value={googleClientId}
-                        onChange={(e) => setGoogleClientId(e.target.value)}
-                        placeholder="xxxxx.apps.googleusercontent.com"
-                        autoComplete="off"
-                      />
-                    </label>
-                    <label>
-                      Client Secret
-                      <input
-                        type="password"
-                        value={googleClientSecret}
-                        onChange={(e) => setGoogleClientSecret(e.target.value)}
-                        placeholder="GOCSPX-..."
-                        autoComplete="off"
-                      />
-                    </label>
-                    <p className="calendar-ics-status">
-                      Redirect URI (agrégalo también en Google Cloud):{' '}
-                      <code>{defaultRedirectUri}</code>
-                    </p>
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      disabled={
-                        googleSaving || !googleClientId.trim() || !googleClientSecret.trim()
-                      }
-                      onClick={() => void saveGoogleConfig()}
-                    >
-                      {googleSaving ? 'Guardando…' : 'Guardar credenciales'}
-                    </button>
-                  </div>
+                  )
                 ) : googleStatus.connected ? (
                   <>
                     <p className="calendar-ics-status">
@@ -786,16 +885,13 @@ export function CalendarView() {
                     className="btn-primary"
                     onClick={() => void connectGoogleCalendar()}
                   >
-                    Conectar Google Calendar
+                    Conectar mi Google Calendar
                   </button>
                 )}
                 {googleMessage && <p className="calendar-ics-status">{googleMessage}</p>}
               </>
             ) : (
-              <p>
-                La agenda de Google la conecta Orlando o un líder. Tú puedes ver abajo si Orlando
-                está disponible el día seleccionado.
-              </p>
+              <p>Inicia sesión para vincular tu agenda de Gmail.</p>
             )}
           </div>
 
@@ -854,6 +950,88 @@ export function CalendarView() {
                   ))}
                 </ul>
               </>
+            )}
+          </div>
+
+          <div className="calendar-orlando-week" aria-label="Pendientes del equipo">
+            <h3>Pendientes del equipo ({teamAgendaCount})</h3>
+            <p className="calendar-orlando-week-hint">
+              Todos los colaboradores (Orlando, Jorddy, etc.). Esta semana y ~4 meses adelante.
+            </p>
+
+            <h4 className="calendar-orlando-week-sub">
+              Esta semana ({teamWeekPendings.length})
+            </h4>
+            {teamWeekPendings.length === 0 ? (
+              <p className="calendar-empty">Sin eventos compartidos esta semana.</p>
+            ) : (
+              <ul className="calendar-orlando-week-list">
+                {teamWeekPendings.map((ev) => {
+                  const isPastOrToday = ev.date <= weekRange.todayKey;
+                  return (
+                    <li key={`${ev.userId}-${ev.id}`}>
+                      <button
+                        type="button"
+                        className={`calendar-orlando-week-item ${isPastOrToday ? 'is-due' : ''} ${ev.date === selectedDate ? 'is-selected' : ''}`}
+                        onClick={() => openTeamPending(ev)}
+                      >
+                        <span className="calendar-orlando-week-when">
+                          {new Date(`${ev.date}T12:00:00`).toLocaleDateString('es-MX', {
+                            weekday: 'short',
+                            day: 'numeric',
+                            month: 'short',
+                          })}{' '}
+                          · {ev.time}
+                        </span>
+                        <span className="calendar-orlando-week-title">{ev.title}</span>
+                        <span className="calendar-orlando-week-owner">
+                          {ev.ownerName ?? 'Colaborador'}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <h4 className="calendar-orlando-week-sub">
+              Próximas semanas y meses ({teamUpcomingPendings.length})
+            </h4>
+            {teamUpcomingPendings.length === 0 ? (
+              <p className="calendar-empty">
+                No hay eventos más adelante. Cada colaborador puede vincular su Gmail y pulsar
+                «Sincronizar ahora».
+              </p>
+            ) : (
+              teamUpcomingByMonth.map((group) => (
+                <div key={group.monthKey} className="calendar-orlando-month-group">
+                  <p className="calendar-orlando-month-label">{group.label}</p>
+                  <ul className="calendar-orlando-week-list">
+                    {group.events.map((ev) => (
+                      <li key={`${ev.userId}-${ev.id}`}>
+                        <button
+                          type="button"
+                          className={`calendar-orlando-week-item ${ev.date === selectedDate ? 'is-selected' : ''}`}
+                          onClick={() => openTeamPending(ev)}
+                        >
+                          <span className="calendar-orlando-week-when">
+                            {new Date(`${ev.date}T12:00:00`).toLocaleDateString('es-MX', {
+                              weekday: 'short',
+                              day: 'numeric',
+                              month: 'short',
+                            })}{' '}
+                            · {ev.time}
+                          </span>
+                          <span className="calendar-orlando-week-title">{ev.title}</span>
+                          <span className="calendar-orlando-week-owner">
+                            {ev.ownerName ?? 'Colaborador'}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))
             )}
           </div>
 
@@ -927,8 +1105,8 @@ export function CalendarView() {
           >
             <h3 id="google-connect-title">Conectar Google Calendar</h3>
             <p>
-              Se abre una ventana pequeña de Google para que Orlando inicie sesión. Esta agenda se
-              queda abierta; no te saca del dashboard.
+              Se abre una ventana de Google para que {user?.name ?? 'tú'} inicies sesión con tu
+              Gmail. Esta agenda se queda abierta; no te saca del dashboard.
             </p>
             {googleConnectBusy ? (
               <p className="google-connect-modal-status">Esperando acceso en la ventana de Google…</p>

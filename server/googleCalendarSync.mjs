@@ -14,8 +14,10 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
-const SYNC_LOOKBACK_DAYS = 7;
-const SYNC_LOOKAHEAD_DAYS = 30;
+/** Días extra antes del lunes (por si hay eventos que cruzan medianoche). */
+const SYNC_PREWEEK_BUFFER_DAYS = 1;
+/** ~4 meses hacia adelante para que Orlando vea semanas y meses siguientes. */
+const SYNC_LOOKAHEAD_DAYS = 120;
 
 let credsLoadPromise = null;
 let tokensMemory = null;
@@ -184,10 +186,11 @@ async function persistGoogleTokens(all) {
   }
 }
 
-export function encodeGoogleOAuthState(userId, oauthRedirectUri) {
+export function encodeGoogleOAuthState(userId, oauthRedirectUri, ownerName = '') {
   const payload = JSON.stringify({
     u: userId || GOOGLE_CAL_USER_ID,
     r: oauthRedirectUri || redirectUri(),
+    n: ownerName || '',
   });
   return Buffer.from(payload, 'utf8').toString('base64url');
 }
@@ -195,7 +198,7 @@ export function encodeGoogleOAuthState(userId, oauthRedirectUri) {
 export function decodeGoogleOAuthState(state) {
   const raw = String(state || '').trim();
   if (!raw) {
-    return { userId: GOOGLE_CAL_USER_ID, redirectUri: redirectUri() };
+    return { userId: GOOGLE_CAL_USER_ID, redirectUri: redirectUri(), ownerName: '' };
   }
   try {
     const json = Buffer.from(raw, 'base64url').toString('utf8');
@@ -204,12 +207,13 @@ export function decodeGoogleOAuthState(state) {
       return {
         userId: String(parsed.u),
         redirectUri: parsed.r ? String(parsed.r) : redirectUri(),
+        ownerName: parsed.n ? String(parsed.n) : '',
       };
     }
   } catch {
     /* legacy: state era solo el userId */
   }
-  return { userId: raw, redirectUri: redirectUri() };
+  return { userId: raw, redirectUri: redirectUri(), ownerName: '' };
 }
 
 export function getGoogleStatus(userId = GOOGLE_CAL_USER_ID) {
@@ -231,7 +235,7 @@ export async function getGoogleStatusAsync(userId = GOOGLE_CAL_USER_ID) {
   return getGoogleStatus(userId);
 }
 
-export function getGoogleAuthUrl(userId = GOOGLE_CAL_USER_ID, oauthRedirectUri) {
+export function getGoogleAuthUrl(userId = GOOGLE_CAL_USER_ID, oauthRedirectUri, ownerName = '') {
   if (!googleConfigured()) {
     throw new Error('Google Calendar no configurado: faltan variables GOOGLE_*');
   }
@@ -245,7 +249,7 @@ export function getGoogleAuthUrl(userId = GOOGLE_CAL_USER_ID, oauthRedirectUri) 
     access_type: 'offline',
     prompt: 'consent',
     include_granted_scopes: 'true',
-    state: encodeGoogleOAuthState(userId, redir),
+    state: encodeGoogleOAuthState(userId, redir, ownerName),
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
@@ -327,7 +331,11 @@ async function getValidAccessToken(userId) {
 }
 
 export async function handleGoogleOAuthCallback(code, stateRaw, redirectOverride) {
-  const { userId, redirectUri: fromState } = decodeGoogleOAuthState(stateRaw);
+  const {
+    userId,
+    redirectUri: fromState,
+    ownerName: ownerFromState,
+  } = decodeGoogleOAuthState(stateRaw);
   const candidates = [
     ...new Set(
       [redirectOverride, fromState, redirectUri()]
@@ -366,6 +374,7 @@ export async function handleGoogleOAuthCallback(code, stateRaw, redirectOverride
     refresh_token: tokens.refresh_token || all[userId]?.refresh_token,
     expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
     email,
+    ownerName: ownerFromState || all[userId]?.ownerName || null,
     connectedAt: new Date().toISOString(),
     lastError: null,
   };
@@ -396,7 +405,7 @@ function localPartsFromDate(d) {
   };
 }
 
-function mapGoogleEvent(ev, userId) {
+function mapGoogleEvent(ev, userId, ownerName = '') {
   if (ev.status === 'cancelled') return null;
   // All-day events: start.date / end.date
   let start;
@@ -423,7 +432,7 @@ function mapGoogleEvent(ev, userId) {
   const showAsFree = transparency === 'transparent';
 
   return {
-    id: `google-${externalId.slice(0, 48) || Date.now()}`,
+    id: `google-${userId.slice(0, 12)}-${externalId.slice(0, 40) || Date.now()}`,
     userId,
     title: (ev.summary || '').trim() || '(Sin título)',
     date: parts.date,
@@ -436,7 +445,7 @@ function mapGoogleEvent(ev, userId) {
     source: 'google',
     externalId,
     shared: true,
-    ownerName: 'Orlando Villagómez',
+    ownerName: ownerName || 'Colaborador',
     kind: showAsFree ? 'event' : 'busy',
     showAsFree,
     startIso: start.toISOString(),
@@ -444,14 +453,43 @@ function mapGoogleEvent(ev, userId) {
   };
 }
 
+function mexicoYmdWeekday(d = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DISPLAY_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+  });
+  const bag = Object.fromEntries(
+    fmt
+      .formatToParts(d)
+      .filter((p) => p.type !== 'literal')
+      .map((p) => [p.type, p.value]),
+  );
+  const weekdayMap = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
+  return {
+    ymd: `${bag.year}-${bag.month}-${bag.day}`,
+    mondayOffset: weekdayMap[bag.weekday] ?? 0,
+  };
+}
+
+function addDaysYmd(ymd, days) {
+  const d = new Date(`${ymd}T12:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Ventana: lunes de esta semana (MX) → +lookahead (cubre toda la semana y más). */
 function windowRange() {
-  const start = new Date();
-  start.setDate(start.getDate() - SYNC_LOOKBACK_DAYS);
-  start.setHours(0, 0, 0, 0);
-  const end = new Date();
-  end.setDate(end.getDate() + SYNC_LOOKAHEAD_DAYS);
-  end.setHours(23, 59, 59, 999);
-  return { start, end };
+  const { ymd, mondayOffset } = mexicoYmdWeekday();
+  const monday = addDaysYmd(ymd, -mondayOffset);
+  const startYmd = addDaysYmd(monday, -SYNC_PREWEEK_BUFFER_DAYS);
+  const endYmd = addDaysYmd(ymd, SYNC_LOOKAHEAD_DAYS);
+  return {
+    start: new Date(`${startYmd}T00:00:00-06:00`),
+    end: new Date(`${endYmd}T23:59:59-06:00`),
+  };
 }
 
 /**
@@ -461,23 +499,33 @@ function windowRange() {
  */
 export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_CAL_USER_ID) {
   const accessToken = await getValidAccessToken(userId);
+  const tokenEntry = (await loadGoogleTokens())[userId] || {};
+  const ownerName =
+    tokenEntry.ownerName ||
+    tokenEntry.email ||
+    (userId === GOOGLE_CAL_USER_ID ? 'Orlando Villagómez' : userId);
   const { start, end } = windowRange();
 
-  const params = new URLSearchParams({
-    timeMin: start.toISOString(),
-    timeMax: end.toISOString(),
-    singleEvents: 'true',
-    orderBy: 'startTime',
-    maxResults: '250',
-  });
+  const items = [];
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({
+      timeMin: start.toISOString(),
+      timeMax: end.toISOString(),
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '250',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+    const payload = await googleGet(
+      accessToken,
+      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
+    );
+    items.push(...(payload.items || []));
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken && items.length < 2000);
 
-  const payload = await googleGet(
-    accessToken,
-    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
-  );
-  const mapped = (payload.items || [])
-    .map((ev) => mapGoogleEvent(ev, userId))
-    .filter(Boolean);
+  const mapped = items.map((ev) => mapGoogleEvent(ev, userId, ownerName)).filter(Boolean);
 
   const busySlots = mapped
     .filter((e) => !e.showAsFree)
@@ -562,6 +610,33 @@ export async function recordGoogleSyncError(userId, error) {
     lastError: error instanceof Error ? error.message : String(error),
   };
   await persistGoogleTokens(all);
+}
+
+/** Usuarios con Google Calendar vinculado (cualquier colaborador). */
+export async function listConnectedGoogleUserIds() {
+  const all = await loadGoogleTokens();
+  return Object.entries(all)
+    .filter(([, entry]) => Boolean(entry?.refresh_token || entry?.access_token))
+    .map(([id]) => id);
+}
+
+/** Sincroniza todos los Gmail vinculados al dashboard. */
+export async function syncAllGoogleCalendars(readState, writeState) {
+  const userIds = await listConnectedGoogleUserIds();
+  const results = [];
+  for (const userId of userIds) {
+    try {
+      results.push(await syncGoogleCalendar(readState, writeState, userId));
+    } catch (err) {
+      await recordGoogleSyncError(userId, err);
+      results.push({
+        userId,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return results;
 }
 
 const EXTERNAL_SOURCES = new Set(['google', 'outlook']);

@@ -1,5 +1,26 @@
 export function toDateKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Lunes 00:00 de la semana local (lun–dom). */
+export function startOfWeekMonday(d: Date = new Date()): Date {
+  const local = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const mondayOffset = (local.getDay() + 6) % 7;
+  local.setDate(local.getDate() - mondayOffset);
+  local.setHours(0, 0, 0, 0);
+  return local;
+}
+
+/** Domingo 23:59:59.999 de la semana local. */
+export function endOfWeekSunday(d: Date = new Date()): Date {
+  const start = startOfWeekMonday(d);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+  end.setHours(23, 59, 59, 999);
+  return end;
 }
 
 export function parseEventDateTime(date: string, time: string): Date {
