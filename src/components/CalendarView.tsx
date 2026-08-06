@@ -29,6 +29,7 @@ import { parseOlmFile } from '../utils/olmImport';
 import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
 import { useSharedNow } from '../hooks/useSharedNow';
 import type { CalendarEvent } from '../types';
+import { CalendarExplorer } from './CalendarExplorer';
 import './CalendarView.css';
 import './CollaboratorMultiSelect.css';
 
@@ -432,6 +433,7 @@ export function CalendarView() {
   const [notes, setNotes] = useState('');
   const [memberIds, setMemberIds] = useState<string[]>([]);
   const [dayModalOpen, setDayModalOpen] = useState(false);
+  const [explorerOpen, setExplorerOpen] = useState(false);
 
   useEventReminders(calendar.events, user, markEventReminded, markEventEmailReminded);
 
@@ -676,7 +678,14 @@ export function CalendarView() {
             <button type="button" className="btn-ghost" onClick={() => shiftMonth(-1)}>
               ‹
             </button>
-            <h2>{monthLabel(year, month)}</h2>
+            <button
+              type="button"
+              className="calendar-month-open"
+              onClick={() => setExplorerOpen(true)}
+              title="Abrir calendario completo (día, semana, mes, año)"
+            >
+              {monthLabel(year, month)}
+            </button>
             <button type="button" className="btn-ghost" onClick={() => shiftMonth(1)}>
               ›
             </button>
@@ -1154,6 +1163,32 @@ export function CalendarView() {
           </div>
         </section>
       </div>
+
+      <CalendarExplorer
+        open={explorerOpen}
+        onClose={() => setExplorerOpen(false)}
+        initialDate={selectedDate}
+        events={calendar.events}
+        activeUsers={activeUsers}
+        onAddEvent={(input) => {
+          addCalendarEvent({
+            title: input.title,
+            date: input.date,
+            time: input.time,
+            reminderMinutes: 30,
+            estimatedMinutes: input.estimatedMinutes,
+            notes: '',
+            kind: 'event',
+            shared: false,
+            memberIds: input.memberIds,
+            memberNames: input.memberNames,
+          });
+          setSelectedDate(input.date);
+          const [y, m] = input.date.split('-').map(Number);
+          setYear(y);
+          setMonth(m - 1);
+        }}
+      />
 
       {dayModalOpen && (
         <div

@@ -25,9 +25,27 @@
   margin-bottom: 14px;
 }
 
-.calendar-panel-head h2 {
+.calendar-panel-head h2,
+.calendar-month-open {
   font-size: 1rem;
   text-transform: capitalize;
+}
+
+.calendar-month-open {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+
+.calendar-month-open:hover {
+  background: rgba(80, 52, 255, 0.08);
+  color: var(--accent, #5034ff);
 }
 
 .calendar-weekdays {
