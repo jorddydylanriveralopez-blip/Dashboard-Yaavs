@@ -5,6 +5,7 @@ const ROUTES = {
   '/api/google/auth': () => import('../../api/google/auth.mjs'),
   '/api/google/auth-url': () => import('../../api/google/auth-url.mjs'),
   '/api/google/callback': () => import('../../api/google/callback.mjs'),
+  '/api/google/exchange': () => import('../../api/google/exchange.mjs'),
   '/api/google/sync': () => import('../../api/google/sync.mjs'),
   '/api/google/configure': () => import('../../api/google/configure.mjs'),
 };

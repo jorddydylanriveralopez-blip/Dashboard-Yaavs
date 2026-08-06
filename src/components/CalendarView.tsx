@@ -38,6 +38,7 @@ export function CalendarView() {
     enablePushNotifications,
     addCalendarEvent,
     importExternalCalendarEvents,
+    refreshSyncState,
     updateCalendarEvent,
     deleteCalendarEvent,
     toggleCalendarDone,
@@ -76,13 +77,37 @@ export function CalendarView() {
     return status;
   };
 
+  const pullGoogleAgendaIntoDashboard = async () => {
+    try {
+      await refreshSyncState();
+    } catch {
+      /* ignore */
+    }
+  };
+
   useEffect(() => {
     if (!canImportOrlandoAgenda || !isApiEnabled()) return;
-    void refreshGoogleStatus();
+    let cancelled = false;
+    void (async () => {
+      const status = await refreshGoogleStatus();
+      if (cancelled || !status?.connected) return;
+      // Si ya está vinculado pero el dashboard no tiene eventos, re-sync + pull.
+      const localGoogle =
+        calendarStore[ORLANDO_USER_ID]?.events?.filter((e) => e.source === 'google')
+          .length ?? 0;
+      if (localGoogle > 0) return;
+      const sync = await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+      if (cancelled || !sync.ok) return;
+      await pullGoogleAgendaIntoDashboard();
+      if (!cancelled) await refreshGoogleStatus();
+    })();
     const id = window.setInterval(() => {
       void refreshGoogleStatus();
     }, 60_000);
-    return () => window.clearInterval(id);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, [canImportOrlandoAgenda]);
 
   useEffect(() => {
@@ -90,16 +115,61 @@ export function CalendarView() {
       const data = event.data as { type?: string; ok?: boolean } | null;
       if (!data || data.type !== 'yaavs-google-oauth') return;
       setGoogleConnectBusy(false);
-      void refreshGoogleStatus().then((status) => {
+      void (async () => {
+        // Asegurar sync + traer eventos al calendarStore del dashboard.
+        await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+        await pullGoogleAgendaIntoDashboard();
+        const status = await refreshGoogleStatus();
         if (status?.connected) {
-          setGoogleMessage('Google Calendar conectado.');
+          setGoogleMessage(
+            `Google Calendar conectado${
+              status.eventCount != null ? ` · ${status.eventCount} eventos` : ''
+            }.`,
+          );
           setGoogleConnectOpen(false);
         } else if (data.ok === false) {
           setGoogleConnectError('No se pudo completar el acceso con Google.');
         }
-      });
+      })();
     };
     window.addEventListener('message', onMessage);
+
+    // Popup cerró / callback redirigió a /agenda?google=connected
+    const params = new URLSearchParams(window.location.search);
+    const googleFlag = params.get('google');
+    if (googleFlag === 'connected' || googleFlag === 'error') {
+      void (async () => {
+        if (googleFlag === 'connected') {
+          await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+          await pullGoogleAgendaIntoDashboard();
+          const status = await refreshGoogleStatus();
+          if (status?.connected) {
+            setGoogleMessage(
+              `Google Calendar conectado${
+                status.eventCount != null ? ` · ${status.eventCount} eventos` : ''
+              }.`,
+            );
+          }
+        } else {
+          setGoogleConnectError('No se pudo completar el acceso con Google.');
+        }
+        window.history.replaceState({}, '', '/agenda');
+      })();
+    }
+
+    try {
+      const raw = localStorage.getItem('yaavs-google-oauth-result');
+      if (raw) {
+        localStorage.removeItem('yaavs-google-oauth-result');
+        const parsed = JSON.parse(raw) as { type?: string; ok?: boolean };
+        if (parsed?.type === 'yaavs-google-oauth') {
+          window.postMessage(parsed, window.location.origin);
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
@@ -140,9 +210,16 @@ export function CalendarView() {
       if (popup.closed) {
         window.clearInterval(poll);
         setGoogleConnectBusy(false);
-        void refreshGoogleStatus().then((status) => {
+        void refreshGoogleStatus().then(async (status) => {
           if (status?.connected) {
-            setGoogleMessage('Google Calendar conectado.');
+            await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+            await pullGoogleAgendaIntoDashboard();
+            const synced = await refreshGoogleStatus();
+            setGoogleMessage(
+              `Google Calendar conectado${
+                synced?.eventCount != null ? ` · ${synced.eventCount} eventos` : ''
+              }.`,
+            );
             setGoogleConnectOpen(false);
           } else {
             setGoogleConnectError(
@@ -158,6 +235,9 @@ export function CalendarView() {
     setGoogleSyncing(true);
     setGoogleMessage(null);
     const result = await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+    if (result.ok) {
+      await pullGoogleAgendaIntoDashboard();
+    }
     const status = await fetchGoogleCalendarStatus(ORLANDO_USER_ID);
     setGoogleStatus(status);
     setGoogleSyncing(false);

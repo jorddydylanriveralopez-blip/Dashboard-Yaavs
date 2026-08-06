@@ -229,6 +229,8 @@ interface AppContextValue {
     >[],
     source: 'outlook' | 'ics',
   ) => number;
+  /** Fuerza pull del estado remoto (p. ej. tras sync de Google Calendar). */
+  refreshSyncState: () => Promise<void>;
   updateCalendarEvent: (id: string, patch: Partial<CalendarEvent>) => void;
   deleteCalendarEvent: (id: string) => void;
   toggleCalendarDone: (id: string) => void;
@@ -802,6 +804,8 @@ function calendarsFingerprint(store: CalendarStore | undefined): string {
   }
 }
 
+const EXTERNAL_CAL_SOURCES = new Set(['google', 'outlook']);
+
 /** Une agendas remotas con locales: no borrar importaciones más ricas (p. ej. Outlook de Orlando). */
 function mergeCalendarStores(
   local: CalendarStore,
@@ -830,16 +834,31 @@ function mergeCalendarStores(
     }
     if (!localState || !remoteState) continue;
 
+    const isExternal = (ev: CalendarEvent) =>
+      Boolean(ev.source && EXTERNAL_CAL_SOURCES.has(ev.source));
+
+    const remoteExternal = (remoteState.events ?? []).filter(isExternal);
+    const localExternal = (localState.events ?? []).filter(isExternal);
+    // Sync Google/Outlook del servidor gana: evita que un localStorage vacío oculte la agenda.
+    const external =
+      remoteExternal.length > 0 ? remoteExternal : localExternal;
+    if (localExternal.length > 0 && remoteExternal.length === 0) {
+      preservedLocal = true;
+    }
+
     const byId = new Map<string, CalendarEvent>();
-    for (const ev of remoteState.events ?? []) byId.set(ev.id, ev);
+    for (const ev of remoteState.events ?? []) {
+      if (isExternal(ev)) continue;
+      byId.set(ev.id, ev);
+    }
     for (const ev of localState.events ?? []) {
+      if (isExternal(ev)) continue;
       const remoteEv = byId.get(ev.id);
       if (!remoteEv) {
         byId.set(ev.id, ev);
         preservedLocal = true;
         continue;
       }
-      // Preferir el que tenga más datos (externalId / notes / source).
       const localScore =
         (ev.externalId ? 2 : 0) + (ev.notes?.length ?? 0) + (ev.source ? 1 : 0);
       const remoteScore =
@@ -852,14 +871,9 @@ function mergeCalendarStores(
       }
     }
 
-    // Si local tiene más eventos (import Outlook), conservar todos.
-    const localCount = localState.events?.length ?? 0;
-    const remoteCount = remoteState.events?.length ?? 0;
-    if (localCount > remoteCount) preservedLocal = true;
-
     next[uid] = {
       activeTimer: remoteState.activeTimer ?? localState.activeTimer ?? null,
-      events: [...byId.values()].sort((a, b) =>
+      events: [...byId.values(), ...external].sort((a, b) =>
         `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
       ),
     };
@@ -1696,6 +1710,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ).length;
     const forceTakeRemote = liveRemoteCount > 0 && localProjectCount === 0;
 
+    const absorbRemoteCalendars = () => {
+      if (!remote.calendars) return;
+      setCalendarStore((prev) => {
+        const { next, preservedLocal: keptCal } = mergeCalendarStores(
+          prev,
+          remote.calendars,
+        );
+        if (keptCal) needsRepushAfterRemote.current = true;
+        if (calendarsFingerprint(prev) === calendarsFingerprint(next)) return prev;
+        localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(next));
+        return next;
+      });
+    };
+
     const absorbRemoteIntoLocalBoard = () => {
       setBoard((prev) => {
         const { projects, changed } = absorbRemoteProjects(
@@ -1715,6 +1743,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (remote.attendanceStore?.records?.length) {
         setAttendanceStore((prev) => mergeAttendanceStores(prev, remote.attendanceStore));
       }
+      // Siempre mezclar agendas (Google/Outlook): no depender del merge completo del board.
+      absorbRemoteCalendars();
     };
 
     if (!forceTakeRemote && localEditAt.current && remote.updatedAt < localEditAt.current) {
@@ -2015,6 +2045,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     applyRemoteRef.current = applyRemote;
   }, [applyRemote]);
 
+  const refreshSyncState = useCallback(async () => {
+    if (!isApiEnabled()) return;
+    try {
+      const remote = await fetchSyncState();
+      if (!remote) return;
+      setSyncOnline(true);
+      // Forzar merge de agendas aunque el board local esté más nuevo.
+      applyRemoteRef.current?.(remote);
+    } catch {
+      setSyncOnline(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isApiEnabled()) {
       syncHydrated.current = true;
@@ -2065,7 +2108,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const remoteHasBoard =
         (remote?.board?.tasks?.length ?? 0) > 0 ||
         (remote?.board?.projects?.length ?? 0) > 0;
-      if (remoteHasBoard) applyRemoteRef.current?.(remote!);
+      const remoteHasCalendars = Object.values(remote?.calendars ?? {}).some(
+        (cal) => (cal?.events?.length ?? 0) > 0,
+      );
+      if (remoteHasBoard || remoteHasCalendars) applyRemoteRef.current?.(remote!);
     };
 
     const start = () => {
@@ -4770,6 +4816,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setFilter,
       addCalendarEvent,
       importExternalCalendarEvents,
+      refreshSyncState,
       updateCalendarEvent,
       deleteCalendarEvent,
       toggleCalendarDone,
@@ -4882,6 +4929,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       filter,
       addCalendarEvent,
       importExternalCalendarEvents,
+      refreshSyncState,
       updateCalendarEvent,
       deleteCalendarEvent,
       toggleCalendarDone,

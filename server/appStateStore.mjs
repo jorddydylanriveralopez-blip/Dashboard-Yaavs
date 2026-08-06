@@ -5,6 +5,7 @@ import {
   externalizeProjectEvidence,
   mergeProgressUpdatesKeepEvidence,
 } from './evidenceStore.mjs';
+import { mergeCalendarsPreservingExternal } from './googleCalendarSync.mjs';
 
 // El cálculo de __dirname con import.meta.url puede fallar al empaquetar la
 // función (Netlify/esbuild). En serverless no usamos el archivo local, así que
@@ -447,6 +448,18 @@ export async function saveAppState(body, { allowEmpty = false } = {}) {
   // Tampoco borrar Extras que otro dispositivo aún no tiene en su snapshot.
   state = mergeKeepExistingExtras(state, existing);
   state = mergeKeepExistingExtraTemplates(state, existing);
+  // No borrar eventos Google/Outlook al guardar un snapshot del cliente sin sync.
+  state = {
+    ...state,
+    calendars: mergeCalendarsPreservingExternal(
+      existing?.calendars || {},
+      state.calendars || {},
+    ),
+    busySlots: {
+      ...(existing?.busySlots || {}),
+      ...(state.busySlots || {}),
+    },
+  };
   // Mover dataUrls pesados a /api/evidence/... (no borrarlos).
   state = externalizeProjectEvidence(state);
 
