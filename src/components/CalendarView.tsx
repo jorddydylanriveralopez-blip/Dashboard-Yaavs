@@ -296,7 +296,7 @@ export function CalendarView() {
     setGoogleSyncing(false);
     setGoogleMessage(
       result.ok
-        ? `Agenda sincronizada${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''} (~2 años atrás + ~4 meses)`
+        ? `Agenda sincronizada${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''} (~2 años atrás + ~1 año)`
         : result.error || 'No se pudo sincronizar',
     );
   };
@@ -769,7 +769,7 @@ export function CalendarView() {
               <>
                 <p>
                   Vincula tu Gmail ({user?.name ?? 'tú'}) para traer eventos de ~2 años atrás y
-                  ~4 meses adelante. Tu agenda es privada y se sincroniza sola cada pocos minutos.
+                  ~1 año adelante. Tu agenda es privada y se sincroniza sola cada pocos minutos.
                 </p>
                 {!isApiEnabled() ? (
                   <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>

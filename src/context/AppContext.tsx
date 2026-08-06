@@ -851,7 +851,7 @@ function mergeCalendarStores(
 
     const remoteExternal = (remoteState.events ?? []).filter(isExternal);
     const localExternal = (localState.events ?? []).filter(isExternal);
-    // Sync Google/Outlook del servidor gana: evita que un localStorage vacío oculte la agenda.
+    // Sync del servidor gana cuando trae eventos; si viene vacío, conservar local.
     const external =
       remoteExternal.length > 0 ? remoteExternal : localExternal;
     if (localExternal.length > 0 && remoteExternal.length === 0) {

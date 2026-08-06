@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -16,8 +17,8 @@ const SCOPES = [
 ].join(' ');
 /** ~2 años hacia atrás para no perder conciertos / eventos viejos. */
 const SYNC_LOOKBACK_DAYS = 730;
-/** ~4 meses hacia adelante. */
-const SYNC_LOOKAHEAD_DAYS = 120;
+/** ~1 año hacia adelante (antes 4 meses; se cortaban muchos días). */
+const SYNC_LOOKAHEAD_DAYS = 365;
 
 let credsLoadPromise = null;
 let tokensMemory = null;
@@ -405,71 +406,107 @@ function localPartsFromDate(d) {
   };
 }
 
-function mapGoogleEvent(ev, userId, ownerName = '') {
-  if (ev.status === 'cancelled') return null;
+/** ID estable y único (antes se truncaba el calendarId:eventId y chocaban muchos). */
+function stableGoogleEventId(userId, externalId) {
+  const hash = crypto.createHash('sha1').update(String(externalId)).digest('hex').slice(0, 24);
+  return `google-${String(userId).slice(0, 12)}-${hash}`;
+}
 
-  let date;
-  let time;
+/** Días YMD desde start hasta end (inclusive). */
+function eachYmdInclusive(startYmd, endYmd) {
+  if (!startYmd) return [];
+  if (!endYmd || endYmd < startYmd) return [startYmd];
+  const out = [];
+  let cur = startYmd;
+  while (cur <= endYmd) {
+    out.push(cur);
+    cur = addDaysYmd(cur, 1);
+    if (out.length > 400) break;
+  }
+  return out;
+}
+
+function mapGoogleEvent(ev, userId, ownerName = '') {
+  if (ev.status === 'cancelled') return [];
+
   let start;
   let end;
   let allDay = false;
+  let startYmd;
+  let endYmdInclusive;
+  let startTime = '09:00';
 
   if (ev.start?.dateTime) {
     start = new Date(ev.start.dateTime);
     end = ev.end?.dateTime ? new Date(ev.end.dateTime) : new Date(start.getTime() + 60 * 60_000);
-    if (Number.isNaN(start.getTime())) return null;
-    const parts = localPartsFromDate(start);
-    date = parts.date;
-    time = parts.time;
+    if (Number.isNaN(start.getTime())) return [];
+    const startParts = localPartsFromDate(start);
+    startYmd = startParts.date;
+    startTime = startParts.time;
+    // Si termina a medianoche exacta, el último día no cuenta (igual que Google).
+    const endParts = localPartsFromDate(end);
+    if (endParts.time === '00:00' && end.getTime() > start.getTime()) {
+      endYmdInclusive = addDaysYmd(endParts.date, -1);
+    } else {
+      endYmdInclusive = endParts.date;
+    }
   } else if (ev.start?.date) {
-    // All-day: usar la fecha de Google tal cual (no reinterpretar en UTC del server).
+    // All-day: end.date de Google es exclusivo.
     allDay = true;
-    date = String(ev.start.date).slice(0, 10);
-    time = '09:00';
-    start = new Date(`${date}T09:00:00-06:00`);
-    const endDate = String(ev.end?.date || ev.start.date).slice(0, 10);
-    end = new Date(`${endDate}T10:00:00-06:00`);
+    startYmd = String(ev.start.date).slice(0, 10);
+    const endExclusive = String(ev.end?.date || ev.start.date).slice(0, 10);
+    endYmdInclusive = addDaysYmd(endExclusive, -1);
+    if (endYmdInclusive < startYmd) endYmdInclusive = startYmd;
+    start = new Date(`${startYmd}T09:00:00-06:00`);
+    end = new Date(`${addDaysYmd(endYmdInclusive, 1)}T10:00:00-06:00`);
   } else {
-    return null;
+    return [];
   }
-  if (Number.isNaN(start.getTime())) return null;
+  if (Number.isNaN(start.getTime())) return [];
 
+  const days = eachYmdInclusive(startYmd, endYmdInclusive);
   const estimatedMinutes = allDay
     ? 8 * 60
     : Math.max(15, Math.round((end.getTime() - start.getTime()) / 60_000) || 60);
-  const externalId = ev._calendarId
+  const baseExternalId = ev._calendarId
     ? `${ev._calendarId}:${ev.id || Date.now()}`
     : String(ev.id || '');
   const transparency = String(ev.transparency || '').toLowerCase();
   const showAsFree = transparency === 'transparent';
+  const title = (ev.summary || '').trim() || '(Sin título)';
+  const notes = [
+    allDay ? 'Todo el día' : '',
+    days.length > 1 ? `${days.length} días` : '',
+    (ev.description || '').trim().slice(0, 450),
+    ev._calendarSummary ? String(ev._calendarSummary) : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+    .slice(0, 500);
 
-  return {
-    id: `google-${userId.slice(0, 12)}-${externalId.replace(/[^a-zA-Z0-9:_-]/g, '').slice(0, 48) || Date.now()}`,
-    userId,
-    title: (ev.summary || '').trim() || '(Sin título)',
-    date,
-    time,
-    reminderMinutes: 15,
-    estimatedMinutes,
-    trackedMinutes: 0,
-    done: false,
-    notes: [
-      allDay ? 'Todo el día' : '',
-      (ev.description || '').trim().slice(0, 450),
-      ev._calendarSummary ? String(ev._calendarSummary) : '',
-    ]
-      .filter(Boolean)
-      .join(' · ')
-      .slice(0, 500),
-    source: 'google',
-    externalId,
-    shared: false,
-    ownerName: ownerName || 'Colaborador',
-    kind: showAsFree ? 'event' : 'busy',
-    showAsFree,
-    startIso: start.toISOString(),
-    endIso: end.toISOString(),
-  };
+  return days.map((date, index) => {
+    const externalId = days.length > 1 ? `${baseExternalId}#${date}` : baseExternalId;
+    return {
+      id: stableGoogleEventId(userId, externalId),
+      userId,
+      title,
+      date,
+      time: allDay ? '09:00' : index === 0 ? startTime : '00:00',
+      reminderMinutes: 15,
+      estimatedMinutes: allDay ? estimatedMinutes : index === 0 ? estimatedMinutes : 60,
+      trackedMinutes: 0,
+      done: false,
+      notes,
+      source: 'google',
+      externalId,
+      shared: false,
+      ownerName: ownerName || 'Colaborador',
+      kind: showAsFree ? 'event' : 'busy',
+      showAsFree,
+      startIso: start.toISOString(),
+      endIso: end.toISOString(),
+    };
+  });
 }
 
 function mexicoYmdWeekday(d = new Date()) {
@@ -499,7 +536,7 @@ function addDaysYmd(ymd, days) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Ventana: ~2 años atrás → ~4 meses adelante (México). */
+/** Ventana: ~2 años atrás → ~1 año adelante (México). */
 function windowRange() {
   const { ymd } = mexicoYmdWeekday();
   const startYmd = addDaysYmd(ymd, -SYNC_LOOKBACK_DAYS);
@@ -562,7 +599,7 @@ async function fetchGoogleEventsForCalendar(accessToken, calendarId, start, end)
     );
     items.push(...(payload.items || []));
     pageToken = payload.nextPageToken || '';
-  } while (pageToken && items.length < 5000);
+  } while (pageToken && items.length < 10000);
   return items;
 }
 
@@ -581,8 +618,10 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
   const { start, end } = windowRange();
 
   const calendarList = await listGoogleCalendarIds(accessToken);
-  const selected = calendarList.filter((c) => c.selected);
-  const targets = (selected.length ? selected : calendarList).slice(0, 30);
+  // Incluir todos los calendarios (no solo los “selected”); Orlando ve más días en Gmail.
+  const primary = calendarList.filter((c) => c.primary || c.id === 'primary');
+  const rest = calendarList.filter((c) => !(c.primary || c.id === 'primary'));
+  const targets = [...primary, ...rest].slice(0, 40);
 
   const items = [];
   const seen = new Set();
@@ -603,7 +642,7 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
     }
   }
 
-  const mapped = items.map((ev) => mapGoogleEvent(ev, userId, ownerName)).filter(Boolean);
+  const mapped = items.flatMap((ev) => mapGoogleEvent(ev, userId, ownerName));
 
   const busySlots = mapped
     .filter((e) => !e.showAsFree)
@@ -737,7 +776,24 @@ export function mergeCalendarsPreservingExternal(existing = {}, incoming = {}) {
     const local = (next.events || []).filter((e) => !EXTERNAL_SOURCES.has(e.source));
     const extIncoming = (next.events || []).filter((e) => EXTERNAL_SOURCES.has(e.source));
     const extPrev = (prev.events || []).filter((e) => EXTERNAL_SOURCES.has(e.source));
-    const external = extIncoming.length ? extIncoming : extPrev;
+    const googleIn = extIncoming.filter((e) => e.source === 'google');
+    const googlePrev = extPrev.filter((e) => e.source === 'google');
+    const otherIn = extIncoming.filter((e) => e.source !== 'google');
+    const otherPrev = extPrev.filter((e) => e.source !== 'google');
+    // Google: si el cliente/sync manda eventos, reemplazan (evita IDs viejos).
+    // Si manda vacío, conservar los del servidor.
+    const google = googleIn.length === 0 ? googlePrev : googleIn;
+    // Outlook/otros: unir por externalId para no perder importaciones.
+    const otherByExt = new Map();
+    for (const e of otherPrev) {
+      otherByExt.set(e.externalId || `id:${e.id}`, e);
+    }
+    for (const e of otherIn) {
+      otherByExt.set(e.externalId || `id:${e.id}`, e);
+    }
+    const other =
+      otherIn.length === 0 ? otherPrev : otherPrev.length === 0 ? otherIn : [...otherByExt.values()];
+    const external = [...google, ...other];
     merged[id] = {
       ...next,
       events: [...local, ...external].sort((a, b) =>
