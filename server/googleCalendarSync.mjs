@@ -575,9 +575,9 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
   const accessToken = await getValidAccessToken(userId);
   const tokenEntry = (await loadGoogleTokens())[userId] || {};
   const ownerName =
-    tokenEntry.ownerName ||
-    tokenEntry.email ||
-    (userId === GOOGLE_CAL_USER_ID ? 'Orlando Villagómez' : userId);
+    userId === GOOGLE_CAL_USER_ID
+      ? tokenEntry.ownerName || 'Orlando Villagómez'
+      : tokenEntry.ownerName || tokenEntry.email || userId;
   const { start, end } = windowRange();
 
   const calendarList = await listGoogleCalendarIds(accessToken);
