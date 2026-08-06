@@ -11,6 +11,19 @@ export function vapidPublicKey(): string {
   return (import.meta.env.VITE_VAPID_PUBLIC_KEY as string | undefined) ?? '';
 }
 
+async function resolveVapidPublicKey(): Promise<string> {
+  const fromEnv = vapidPublicKey().trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const res = await fetch(`${apiBase()}/api/push`, { cache: 'no-store' });
+    if (!res.ok) return '';
+    const data = (await res.json()) as { publicKey?: string };
+    return (data.publicKey || '').trim();
+  } catch {
+    return '';
+  }
+}
+
 export function isPushSupported(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -82,7 +95,7 @@ export async function subscribeToPush(
   options: { requestPermission?: boolean } = {},
 ): Promise<{ ok: boolean; reason?: string }> {
   if (!isPushSupported()) return { ok: false, reason: 'unsupported' };
-  const key = vapidPublicKey();
+  const key = await resolveVapidPublicKey();
   if (!key) return { ok: false, reason: 'no-vapid' };
 
   let permission = Notification.permission;

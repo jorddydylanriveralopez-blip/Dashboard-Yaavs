@@ -20,7 +20,7 @@ import {
   sendAgendaAlertEmail,
   eventsDueForReminder,
 } from './calendarReminders.mjs';
-import { removeSubscription, saveSubscription, sendPush } from './pushStore.mjs';
+import { ensureVapidConfigured, getVapidPublicKey, removeSubscription, saveSubscription, sendPush } from './pushStore.mjs';
 import {
   ensureGoogleCredsLoaded,
   getGoogleAuthUrl,
@@ -600,10 +600,27 @@ app.get('/api/media/file/:id', (req, res) => {
 
 app.all('/api/push', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') {
     res.status(204).end();
+    return;
+  }
+  if (req.method === 'GET') {
+    try {
+      await ensureVapidConfigured();
+      const publicKey = await getVapidPublicKey();
+      if (!publicKey) {
+        res.status(503).json({ ok: false, error: 'VAPID no disponible' });
+        return;
+      }
+      res.json({ ok: true, publicKey });
+    } catch (error) {
+      res.status(500).json({
+        ok: false,
+        error: error instanceof Error ? error.message : 'Error VAPID',
+      });
+    }
     return;
   }
   if (req.method !== 'POST') {
@@ -644,12 +661,14 @@ app.all('/api/push', async (req, res) => {
         url,
         tag,
       });
-      res.status(200).json(result);
+      res.status(result.ok ? 200 : 503).json(result);
       return;
     }
-    res.status(400).json({ error: 'Acción desconocida' });
+    res.status(400).json({ error: 'Acción no válida' });
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Error' });
+    res.status(500).json({
+      error: error instanceof Error ? error.message : 'Error en push',
+    });
   }
 });
 
@@ -682,6 +701,15 @@ app.listen(PORT, '0.0.0.0', async () => {
     console.warn(
       'DATABASE_URL no está configurada. Configúrala en Hostinger/Render con la misma Neon para no perder proyectos.',
     );
+  }
+  try {
+    if (await ensureVapidConfigured()) {
+      console.log('Notificaciones push (VAPID) listas');
+    } else {
+      console.warn('VAPID no disponible todavía');
+    }
+  } catch (err) {
+    console.warn('VAPID init:', err?.message ?? err);
   }
   if (googleConfigured() || (await ensureGoogleCredsLoaded())) {
     console.log('Google Calendar OAuth configurado');

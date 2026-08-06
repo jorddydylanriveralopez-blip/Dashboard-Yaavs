@@ -525,7 +525,7 @@ export function CalendarView() {
     }
     if (result.reason === 'no-vapid') {
       setPushStatus(
-        'Falta configurar VITE_VAPID_PUBLIC_KEY en el servidor. Mientras tanto, Orlando recibe correo.',
+        'No se pudo activar push todavía. Espera el redeploy o recarga en unos minutos.',
       );
       return;
     }

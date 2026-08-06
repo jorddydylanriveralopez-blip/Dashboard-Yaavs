@@ -1,24 +1,104 @@
 import webpush from 'web-push';
 import { databaseUrl, sql } from './db.mjs';
 
-let vapidReady = false;
+const VAPID_DB_KEY = 'yaavs-vapid';
 
-function ensureVapid() {
-  if (vapidReady) return true;
-  const publicKey = process.env.VAPID_PUBLIC_KEY;
-  const privateKey = process.env.VAPID_PRIVATE_KEY;
+let vapidReady = false;
+let vapidPublic = '';
+let vapidLoadPromise = null;
+
+function applyVapid(publicKey, privateKey, subject) {
   if (!publicKey || !privateKey) return false;
   webpush.setVapidDetails(
-    process.env.VAPID_SUBJECT || 'mailto:marketing@yaavs.com.mx',
+    subject || process.env.VAPID_SUBJECT || 'mailto:marketing@yaavs.com.mx',
     publicKey,
     privateKey,
   );
+  vapidPublic = publicKey;
   vapidReady = true;
   return true;
 }
 
+async function saveVapidToDb(publicKey, privateKey) {
+  if (!databaseUrl()) return;
+  const json = JSON.stringify({
+    publicKey,
+    privateKey,
+    subject: process.env.VAPID_SUBJECT || 'mailto:marketing@yaavs.com.mx',
+    updatedAt: new Date().toISOString(),
+  });
+  try {
+    await sql`
+      INSERT INTO app_state (key, state, updated_at)
+      VALUES (${VAPID_DB_KEY}, ${json}::jsonb, now())
+      ON CONFLICT (key) DO UPDATE SET state = ${json}::jsonb, updated_at = now()
+    `;
+  } catch (err) {
+    console.warn('No se pudo guardar VAPID en DB:', err?.message ?? err);
+  }
+}
+
+async function loadVapidFromDb() {
+  if (!databaseUrl()) return null;
+  try {
+    const rows = await sql`SELECT state FROM app_state WHERE key = ${VAPID_DB_KEY} LIMIT 1`;
+    const state = rows?.[0]?.state;
+    if (!state) return null;
+    const parsed = typeof state === 'string' ? JSON.parse(state) : state;
+    if (parsed?.publicKey && parsed?.privateKey) return parsed;
+  } catch (err) {
+    console.warn('No se pudo leer VAPID de DB:', err?.message ?? err);
+  }
+  return null;
+}
+
+/** Carga o genera claves VAPID (env → DB → generar y persistir). */
+export async function ensureVapidConfigured() {
+  if (vapidReady && vapidPublic) return true;
+  if (vapidLoadPromise) return vapidLoadPromise;
+
+  vapidLoadPromise = (async () => {
+    const envPub = (process.env.VAPID_PUBLIC_KEY || '').trim();
+    const envPriv = (process.env.VAPID_PRIVATE_KEY || '').trim();
+    if (envPub && envPriv && applyVapid(envPub, envPriv)) {
+      // Persist for Hostinger rebuilds that lose env vars.
+      await saveVapidToDb(envPub, envPriv);
+      return true;
+    }
+
+    const fromDb = await loadVapidFromDb();
+    if (fromDb && applyVapid(fromDb.publicKey, fromDb.privateKey, fromDb.subject)) {
+      return true;
+    }
+
+    try {
+      const generated = webpush.generateVAPIDKeys();
+      if (applyVapid(generated.publicKey, generated.privateKey)) {
+        await saveVapidToDb(generated.publicKey, generated.privateKey);
+        console.log('VAPID generado y guardado en la base de datos');
+        return true;
+      }
+    } catch (err) {
+      console.warn('No se pudo generar VAPID:', err?.message ?? err);
+    }
+    return false;
+  })();
+
+  try {
+    return await vapidLoadPromise;
+  } finally {
+    vapidLoadPromise = null;
+  }
+}
+
+export async function getVapidPublicKey() {
+  await ensureVapidConfigured();
+  return vapidPublic || null;
+}
+
 export async function saveSubscription({ subscription, userId, userName, employeeId }) {
   if (!subscription?.endpoint) throw new Error('Suscripción inválida');
+  if (!databaseUrl()) throw new Error('Base de datos no configurada');
   const json = JSON.stringify(subscription);
   await sql`
     INSERT INTO push_subscriptions (endpoint, subscription, user_id, user_name, employee_id, updated_at)
@@ -34,6 +114,7 @@ export async function saveSubscription({ subscription, userId, userName, employe
 
 export async function removeSubscription(endpoint) {
   if (!endpoint) return;
+  if (!databaseUrl()) return;
   await sql`DELETE FROM push_subscriptions WHERE endpoint = ${endpoint}`;
 }
 
@@ -45,7 +126,6 @@ async function fetchTargets({ audience, employeeIds, userIds, excludeUserId }) {
   return rows.filter((row) => {
     if (excludeUserId && row.user_id === excludeUserId) return false;
 
-    // Si piden IDs concretos, solo esos (emp o user).
     if (empFilter || userFilter) {
       const matchEmp = empFilter && employeeIds.includes(row.employee_id);
       const matchUser = userFilter && userIds.includes(row.user_id);
@@ -71,7 +151,7 @@ export async function sendPush({
   url,
   tag,
 }) {
-  if (!ensureVapid()) {
+  if (!(await ensureVapidConfigured())) {
     return { ok: false, error: 'VAPID no configurado', sent: 0 };
   }
   if (!databaseUrl()) {
