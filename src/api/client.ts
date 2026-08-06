@@ -145,11 +145,14 @@ export function getGoogleAuthUrl(userId: string = CALENDAR_SYNC_USER_ID): string
 /** Devuelve la URL real de Google OAuth (evita que Hostinger sirva el SPA en /api/google/auth). */
 export async function fetchGoogleAuthUrl(
   userId: string = CALENDAR_SYNC_USER_ID,
+  options?: { ownerName?: string },
 ): Promise<{ ok: boolean; url?: string; error?: string }> {
   if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
   try {
+    const params = new URLSearchParams({ userId });
+    if (options?.ownerName) params.set('ownerName', options.ownerName);
     const res = await fetchWithTimeout(
-      `${API_URL}/api/google/auth-url?userId=${encodeURIComponent(userId)}`,
+      `${API_URL}/api/google/auth-url?${params}`,
       { cache: 'no-store' },
       HEALTH_TIMEOUT_MS,
     );
