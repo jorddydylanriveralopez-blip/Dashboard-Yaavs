@@ -1,4 +1,5 @@
 import type { AppSyncState } from '../types';
+import { CALENDAR_SYNC_USER_ID } from '../constants';
 
 /** Estado completo (proyectos + evidencias) puede tardar; no bajar de ~2 min. */
 const STATE_TIMEOUT_MS = 180_000;
@@ -30,6 +31,10 @@ export function isApiEnabled(): boolean {
     if (pageHost !== 'localhost' && pageHost !== '127.0.0.1') return false;
   }
   return true;
+}
+
+export function getApiBaseUrl(): string {
+  return API_URL;
 }
 
 async function fetchWithTimeout(
@@ -116,5 +121,65 @@ export async function checkApiHealth(): Promise<boolean> {
     return res.ok;
   } catch {
     return false;
+  }
+}
+
+export interface ExternalCalendarStatus {
+  configured: boolean;
+  connected: boolean;
+  userId: string;
+  email: string | null;
+  lastSyncAt: string | null;
+  lastError: string | null;
+}
+
+/** @deprecated usar ExternalCalendarStatus */
+export type OutlookStatus = ExternalCalendarStatus;
+
+export function getGoogleAuthUrl(userId: string = CALENDAR_SYNC_USER_ID): string | null {
+  if (!isApiEnabled()) return null;
+  return `${API_URL}/api/google/auth?userId=${encodeURIComponent(userId)}`;
+}
+
+export async function fetchGoogleCalendarStatus(
+  userId: string = CALENDAR_SYNC_USER_ID,
+): Promise<ExternalCalendarStatus | null> {
+  if (!isApiEnabled()) return null;
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/google/status?userId=${encodeURIComponent(userId)}`,
+      { cache: 'no-store' },
+      HEALTH_TIMEOUT_MS,
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as ExternalCalendarStatus;
+  } catch {
+    return null;
+  }
+}
+
+export async function triggerGoogleCalendarSync(
+  userId: string = CALENDAR_SYNC_USER_ID,
+): Promise<{ ok: boolean; error?: string; eventCount?: number }> {
+  if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/google/sync`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      },
+      STATE_TIMEOUT_MS,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      eventCount?: number;
+    };
+    if (!res.ok) return { ok: false, error: data.error || 'Error al sincronizar' };
+    return { ok: true, eventCount: data.eventCount };
+  } catch {
+    return { ok: false, error: 'No se pudo sincronizar Google Calendar' };
   }
 }

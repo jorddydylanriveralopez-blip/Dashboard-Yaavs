@@ -13,6 +13,10 @@ dist-ssr
 dev-dist
 *.local
 Archivo.zip
+.env
+server/data/outlook-tokens.json
+server/data/google-tokens.json
+server/data/store.json
 
 # Editor directories and files
 .vscode/*

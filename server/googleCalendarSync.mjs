@@ -1,0 +1,394 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DATA_DIR = path.join(__dirname, 'data');
+const TOKENS_PATH = path.join(DATA_DIR, 'google-tokens.json');
+
+export const GOOGLE_CAL_USER_ID = 'u-orlando';
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/userinfo.email',
+].join(' ');
+const SYNC_LOOKBACK_DAYS = 7;
+const SYNC_LOOKAHEAD_DAYS = 30;
+
+function env(name, fallback = '') {
+  return (process.env[name] ?? fallback).trim();
+}
+
+export function googleConfigured() {
+  return Boolean(
+    env('GOOGLE_CLIENT_ID') &&
+      env('GOOGLE_CLIENT_SECRET') &&
+      env('GOOGLE_REDIRECT_URI'),
+  );
+}
+
+function redirectUri() {
+  return env('GOOGLE_REDIRECT_URI', 'http://localhost:3001/api/google/callback');
+}
+
+function ensureDataDir() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function readTokens() {
+  try {
+    if (fs.existsSync(TOKENS_PATH)) {
+      return JSON.parse(fs.readFileSync(TOKENS_PATH, 'utf8'));
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+function writeTokens(all) {
+  ensureDataDir();
+  fs.writeFileSync(TOKENS_PATH, JSON.stringify(all, null, 2));
+}
+
+export function getGoogleStatus(userId = GOOGLE_CAL_USER_ID) {
+  const entry = readTokens()[userId];
+  return {
+    configured: googleConfigured(),
+    connected: Boolean(entry?.refresh_token || entry?.access_token),
+    userId,
+    email: entry?.email ?? null,
+    lastSyncAt: entry?.lastSyncAt ?? null,
+    lastError: entry?.lastError ?? null,
+  };
+}
+
+export function getGoogleAuthUrl(userId = GOOGLE_CAL_USER_ID) {
+  if (!googleConfigured()) {
+    throw new Error('Google Calendar no configurado: faltan variables GOOGLE_*');
+  }
+  const params = new URLSearchParams({
+    client_id: env('GOOGLE_CLIENT_ID'),
+    redirect_uri: redirectUri(),
+    response_type: 'code',
+    scope: SCOPES,
+    access_type: 'offline',
+    prompt: 'consent',
+    include_granted_scopes: 'true',
+    state: userId,
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+
+async function exchangeCode(code) {
+  const body = new URLSearchParams({
+    code,
+    client_id: env('GOOGLE_CLIENT_ID'),
+    client_secret: env('GOOGLE_CLIENT_SECRET'),
+    redirect_uri: redirectUri(),
+    grant_type: 'authorization_code',
+  });
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error_description || data.error || 'Error al canjear código OAuth');
+  }
+  return data;
+}
+
+async function refreshAccessToken(refreshToken) {
+  const body = new URLSearchParams({
+    client_id: env('GOOGLE_CLIENT_ID'),
+    client_secret: env('GOOGLE_CLIENT_SECRET'),
+    refresh_token: refreshToken,
+    grant_type: 'refresh_token',
+  });
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error_description || data.error || 'Error al refrescar token');
+  }
+  return data;
+}
+
+async function googleGet(accessToken, url) {
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error?.message || `Google API falló (${res.status})`);
+  }
+  return data;
+}
+
+async function getValidAccessToken(userId) {
+  const all = readTokens();
+  const entry = all[userId];
+  if (!entry) throw new Error('Google Calendar no conectado para este usuario');
+
+  const expiresAt = entry.expires_at ? Date.parse(entry.expires_at) : 0;
+  if (entry.access_token && expiresAt > Date.now() + 60_000) {
+    return entry.access_token;
+  }
+  if (!entry.refresh_token) {
+    throw new Error('Sin refresh token; vuelve a conectar Google Calendar');
+  }
+
+  const refreshed = await refreshAccessToken(entry.refresh_token);
+  const next = {
+    ...entry,
+    access_token: refreshed.access_token,
+    expires_at: new Date(Date.now() + (refreshed.expires_in || 3600) * 1000).toISOString(),
+    lastError: null,
+  };
+  if (refreshed.refresh_token) next.refresh_token = refreshed.refresh_token;
+  all[userId] = next;
+  writeTokens(all);
+  return next.access_token;
+}
+
+export async function handleGoogleOAuthCallback(code, stateUserId) {
+  const userId = stateUserId || GOOGLE_CAL_USER_ID;
+  const tokens = await exchangeCode(code);
+  const accessToken = tokens.access_token;
+
+  let email = null;
+  try {
+    const me = await googleGet(accessToken, 'https://www.googleapis.com/oauth2/v2/userinfo');
+    email = me.email || null;
+  } catch {
+    /* optional */
+  }
+
+  const all = readTokens();
+  all[userId] = {
+    ...(all[userId] ?? {}),
+    access_token: accessToken,
+    refresh_token: tokens.refresh_token || all[userId]?.refresh_token,
+    expires_at: new Date(Date.now() + (tokens.expires_in || 3600) * 1000).toISOString(),
+    email,
+    connectedAt: new Date().toISOString(),
+    lastError: null,
+  };
+  writeTokens(all);
+  return { userId, email };
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+function localPartsFromDate(d) {
+  return {
+    date: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
+    time: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+    ms: d.getTime(),
+  };
+}
+
+function mapGoogleEvent(ev, userId) {
+  if (ev.status === 'cancelled') return null;
+  // All-day events: start.date / end.date
+  let start;
+  let end;
+  if (ev.start?.dateTime) {
+    start = new Date(ev.start.dateTime);
+    end = ev.end?.dateTime ? new Date(ev.end.dateTime) : new Date(start.getTime() + 60 * 60_000);
+  } else if (ev.start?.date) {
+    start = new Date(`${ev.start.date}T09:00:00`);
+    const endDate = ev.end?.date || ev.start.date;
+    end = new Date(`${endDate}T10:00:00`);
+  } else {
+    return null;
+  }
+  if (Number.isNaN(start.getTime())) return null;
+
+  const parts = localPartsFromDate(start);
+  const estimatedMinutes = Math.max(
+    15,
+    Math.round((end.getTime() - start.getTime()) / 60_000) || 60,
+  );
+  const externalId = String(ev.id || '');
+  const transparency = String(ev.transparency || '').toLowerCase();
+  const showAsFree = transparency === 'transparent';
+
+  return {
+    id: `google-${externalId.slice(0, 48) || Date.now()}`,
+    userId,
+    title: (ev.summary || '').trim() || '(Sin título)',
+    date: parts.date,
+    time: parts.time,
+    reminderMinutes: 15,
+    estimatedMinutes,
+    trackedMinutes: 0,
+    done: false,
+    notes: (ev.description || '').trim().slice(0, 500),
+    source: 'google',
+    externalId,
+    shared: true,
+    ownerName: 'Orlando Villagómez',
+    kind: showAsFree ? 'event' : 'busy',
+    showAsFree,
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
+function windowRange() {
+  const start = new Date();
+  start.setDate(start.getDate() - SYNC_LOOKBACK_DAYS);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setDate(end.getDate() + SYNC_LOOKAHEAD_DAYS);
+  end.setHours(23, 59, 59, 999);
+  return { start, end };
+}
+
+/**
+ * Pull Google Calendar events into app state.
+ * @param {() => object | Promise<object>} readState
+ * @param {(state: object) => void | Promise<void>} writeState
+ */
+export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_CAL_USER_ID) {
+  const accessToken = await getValidAccessToken(userId);
+  const { start, end } = windowRange();
+
+  const params = new URLSearchParams({
+    timeMin: start.toISOString(),
+    timeMax: end.toISOString(),
+    singleEvents: 'true',
+    orderBy: 'startTime',
+    maxResults: '250',
+  });
+
+  const payload = await googleGet(
+    accessToken,
+    `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
+  );
+  const mapped = (payload.items || [])
+    .map((ev) => mapGoogleEvent(ev, userId))
+    .filter(Boolean);
+
+  const busySlots = mapped
+    .filter((e) => !e.showAsFree)
+    .map((e) => ({
+      userId,
+      start: e.startIso,
+      end: e.endIso,
+    }))
+    .sort((a, b) => a.start.localeCompare(b.start));
+
+  const calendarEvents = mapped.map(
+    ({ showAsFree: _f, startIso: _s, endIso: _e, ...rest }) => rest,
+  );
+
+  const state = await readState();
+  const calendars = { ...(state.calendars || {}) };
+  const current = calendars[userId] || { events: [], activeTimer: null };
+  const localEvents = (current.events || []).filter(
+    (e) => e.source !== 'google',
+  );
+  const prevGoogle = new Map(
+    (current.events || [])
+      .filter((e) => e.source === 'google' && e.externalId)
+      .map((e) => [e.externalId, e]),
+  );
+
+  const googleEvents = calendarEvents.map((ev) => {
+    const prev = prevGoogle.get(ev.externalId);
+    if (!prev) return ev;
+    return {
+      ...ev,
+      trackedMinutes: prev.trackedMinutes ?? 0,
+      done: prev.done || ev.done,
+      remindedAt: prev.remindedAt,
+      emailRemindedAt: prev.emailRemindedAt,
+      notes: prev.notes?.trim() ? prev.notes : ev.notes,
+    };
+  });
+
+  calendars[userId] = {
+    events: [...localEvents, ...googleEvents].sort((a, b) =>
+      `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
+    ),
+    activeTimer: current.activeTimer,
+  };
+
+  const nextState = {
+    ...state,
+    calendars,
+    busySlots: {
+      ...(state.busySlots || {}),
+      [userId]: busySlots,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+  await writeState(nextState);
+
+  const all = readTokens();
+  if (all[userId]) {
+    all[userId] = {
+      ...all[userId],
+      lastSyncAt: new Date().toISOString(),
+      lastError: null,
+      eventCount: googleEvents.length,
+    };
+    writeTokens(all);
+  }
+
+  return {
+    userId,
+    eventCount: googleEvents.length,
+    busyCount: busySlots.length,
+    syncedAt: all[userId]?.lastSyncAt,
+  };
+}
+
+export function recordGoogleSyncError(userId, error) {
+  const all = readTokens();
+  if (!all[userId]) return;
+  all[userId] = {
+    ...all[userId],
+    lastError: error instanceof Error ? error.message : String(error),
+  };
+  writeTokens(all);
+}
+
+const EXTERNAL_SOURCES = new Set(['google', 'outlook']);
+
+/** Merge calendars on client PUT without wiping synced external events. */
+export function mergeCalendarsPreservingExternal(existing = {}, incoming = {}) {
+  const userIds = new Set([...Object.keys(existing), ...Object.keys(incoming)]);
+  const merged = {};
+  for (const id of userIds) {
+    const prev = existing[id];
+    const next = incoming[id];
+    if (!next) {
+      merged[id] = prev;
+      continue;
+    }
+    if (!prev) {
+      merged[id] = next;
+      continue;
+    }
+    const local = (next.events || []).filter((e) => !EXTERNAL_SOURCES.has(e.source));
+    const extIncoming = (next.events || []).filter((e) => EXTERNAL_SOURCES.has(e.source));
+    const extPrev = (prev.events || []).filter((e) => EXTERNAL_SOURCES.has(e.source));
+    const external = extIncoming.length ? extIncoming : extPrev;
+    merged[id] = {
+      ...next,
+      events: [...local, ...external].sort((a, b) =>
+        `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
+      ),
+    };
+  }
+  return merged;
+}

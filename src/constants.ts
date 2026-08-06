@@ -23,7 +23,6 @@ export const STATUS_COLORS: Record<TaskStatus, string> = {
 
 /** Súbelo cuando cambies seed/usuarios para forzar migración en clientes antiguos. */
 export const BOARD_SCHEMA_VERSION = 12;
-
 /** Nombres viejos del proyecto (TeamBoard / Mi Empresa) → Yaavs */
 export const LEGACY_COMPANY_NAMES = [
   'mi empresa',
@@ -51,10 +50,17 @@ export const SESSION_EXPIRY_KEY = 'empresa-board-session-expiry';
 /** '1' = sesión en localStorage (sobrevive al cerrar el navegador). */
 export const SESSION_PERSIST_KEY = 'empresa-board-session-persist';
 export const CALENDAR_STORAGE_KEY = 'empresa-board-calendar-v1';
+export const BUSY_SLOTS_STORAGE_KEY = 'empresa-board-busy-slots-v1';
 /** Correos de recordatorio de agenda por userId. */
 export const CALENDAR_EMAIL_BY_USER: Record<string, string> = {
   'u-orlando': 'orlando.villagomez@yaavs.com.mx',
 };
+/** Usuario cuya agenda externa (Google Calendar) se sincroniza al dashboard. */
+export const CALENDAR_SYNC_USER_ID = 'u-orlando';
+export const CALENDAR_SYNC_USER_NAME = 'Orlando';
+/** @deprecated usar CALENDAR_SYNC_USER_ID */
+export const OUTLOOK_SYNC_USER_ID = CALENDAR_SYNC_USER_ID;
+export const OUTLOOK_SYNC_USER_NAME = CALENDAR_SYNC_USER_NAME;
 export const ASSIGNMENTS_STORAGE_KEY = 'empresa-board-assignments-v1';
 export const PASSWORD_OVERRIDES_KEY = 'empresa-board-passwords';
 export const ONBOARDING_KEY = 'empresa-board-onboarding-done';

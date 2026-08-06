@@ -21,18 +21,54 @@ import {
   eventsDueForReminder,
 } from './calendarReminders.mjs';
 import { removeSubscription, saveSubscription, sendPush } from './pushStore.mjs';
+import {
+  getGoogleAuthUrl,
+  getGoogleStatus,
+  googleConfigured,
+  GOOGLE_CAL_USER_ID,
+  handleGoogleOAuthCallback,
+  recordGoogleSyncError,
+  syncGoogleCalendar,
+} from './googleCalendarSync.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, '..');
 const DB_PATH = path.join(__dirname, 'data', 'store.json');
 const DIST_DIR = path.join(__dirname, '..', 'dist');
 const PORT = Number(process.env.PORT) || 3001;
+
+function loadDotEnv() {
+  try {
+    const envPath = path.join(ROOT, '.env');
+    if (!fs.existsSync(envPath)) return;
+    for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const eq = trimmed.indexOf('=');
+      if (eq < 1) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let val = trimmed.slice(eq + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+loadDotEnv();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, service: 'yaavs-board' });
+  res.json({ ok: true, service: 'yaavs-board', google: googleConfigured() });
 });
 
 app.get('/api/evidence/:filename', (req, res) => {
@@ -72,6 +108,75 @@ app.put('/api/state', async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : 'No se pudo guardar el estado',
+    });
+  }
+});
+
+app.get('/api/google/status', (req, res) => {
+  const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
+  res.json(getGoogleStatus(userId));
+});
+
+app.get('/api/google/auth', (req, res) => {
+  try {
+    const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
+    res.redirect(getGoogleAuthUrl(userId));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get('/api/google/callback', async (req, res) => {
+  const { code, state, error, error_description: errorDescription } = req.query;
+  if (error) {
+    res
+      .status(400)
+      .send(
+        `<html><body><h1>No se pudo conectar Google Calendar</h1><p>${errorDescription || error}</p></body></html>`,
+      );
+    return;
+  }
+  if (!code) {
+    res.status(400).send('<html><body><h1>Falta código OAuth</h1></body></html>');
+    return;
+  }
+  try {
+    const { userId } = await handleGoogleOAuthCallback(
+      String(code),
+      state ? String(state) : GOOGLE_CAL_USER_ID,
+    );
+    try {
+      await syncGoogleCalendar(loadAppState, saveAppState, userId);
+    } catch (syncErr) {
+      recordGoogleSyncError(userId, syncErr);
+      console.error('Google sync post-callback:', syncErr);
+    }
+    res.send(
+      `<html><body style="font-family:system-ui;padding:2rem">
+        <h1>Google Calendar conectado</h1>
+        <p>Ya puedes cerrar esta ventana y volver al dashboard.</p>
+        <script>setTimeout(function(){ window.close(); }, 1500);</script>
+      </body></html>`,
+    );
+  } catch (err) {
+    res
+      .status(500)
+      .send(
+        `<html><body><h1>Error OAuth</h1><p>${err instanceof Error ? err.message : String(err)}</p></body></html>`,
+      );
+  }
+});
+
+app.post('/api/google/sync', async (req, res) => {
+  const userId = String(req.body?.userId || req.query.userId || GOOGLE_CAL_USER_ID);
+  try {
+    const result = await syncGoogleCalendar(loadAppState, saveAppState, userId);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    recordGoogleSyncError(userId, error);
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 });
@@ -439,5 +544,22 @@ app.listen(PORT, '0.0.0.0', async () => {
     console.warn(
       'DATABASE_URL no está configurada. Configúrala en Hostinger/Render con la misma Neon para no perder proyectos.',
     );
+  }
+  if (googleConfigured()) {
+    console.log('Google Calendar OAuth configurado');
+    const tick = async () => {
+      const status = getGoogleStatus(GOOGLE_CAL_USER_ID);
+      if (!status.connected) return;
+      try {
+        await syncGoogleCalendar(loadAppState, saveAppState, GOOGLE_CAL_USER_ID);
+      } catch (err) {
+        recordGoogleSyncError(GOOGLE_CAL_USER_ID, err);
+        console.error('Google sync periódico:', err?.message ?? err);
+      }
+    };
+    void tick();
+    setInterval(tick, 5 * 60 * 1000);
+  } else {
+    console.log('Google Calendar no configurado (GOOGLE_CLIENT_ID / SECRET / REDIRECT_URI)');
   }
 });

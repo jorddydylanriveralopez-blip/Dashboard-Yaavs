@@ -1,7 +1,14 @@
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useApp } from '../context/AppContext';
 import { REMINDER_OPTIONS } from '../constants';
 import { reminderEmailForUser } from '../api/calendar';
+import {
+  fetchGoogleCalendarStatus,
+  getGoogleAuthUrl,
+  isApiEnabled,
+  triggerGoogleCalendarSync,
+  type ExternalCalendarStatus,
+} from '../api/client';
 import { useEventReminders } from '../hooks/useEventReminders';
 import {
   elapsedMinutesSince,
@@ -43,9 +50,44 @@ export function CalendarView() {
   const icsInputRef = useRef<HTMLInputElement>(null);
   const [icsStatus, setIcsStatus] = useState<string | null>(null);
   const [pushStatus, setPushStatus] = useState<string | null>(null);
+  const [googleStatus, setGoogleStatus] = useState<ExternalCalendarStatus | null>(null);
+  const [googleSyncing, setGoogleSyncing] = useState(false);
+  const [googleMessage, setGoogleMessage] = useState<string | null>(null);
   const canImportOrlandoAgenda =
     Boolean(user) &&
     (canEditAll || user?.employeeId === 'emp-orlando' || user?.id === ORLANDO_USER_ID);
+
+  useEffect(() => {
+    if (!canImportOrlandoAgenda || !isApiEnabled()) return;
+    void fetchGoogleCalendarStatus(ORLANDO_USER_ID).then(setGoogleStatus);
+    const id = window.setInterval(() => {
+      void fetchGoogleCalendarStatus(ORLANDO_USER_ID).then(setGoogleStatus);
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [canImportOrlandoAgenda]);
+
+  const connectGoogleCalendar = () => {
+    const url = getGoogleAuthUrl(ORLANDO_USER_ID);
+    if (!url) {
+      setGoogleMessage('API no disponible. Revisa VITE_API_URL.');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer,width=520,height=720');
+  };
+
+  const syncGoogleNow = async () => {
+    setGoogleSyncing(true);
+    setGoogleMessage(null);
+    const result = await triggerGoogleCalendarSync(ORLANDO_USER_ID);
+    const status = await fetchGoogleCalendarStatus(ORLANDO_USER_ID);
+    setGoogleStatus(status);
+    setGoogleSyncing(false);
+    setGoogleMessage(
+      result.ok
+        ? `Google Calendar sincronizado${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''}`
+        : result.error || 'No se pudo sincronizar',
+    );
+  };
 
   const initialNow = new Date();
   const [year, setYear] = useState(initialNow.getFullYear());
@@ -484,6 +526,55 @@ export function CalendarView() {
               </button>
             </div>
           </form>
+
+          <div className="calendar-ics">
+            <h3>Google Calendar de Orlando</h3>
+            {canImportOrlandoAgenda ? (
+              <>
+                <p>
+                  Conecta el Gmail de Orlando para que su agenda se sincronice sola. El equipo verá
+                  su disponibilidad abajo.
+                </p>
+                {!isApiEnabled() ? (
+                  <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>
+                ) : !googleStatus?.configured ? (
+                  <p className="calendar-ics-status">
+                    Faltan `GOOGLE_CLIENT_ID` / `SECRET` en el servidor.
+                  </p>
+                ) : googleStatus.connected ? (
+                  <>
+                    <p className="calendar-ics-status">
+                      Conectado{googleStatus.email ? ` · ${googleStatus.email}` : ''}
+                      {googleStatus.lastSyncAt
+                        ? ` · Última sync ${new Date(googleStatus.lastSyncAt).toLocaleString('es-MX')}`
+                        : ''}
+                    </p>
+                    {googleStatus.lastError && (
+                      <p className="calendar-ics-status">{googleStatus.lastError}</p>
+                    )}
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={googleSyncing}
+                      onClick={() => void syncGoogleNow()}
+                    >
+                      {googleSyncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+                    </button>
+                  </>
+                ) : (
+                  <button type="button" className="btn-primary" onClick={connectGoogleCalendar}>
+                    Conectar Google Calendar
+                  </button>
+                )}
+                {googleMessage && <p className="calendar-ics-status">{googleMessage}</p>}
+              </>
+            ) : (
+              <p>
+                La agenda de Google la conecta Orlando o un líder. Tú puedes ver abajo si Orlando
+                está disponible el día seleccionado.
+              </p>
+            )}
+          </div>
 
           <div className="calendar-ics">
             <h3>Importar agenda de Orlando (Outlook)</h3>

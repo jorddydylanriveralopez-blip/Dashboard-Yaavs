@@ -273,11 +273,20 @@ export interface CalendarEvent {
   shared?: boolean;
   /** Nombre del dueño para la vista de equipo. */
   ownerName?: string;
-  /** Origen del evento (Outlook / ICS / local). */
-  source?: 'local' | 'outlook' | 'ics';
-  /** ID externo para reimportar sin duplicar (UUID Outlook, UID ICS…). */
+  /** Origen del evento (Google / Outlook / ICS / local). */
+  source?: 'local' | 'outlook' | 'ics' | 'google';
+  /** ID externo para reimportar sin duplicar (UUID Outlook, UID ICS, Google…). */
   externalId?: string;
 }
+
+/** Franja de ocupación visible al equipo (sin título ni detalles). */
+export interface BusySlot {
+  userId: string;
+  start: string;
+  end: string;
+}
+
+export type BusySlotStore = Record<string, BusySlot[]>;
 
 export interface ActiveTimer {
   eventId: string;
@@ -661,5 +670,7 @@ export interface AppSyncState {
   officeOvertime?: OfficeOvertimeStore;
   /** Asistencias del área (sincronizadas celular ↔ web). */
   attendanceStore?: AttendanceStore;
+  /** Disponibilidad pública (solo ocupado + horario). */
+  busySlots?: BusySlotStore;
   updatedAt: string;
 }
