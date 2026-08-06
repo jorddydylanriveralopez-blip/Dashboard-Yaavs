@@ -926,11 +926,12 @@ export function CalendarView() {
             {canConnectGoogle ? (
               <>
                 <p>
-                  Vincula tu Gmail ({user?.name ?? 'tú'}) solo para eventos que estén en Google.
+                  Vincula tu Gmail ({user?.name ?? 'tú'}) para traer y también crear eventos en Google.
                   {isOrlandoViewer
                     ? ' Lo de Hotmail/Outlook no sale aquí: usa la sección Outlook abajo.'
                     : ' Tu agenda personal es privada; sí verás si Orlando está ocupado.'}{' '}
-                  Se sincroniza sola.
+                  Si ya lo tenías conectado, vuelve a pulsar conectar una vez para dar permiso de
+                  escritura. Se sincroniza sola.
                 </p>
                 {!isApiEnabled() ? (
                   <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>

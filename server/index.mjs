@@ -40,6 +40,7 @@ import {
   saveGoogleOAuthConfig,
   syncAllGoogleCalendars,
   syncGoogleCalendar,
+  createGoogleCalendarEvent,
 } from './googleCalendarSync.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -329,6 +330,28 @@ app.post('/api/google/sync', async (req, res) => {
     res.json({ ok: true, ...result });
   } catch (error) {
     recordGoogleSyncError(userId, error);
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
+app.post('/api/google/events', async (req, res) => {
+  await ensureGoogleCredsLoaded();
+  const userId = String(req.body?.userId || req.query.userId || GOOGLE_CAL_USER_ID);
+  try {
+    const result = await createGoogleCalendarEvent(userId, {
+      title: req.body?.title,
+      date: req.body?.date,
+      time: req.body?.time,
+      estimatedMinutes: req.body?.estimatedMinutes,
+      notes: req.body?.notes,
+      memberNames: req.body?.memberNames,
+      attendeeEmails: req.body?.attendeeEmails,
+    });
+    res.json({ ok: true, ...result });
+  } catch (error) {
     res.status(500).json({
       ok: false,
       error: error instanceof Error ? error.message : String(error),

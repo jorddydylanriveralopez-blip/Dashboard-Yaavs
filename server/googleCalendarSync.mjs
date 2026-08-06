@@ -12,9 +12,12 @@ const TOKENS_DB_KEY = 'yaavs-google-tokens';
 
 export const GOOGLE_CAL_USER_ID = 'u-orlando';
 const SCOPES = [
+  'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
+/** Zona horaria de visualización / escritura de eventos. */
+const DISPLAY_TZ = 'America/Mexico_City';
 /** ~2 años hacia atrás para no perder conciertos / eventos viejos. */
 const SYNC_LOOKBACK_DAYS = 730;
 /** ~1 año hacia adelante (antes 4 meses; se cortaban muchos días). */
@@ -305,6 +308,95 @@ async function googleGet(accessToken, url) {
   return data;
 }
 
+async function googlePost(accessToken, url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error?.message || `Google API falló (${res.status})`);
+  }
+  return data;
+}
+
+/**
+ * Crea un evento en el Google Calendar primario del usuario.
+ * Requiere que haya reconectado Gmail con permiso de escritura.
+ */
+export async function createGoogleCalendarEvent(userId, input = {}) {
+  const accessToken = await getValidAccessToken(userId);
+  const title = String(input.title || '').trim() || '(Sin título)';
+  const date = String(input.date || '').slice(0, 10);
+  const time = String(input.time || '09:00').slice(0, 5);
+  const estimatedMinutes = Math.max(15, Number(input.estimatedMinutes) || 60);
+  const notes = String(input.notes || '').trim();
+  const memberNames = Array.isArray(input.memberNames)
+    ? input.memberNames.map(String).filter(Boolean)
+    : [];
+  const attendeeEmails = Array.isArray(input.attendeeEmails)
+    ? [...new Set(input.attendeeEmails.map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))]
+    : [];
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error('Fecha inválida para Google Calendar');
+  }
+
+  const [hh, mm] = time.split(':').map(Number);
+  const startMins = (hh || 0) * 60 + (mm || 0);
+  const endMins = startMins + estimatedMinutes;
+  const endHh = String(Math.floor(endMins / 60) % 24).padStart(2, '0');
+  const endMm = String(endMins % 60).padStart(2, '0');
+  const endDate =
+    endMins >= 24 * 60
+      ? (() => {
+          const d = new Date(`${date}T12:00:00Z`);
+          d.setUTCDate(d.getUTCDate() + 1);
+          return d.toISOString().slice(0, 10);
+        })()
+      : date;
+
+  const description = [
+    notes,
+    memberNames.length ? `Integrantes: ${memberNames.join(', ')}` : '',
+    'Creado desde Yaavs Dashboard',
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const body = {
+    summary: title,
+    description,
+    start: {
+      dateTime: `${date}T${time}:00`,
+      timeZone: DISPLAY_TZ,
+    },
+    end: {
+      dateTime: `${endDate}T${endHh}:${endMm}:00`,
+      timeZone: DISPLAY_TZ,
+    },
+  };
+  if (attendeeEmails.length) {
+    body.attendees = attendeeEmails.map((email) => ({ email }));
+  }
+
+  const created = await googlePost(
+    accessToken,
+    'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all',
+    body,
+  );
+
+  return {
+    googleEventId: created.id,
+    htmlLink: created.htmlLink || null,
+    externalId: `primary:${created.id}`,
+  };
+}
+
 async function getValidAccessToken(userId) {
   const all = await loadGoogleTokens();
   const entry = all[userId];
@@ -382,8 +474,6 @@ export async function handleGoogleOAuthCallback(code, stateRaw, redirectOverride
   await persistGoogleTokens(all);
   return { userId, email };
 }
-
-const DISPLAY_TZ = 'America/Mexico_City';
 
 /** Fecha/hora locales en zona de la empresa (Hostinger suele ser UTC). */
 function localPartsFromDate(d) {

@@ -252,6 +252,42 @@ export async function triggerGoogleCalendarSync(
   }
 }
 
+export async function createGoogleCalendarEventRemote(input: {
+  userId: string;
+  title: string;
+  date: string;
+  time: string;
+  estimatedMinutes?: number;
+  notes?: string;
+  memberNames?: string[];
+  attendeeEmails?: string[];
+}): Promise<{ ok: boolean; error?: string; externalId?: string; htmlLink?: string | null }> {
+  if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/google/events`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      },
+      STATE_TIMEOUT_MS,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      externalId?: string;
+      htmlLink?: string | null;
+    };
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || 'No se pudo crear el evento en Gmail' };
+    }
+    return { ok: true, externalId: data.externalId, htmlLink: data.htmlLink };
+  } catch {
+    return { ok: false, error: 'No se pudo crear el evento en Gmail' };
+  }
+}
+
 export async function saveGoogleOAuthConfig(input: {
   clientId: string;
   clientSecret: string;

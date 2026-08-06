@@ -30,6 +30,7 @@ import {
 } from '../utils/teamRoster';
 import {
   checkApiHealth,
+  createGoogleCalendarEventRemote,
   fetchGoogleCalendarStatus,
   fetchSyncState,
   isApiEnabled,
@@ -37,7 +38,11 @@ import {
   triggerGoogleCalendarSync,
 } from '../api/client';
 import { saveAssignmentAttachments } from '../utils/attachmentStore';
-import { syncCalendarForReminders, notifyOrlandoAgendaAlert } from '../api/calendar';
+import {
+  syncCalendarForReminders,
+  notifyOrlandoAgendaAlert,
+  reminderEmailForUser,
+} from '../api/calendar';
 import { notifyPush, subscribeToPush } from '../api/pushClient';
 import {
   ASSIGNMENTS_STORAGE_KEY,
@@ -221,7 +226,9 @@ interface AppContextValue {
   setCompanyName: (name: string) => void;
   filter: string;
   setFilter: (f: string) => void;
-  addCalendarEvent: (input: Omit<CalendarEvent, 'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt'>) => void;
+  addCalendarEvent: (
+    input: Omit<CalendarEvent, 'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt'>,
+  ) => string | null;
   /** Importa/reemplaza eventos externos (Outlook/ICS) en la agenda de un usuario (p. ej. Orlando). */
   importExternalCalendarEvents: (
     targetUserId: string,
@@ -3833,8 +3840,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addCalendarEvent = useCallback(
-    (input: Omit<CalendarEvent, 'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt'>) => {
-      if (!userKey || !user) return;
+    (
+      input: Omit<CalendarEvent, 'id' | 'userId' | 'trackedMinutes' | 'done' | 'remindedAt'>,
+    ): string | null => {
+      if (!userKey || !user) return null;
       const kind = input.kind ?? 'event';
       // Agenda personal: nunca compartir con otros colaboradores.
       const shared = input.shared ?? false;
@@ -3854,9 +3863,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
           `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`),
         ),
       });
-      // Sin avisos al equipo: la agenda es privada.
+
+      // Empujar a Gmail si el usuario tiene Google Calendar conectado.
+      if (kind !== 'busy' && isApiEnabled()) {
+        const attendeeEmails = (input.memberIds ?? [])
+          .map((id) => {
+            const member = activeUsers.find((u) => u.id === id);
+            return reminderEmailForUser(id, member?.email) ?? undefined;
+          })
+          .filter((e): e is string => Boolean(e));
+        void (async () => {
+          const status = await fetchGoogleCalendarStatus(userKey);
+          if (!status?.connected) return;
+          const remote = await createGoogleCalendarEventRemote({
+            userId: userKey,
+            title: ev.title,
+            date: ev.date,
+            time: ev.time,
+            estimatedMinutes: ev.estimatedMinutes,
+            notes: ev.notes,
+            memberNames: ev.memberNames,
+            attendeeEmails,
+          });
+          if (!remote.ok || !remote.externalId) return;
+          setCalendarStore((prev) => {
+            const current = prev[userKey] ?? emptyCalendar();
+            const nextEvents = current.events.map((e) =>
+              e.id === ev.id
+                ? {
+                    ...e,
+                    source: 'google' as const,
+                    externalId: remote.externalId,
+                  }
+                : e,
+            );
+            const next = { ...prev, [userKey]: { ...current, events: nextEvents } };
+            localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(next));
+            return next;
+          });
+          schedulePushRef.current({ immediate: true });
+        })();
+      }
+
+      return ev.id;
     },
-    [userKey, user, calendar, persistCalendar, canEditAll],
+    [userKey, user, calendar, persistCalendar, activeUsers],
   );
 
   const importExternalCalendarEvents = useCallback(
