@@ -537,9 +537,16 @@ export function CalendarView() {
                 </p>
                 {!isApiEnabled() ? (
                   <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>
-                ) : !googleStatus?.configured ? (
+                ) : !googleStatus ? (
                   <p className="calendar-ics-status">
-                    Faltan `GOOGLE_CLIENT_ID` / `SECRET` en el servidor.
+                    No se pudo leer el estado de Google. Espera el redeploy o revisa que exista{' '}
+                    <code>/api/google/status</code>.
+                  </p>
+                ) : !googleStatus.configured ? (
+                  <p className="calendar-ics-status">
+                    Faltan variables en Hostinger:{' '}
+                    <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code> y{' '}
+                    <code>GOOGLE_REDIRECT_URI</code>. Agrégalas en el panel y reinicia el sitio.
                   </p>
                 ) : googleStatus.connected ? (
                   <>
