@@ -833,20 +833,22 @@ export function CalendarView() {
                         ? ` · Última sync ${new Date(googleStatus.lastSyncAt).toLocaleString('es-MX')}`
                         : ''}
                     </p>
+                    <p className="calendar-ics-status">
+                      {googleSyncing
+                        ? 'Sincronizando con Gmail…'
+                        : 'Sincronización automática activa — no necesitas hacer clic.'}
+                    </p>
                     {googleStatus.lastError && (
                       <p className="calendar-ics-status">{googleStatus.lastError}</p>
                     )}
                     <button
                       type="button"
-                      className="btn-primary"
+                      className="btn-ghost"
                       disabled={googleSyncing}
                       onClick={() => void syncGoogleNow()}
                     >
-                      {googleSyncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+                      {googleSyncing ? 'Actualizando…' : 'Actualizar ahora'}
                     </button>
-                    <p className="calendar-ics-status">
-                      Se actualiza sola; el botón es opcional si quieres forzar una sync.
-                    </p>
                   </>
                 ) : (
                   <button
