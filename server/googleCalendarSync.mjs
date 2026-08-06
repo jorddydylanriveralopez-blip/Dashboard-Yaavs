@@ -14,9 +14,9 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
 ].join(' ');
-/** Días extra antes del lunes (por si hay eventos que cruzan medianoche). */
-const SYNC_PREWEEK_BUFFER_DAYS = 1;
-/** ~4 meses hacia adelante para que Orlando vea semanas y meses siguientes. */
+/** ~2 años hacia atrás para no perder conciertos / eventos viejos. */
+const SYNC_LOOKBACK_DAYS = 730;
+/** ~4 meses hacia adelante. */
 const SYNC_LOOKAHEAD_DAYS = 120;
 
 let credsLoadPromise = null;
@@ -480,11 +480,10 @@ function addDaysYmd(ymd, days) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Ventana: lunes de esta semana (MX) → +lookahead (cubre toda la semana y más). */
+/** Ventana: ~2 años atrás → ~4 meses adelante (México). */
 function windowRange() {
-  const { ymd, mondayOffset } = mexicoYmdWeekday();
-  const monday = addDaysYmd(ymd, -mondayOffset);
-  const startYmd = addDaysYmd(monday, -SYNC_PREWEEK_BUFFER_DAYS);
+  const { ymd } = mexicoYmdWeekday();
+  const startYmd = addDaysYmd(ymd, -SYNC_LOOKBACK_DAYS);
   const endYmd = addDaysYmd(ymd, SYNC_LOOKAHEAD_DAYS);
   return {
     start: new Date(`${startYmd}T00:00:00-06:00`),
@@ -523,7 +522,7 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
     );
     items.push(...(payload.items || []));
     pageToken = payload.nextPageToken || '';
-  } while (pageToken && items.length < 2000);
+  } while (pageToken && items.length < 5000);
 
   const mapped = items.map((ev) => mapGoogleEvent(ev, userId, ownerName)).filter(Boolean);
 

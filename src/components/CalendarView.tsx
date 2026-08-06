@@ -265,7 +265,7 @@ export function CalendarView() {
     setGoogleSyncing(false);
     setGoogleMessage(
       result.ok
-        ? `Agenda sincronizada${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''} (esta semana + ~4 meses)`
+        ? `Agenda sincronizada${result.eventCount != null ? ` · ${result.eventCount} eventos` : ''} (~2 años atrás + ~4 meses)`
         : result.error || 'No se pudo sincronizar',
     );
   };
@@ -414,6 +414,37 @@ export function CalendarView() {
     return teamAgendaEvents.filter((ev) => ev.date > weekRange.endKey);
   }, [teamAgendaEvents, weekRange.endKey]);
 
+  const teamPastPendings = useMemo(() => {
+    return teamAgendaEvents
+      .filter((ev) => ev.date < weekRange.startKey)
+      .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`));
+  }, [teamAgendaEvents, weekRange.startKey]);
+
+  const teamPastByMonth = useMemo(() => {
+    const groups: { monthKey: string; label: string; events: CalendarEvent[] }[] = [];
+    const byMonth = new Map<string, CalendarEvent[]>();
+    for (const ev of teamPastPendings) {
+      const monthKey = ev.date.slice(0, 7);
+      const list = byMonth.get(monthKey) ?? [];
+      list.push(ev);
+      byMonth.set(monthKey, list);
+    }
+    for (const [monthKey, events] of [...byMonth.entries()].sort((a, b) =>
+      b[0].localeCompare(a[0]),
+    )) {
+      const [y, m] = monthKey.split('-').map(Number);
+      groups.push({
+        monthKey,
+        label: new Date(y, m - 1, 1).toLocaleDateString('es-MX', {
+          month: 'long',
+          year: 'numeric',
+        }),
+        events,
+      });
+    }
+    return groups;
+  }, [teamPastPendings]);
+
   const teamUpcomingByMonth = useMemo(() => {
     const groups: { monthKey: string; label: string; events: CalendarEvent[] }[] = [];
     const byMonth = new Map<string, CalendarEvent[]>();
@@ -437,7 +468,8 @@ export function CalendarView() {
     return groups;
   }, [teamUpcomingPendings]);
 
-  const teamAgendaCount = teamWeekPendings.length + teamUpcomingPendings.length;
+  const teamAgendaCount =
+    teamWeekPendings.length + teamUpcomingPendings.length + teamPastPendings.length;
 
   const isInCurrentWeek = (dateKey: string) =>
     dateKey >= weekRange.startKey && dateKey <= weekRange.endKey;
@@ -802,8 +834,8 @@ export function CalendarView() {
             {canConnectGoogle ? (
               <>
                 <p>
-                  Vincula tu Gmail ({user?.name ?? 'tú'}) para sincronizar esta semana y ~4 meses.
-                  El equipo verá tus pendientes marcados en el calendario.
+                  Vincula tu Gmail ({user?.name ?? 'tú'}) para traer eventos de ~2 años atrás y
+                  ~4 meses adelante. El equipo verá tus pendientes marcados en el calendario.
                 </p>
                 {!isApiEnabled() ? (
                   <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>
@@ -948,7 +980,7 @@ export function CalendarView() {
           <div className="calendar-orlando-week" aria-label="Pendientes del equipo">
             <h3>Pendientes del equipo ({teamAgendaCount})</h3>
             <p className="calendar-orlando-week-hint">
-              Todos los colaboradores (Orlando, Jorddy, etc.). Esta semana y ~4 meses adelante.
+              Todos los colaboradores. Incluye fechas pasadas (~2 años) y próximas (~4 meses).
             </p>
 
             <h4 className="calendar-orlando-week-sub">
@@ -1011,6 +1043,46 @@ export function CalendarView() {
                               weekday: 'short',
                               day: 'numeric',
                               month: 'short',
+                            })}{' '}
+                            · {ev.time}
+                          </span>
+                          <span className="calendar-orlando-week-title">{ev.title}</span>
+                          <span className="calendar-orlando-week-owner">
+                            {ev.ownerName ?? 'Colaborador'}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))
+            )}
+
+            <h4 className="calendar-orlando-week-sub">
+              Anteriores ({teamPastPendings.length})
+            </h4>
+            {teamPastPendings.length === 0 ? (
+              <p className="calendar-empty">
+                Aún no hay eventos pasados sincronizados. Pulsa «Sincronizar ahora».
+              </p>
+            ) : (
+              teamPastByMonth.map((group) => (
+                <div key={`past-${group.monthKey}`} className="calendar-orlando-month-group">
+                  <p className="calendar-orlando-month-label">{group.label}</p>
+                  <ul className="calendar-orlando-week-list">
+                    {group.events.map((ev) => (
+                      <li key={`past-${ev.userId}-${ev.id}`}>
+                        <button
+                          type="button"
+                          className={`calendar-orlando-week-item ${ev.date === selectedDate ? 'is-selected' : ''}`}
+                          onClick={() => openTeamPending(ev)}
+                        >
+                          <span className="calendar-orlando-week-when">
+                            {new Date(`${ev.date}T12:00:00`).toLocaleDateString('es-MX', {
+                              weekday: 'short',
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
                             })}{' '}
                             · {ev.time}
                           </span>
