@@ -431,7 +431,7 @@ export function CalendarView() {
   const [reminderMinutes, setReminderMinutes] = useState(30);
   const [notes, setNotes] = useState('');
   const [memberIds, setMemberIds] = useState<string[]>([]);
-  const dayExpandRef = useRef<HTMLDivElement>(null);
+  const [dayModalOpen, setDayModalOpen] = useState(false);
 
   useEventReminders(calendar.events, user, markEventReminded, markEventEmailReminded);
 
@@ -555,10 +555,25 @@ export function CalendarView() {
 
   const selectDay = (dateKey: string) => {
     setSelectedDate(dateKey);
-    window.requestAnimationFrame(() => {
-      dayExpandRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    });
+    setDayModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!dayModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDayModalOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [dayModalOpen]);
+
+  const modalDayLabel = new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-MX', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
 
   const handleCalendarFileImport = async (file: File | null) => {
     if (!file) return;
@@ -724,58 +739,6 @@ export function CalendarView() {
                 </button>
               );
             })}
-          </div>
-
-          <div
-            ref={dayExpandRef}
-            className="calendar-day-expand"
-            aria-label="Pendientes del día seleccionado"
-          >
-            <h3>
-              {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-MX', {
-                weekday: 'long',
-                day: 'numeric',
-                month: 'long',
-              })}
-              <span className="calendar-day-expand-count">
-                {dayEvents.length} pendiente{dayEvents.length === 1 ? '' : 's'}
-              </span>
-            </h3>
-            {dayEvents.length === 0 ? (
-              <p className="calendar-empty">Sin pendientes este día. Agrégalos a la derecha.</p>
-            ) : (
-              <ul className="calendar-day-expand-list">
-                {dayEvents.map((ev) => (
-                  <li key={ev.id}>
-                    <strong>
-                      {ev.time}
-                      {ev.estimatedMinutes > 0
-                        ? `–${endTimeFromStart(ev.time, ev.estimatedMinutes)}`
-                        : ''}
-                    </strong>
-                    <span>
-                      {ev.title}
-                      {ev.memberNames && ev.memberNames.length > 0
-                        ? ` · ${ev.memberNames.join(', ')}`
-                        : ''}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {!isOrlandoViewer && orlandoDayEvents.length > 0 && (
-              <div className="calendar-day-expand-orlando">
-                <p>Orlando ocupado</p>
-                <ul className="calendar-day-expand-list">
-                  {orlandoDayEvents.map((ev) => (
-                    <li key={`o-${ev.id}`}>
-                      <strong>{ev.time}</strong>
-                      <span>{ev.title}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
           </div>
 
           <div className="calendar-summary">
@@ -1191,6 +1154,113 @@ export function CalendarView() {
           </div>
         </section>
       </div>
+
+      {dayModalOpen && (
+        <div
+          className="calendar-day-modal-backdrop"
+          role="presentation"
+          onClick={() => setDayModalOpen(false)}
+        >
+          <div
+            className="calendar-day-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="calendar-day-modal-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="calendar-day-modal-head">
+              <div>
+                <p className="calendar-day-modal-eyebrow">Agenda del día</p>
+                <h3 id="calendar-day-modal-title">{modalDayLabel}</h3>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                onClick={() => setDayModalOpen(false)}
+              >
+                Cerrar
+              </button>
+            </header>
+
+            <p className="calendar-day-modal-summary">
+              {dayEvents.length} pendiente{dayEvents.length === 1 ? '' : 's'}
+              {!isOrlandoViewer && orlandoDayEvents.length > 0
+                ? ` · Orlando: ${orlandoDayEvents.length} evento${orlandoDayEvents.length === 1 ? '' : 's'}`
+                : ''}
+            </p>
+
+            {dayEvents.length === 0 ? (
+              <p className="calendar-empty">No hay pendientes este día.</p>
+            ) : (
+              <ul className="calendar-day-modal-list">
+                {dayEvents.map((ev) => {
+                  const end =
+                    ev.estimatedMinutes > 0
+                      ? endTimeFromStart(ev.time, ev.estimatedMinutes)
+                      : null;
+                  return (
+                    <li key={ev.id} className={ev.kind === 'busy' ? 'is-busy' : ''}>
+                      <div className="calendar-day-modal-when">
+                        <strong>
+                          {ev.time}
+                          {end ? ` – ${end}` : ''}
+                        </strong>
+                        {ev.kind === 'busy' && (
+                          <span className="event-busy-badge">Ocupado</span>
+                        )}
+                      </div>
+                      <p className="calendar-day-modal-title">{ev.title}</p>
+                      {ev.memberNames && ev.memberNames.length > 0 && (
+                        <p className="calendar-day-modal-members">
+                          Integrantes: {ev.memberNames.join(', ')}
+                        </p>
+                      )}
+                      {ev.notes?.trim() && (
+                        <p className="calendar-day-modal-notes">{ev.notes.trim()}</p>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            {!isOrlandoViewer && orlandoDayEvents.length > 0 && (
+              <div className="calendar-day-modal-orlando">
+                <h4>Orlando ocupado</h4>
+                <ul className="calendar-day-modal-list">
+                  {orlandoDayEvents.map((ev) => {
+                    const end =
+                      ev.estimatedMinutes > 0
+                        ? endTimeFromStart(ev.time, ev.estimatedMinutes)
+                        : null;
+                    return (
+                      <li key={`o-${ev.id}`} className="is-busy">
+                        <div className="calendar-day-modal-when">
+                          <strong>
+                            {ev.time}
+                            {end ? ` – ${end}` : ''}
+                          </strong>
+                        </div>
+                        <p className="calendar-day-modal-title">{ev.title}</p>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+
+            <div className="calendar-day-modal-actions">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => setDayModalOpen(false)}
+              >
+                Entendido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {googleConnectOpen && (
         <div
