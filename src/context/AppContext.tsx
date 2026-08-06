@@ -808,7 +808,21 @@ function calendarsFingerprint(store: CalendarStore | undefined): string {
 
 const EXTERNAL_CAL_SOURCES = new Set(['google', 'outlook']);
 
-/** Cada colaborador solo conserva su propia agenda en el cliente (privacidad). */
+/** Agenda propia + agenda de Orlando (ocupado visible al equipo). */
+function calendarsForViewer(
+  store: CalendarStore,
+  viewerId: string | null | undefined,
+): CalendarStore {
+  if (!viewerId) {
+    return store['u-orlando'] ? { 'u-orlando': store['u-orlando'] } : {};
+  }
+  const next: CalendarStore = {};
+  if (store[viewerId]) next[viewerId] = store[viewerId];
+  if (store['u-orlando']) next['u-orlando'] = store['u-orlando'];
+  return next;
+}
+
+/** Al guardar, cada cliente solo empuja su propia agenda (no pisa la de otros). */
 function onlyOwnCalendarStore(
   store: CalendarStore,
   viewerId: string | null | undefined,
@@ -1735,12 +1749,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           remote.calendars,
         );
         if (keptCal) needsRepushAfterRemote.current = true;
-        const privateNext = onlyOwnCalendarStore(next, userKeyRef.current);
+        const visibleNext = calendarsForViewer(next, userKeyRef.current);
         const viewer = userKeyRef.current;
-        const mergedPrivate =
-          viewer && prev[viewer] && !privateNext[viewer]
-            ? { ...privateNext, [viewer]: prev[viewer] }
-            : privateNext;
+        let mergedPrivate = visibleNext;
+        if (viewer && prev[viewer] && !mergedPrivate[viewer]) {
+          mergedPrivate = { ...mergedPrivate, [viewer]: prev[viewer] };
+        }
+        if (prev['u-orlando'] && !mergedPrivate['u-orlando']) {
+          mergedPrivate = { ...mergedPrivate, 'u-orlando': prev['u-orlando'] };
+        }
         if (calendarsFingerprint(prev) === calendarsFingerprint(mergedPrivate)) {
           return prev;
         }
@@ -1929,13 +1946,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCalendarStore((prev) => {
       const { next, preservedLocal: keptCal } = mergeCalendarStores(prev, remote.calendars);
       if (keptCal) preservedLocal = true;
-      const privateNext = onlyOwnCalendarStore(next, userKeyRef.current);
-      // Conservar también la agenda propia local si el remoto aún no la trae.
+      const visibleNext = calendarsForViewer(next, userKeyRef.current);
+      // Conservar agenda propia / Orlando local si el remoto aún no la trae.
       const viewer = userKeyRef.current;
-      const mergedPrivate =
-        viewer && prev[viewer] && !privateNext[viewer]
-          ? { ...privateNext, [viewer]: prev[viewer] }
-          : privateNext;
+      let mergedPrivate = visibleNext;
+      if (viewer && prev[viewer] && !mergedPrivate[viewer]) {
+        mergedPrivate = { ...mergedPrivate, [viewer]: prev[viewer] };
+      }
+      if (prev['u-orlando'] && !mergedPrivate['u-orlando']) {
+        mergedPrivate = { ...mergedPrivate, 'u-orlando': prev['u-orlando'] };
+      }
       if (calendarsFingerprint(prev) === calendarsFingerprint(mergedPrivate)) return prev;
       localStorage.setItem(CALENDAR_STORAGE_KEY, JSON.stringify(mergedPrivate));
       return mergedPrivate;

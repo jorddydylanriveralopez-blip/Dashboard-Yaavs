@@ -34,6 +34,7 @@ export function CalendarView() {
   const {
     user,
     calendar,
+    calendarStore,
     canEditAll,
     enablePushNotifications,
     addCalendarEvent,
@@ -359,73 +360,30 @@ export function CalendarView() {
     };
   }, [activeEvents.length, googleStatus?.lastSyncAt, googleMessage]);
 
-  /** Pendientes privados del usuario (esta semana / próximos / anteriores). */
-  const myWeekPendings = useMemo(
-    () =>
-      activeEvents.filter(
-        (ev) => ev.date >= weekRange.startKey && ev.date <= weekRange.endKey,
-      ),
-    [activeEvents, weekRange.startKey, weekRange.endKey],
-  );
+  const isOrlandoViewer =
+    user?.id === ORLANDO_USER_ID || user?.employeeId === 'emp-orlando';
 
-  const myUpcomingPendings = useMemo(
-    () => activeEvents.filter((ev) => ev.date > weekRange.endKey),
-    [activeEvents, weekRange.endKey],
-  );
+  /** Agenda ocupada de Orlando (visible para el equipo en el día seleccionado). */
+  const orlandoDayEvents = useMemo(() => {
+    const events = calendarStore[ORLANDO_USER_ID]?.events ?? [];
+    return events
+      .filter((ev) => !ev.done && ev.date === selectedDate)
+      .sort((a, b) => a.time.localeCompare(b.time));
+  }, [calendarStore, selectedDate]);
 
-  const myPastPendings = useMemo(
-    () =>
-      activeEvents
-        .filter((ev) => ev.date < weekRange.startKey)
-        .sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`)),
-    [activeEvents, weekRange.startKey],
-  );
+  const orlandoBusyToday = orlandoDayEvents.length > 0;
 
-  const groupByMonth = (events: CalendarEvent[]) => {
-    const groups: { monthKey: string; label: string; events: CalendarEvent[] }[] = [];
-    const byMonth = new Map<string, CalendarEvent[]>();
-    for (const ev of events) {
-      const monthKey = ev.date.slice(0, 7);
-      const list = byMonth.get(monthKey) ?? [];
-      list.push(ev);
-      byMonth.set(monthKey, list);
+  const orlandoByDate = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const ev of calendarStore[ORLANDO_USER_ID]?.events ?? []) {
+      if (ev.done) continue;
+      map.set(ev.date, (map.get(ev.date) ?? 0) + 1);
     }
-    for (const [monthKey, list] of byMonth) {
-      const [y, m] = monthKey.split('-').map(Number);
-      groups.push({
-        monthKey,
-        label: new Date(y, m - 1, 1).toLocaleDateString('es-MX', {
-          month: 'long',
-          year: 'numeric',
-        }),
-        events: list,
-      });
-    }
-    return groups;
-  };
-
-  const myUpcomingByMonth = useMemo(
-    () => groupByMonth(myUpcomingPendings),
-    [myUpcomingPendings],
-  );
-  const myPastByMonth = useMemo(
-    () =>
-      groupByMonth(myPastPendings).sort((a, b) => b.monthKey.localeCompare(a.monthKey)),
-    [myPastPendings],
-  );
-
-  const myAgendaCount =
-    myWeekPendings.length + myUpcomingPendings.length + myPastPendings.length;
+    return map;
+  }, [calendarStore]);
 
   const isInCurrentWeek = (dateKey: string) =>
     dateKey >= weekRange.startKey && dateKey <= weekRange.endKey;
-
-  const openMyPending = (ev: CalendarEvent) => {
-    setSelectedDate(ev.date);
-    const [y, m] = ev.date.split('-').map(Number);
-    setYear(y);
-    setMonth(m - 1);
-  };
 
   const activeEvent = calendar.activeTimer
     ? calendar.events.find((e) => e.id === calendar.activeTimer?.eventId)
@@ -607,18 +565,21 @@ export function CalendarView() {
               const ownDay = eventsByDate.get(key) ?? [];
               const ownCount = ownDay.length;
               const ownPreview = ownDay.slice(0, 2);
+              const orlandoCount = isOrlandoViewer ? 0 : orlandoByDate.get(key) ?? 0;
               const isSelected = key === selectedDate;
               const isToday = key === toDateKey(new Date());
               return (
                 <button
                   key={key}
                   type="button"
-                  className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${ownCount > 0 ? 'has-own' : ''} ${isInCurrentWeek(key) ? 'in-week' : ''}`}
+                  className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${ownCount > 0 ? 'has-own' : ''} ${orlandoCount > 0 ? 'has-orlando' : ''} ${isInCurrentWeek(key) ? 'in-week' : ''}`}
                   onClick={() => setSelectedDate(key)}
                   title={
                     ownCount > 0
                       ? ownDay.map((e) => `${e.time} ${e.title}`).join('\n')
-                      : undefined
+                      : orlandoCount > 0
+                        ? `Orlando: ${orlandoCount} evento(s)`
+                        : undefined
                   }
                 >
                   <span className="day-num">{cell.getDate()}</span>
@@ -635,9 +596,10 @@ export function CalendarView() {
                       )}
                     </span>
                   )}
-                  {ownCount > 0 && (
+                  {(ownCount > 0 || orlandoCount > 0) && (
                     <span className="day-dots-row" aria-hidden>
-                      <span className="day-dot day-dot--own" />
+                      {ownCount > 0 && <span className="day-dot day-dot--own" />}
+                      {orlandoCount > 0 && <span className="day-dot day-dot--orlando" />}
                     </span>
                   )}
                 </button>
@@ -651,7 +613,13 @@ export function CalendarView() {
               {formatDuration(monthTotalTracked)}
             </p>
             <p className="calendar-legend">
-              <span className="day-dot day-dot--own" /> Tus pendientes (privados)
+              <span className="day-dot day-dot--own" /> Tus pendientes
+              {!isOrlandoViewer && (
+                <>
+                  {' '}
+                  <span className="day-dot day-dot--orlando" /> Orlando ocupado
+                </>
+              )}
             </p>
             <button type="button" className="btn-ghost notify-btn" onClick={() => void requestNotify()}>
               Activar notificaciones
@@ -769,7 +737,10 @@ export function CalendarView() {
               <>
                 <p>
                   Vincula tu Gmail ({user?.name ?? 'tú'}) para traer eventos de ~2 años atrás y
-                  ~1 año adelante. Tu agenda es privada y se sincroniza sola cada pocos minutos.
+                  ~1 año adelante. Se sincroniza sola.
+                  {isOrlandoViewer
+                    ? ' El equipo puede ver tu ocupación por día.'
+                    : ' Tu agenda personal es privada; sí verás si Orlando está ocupado.'}
                 </p>
                 {!isApiEnabled() ? (
                   <p className="calendar-ics-status">Activa la API para conectar Google Calendar.</p>
@@ -870,8 +841,8 @@ export function CalendarView() {
             <div className="calendar-ics">
               <h3>Importar agenda de Orlando (Outlook)</h3>
               <p>
-                Sube el archivo <code>.olm</code> de Outlook para Mac (o un <code>.ics</code>) a
-                la agenda privada de Orlando. Solo él la ve.
+                Sube el archivo <code>.olm</code> de Outlook para Mac (o un <code>.ics</code>).
+                El equipo verá si Orlando está ocupado ese día.
               </p>
               <input
                 ref={icsInputRef}
@@ -884,112 +855,45 @@ export function CalendarView() {
             </div>
           )}
 
-          <div className="calendar-orlando-week" aria-label="Mis pendientes">
-            <h3>Mis pendientes ({myAgendaCount})</h3>
-            <p className="calendar-orlando-week-hint">
-              Solo tú ves esta agenda. Incluye fechas pasadas y próximas tras sincronizar Gmail.
-            </p>
-
-            <h4 className="calendar-orlando-week-sub">Esta semana ({myWeekPendings.length})</h4>
-            {myWeekPendings.length === 0 ? (
-              <p className="calendar-empty">Sin pendientes esta semana.</p>
-            ) : (
-              <ul className="calendar-orlando-week-list">
-                {myWeekPendings.map((ev) => {
-                  const isPastOrToday = ev.date <= weekRange.todayKey;
-                  return (
-                    <li key={ev.id}>
-                      <button
-                        type="button"
-                        className={`calendar-orlando-week-item ${isPastOrToday ? 'is-due' : ''} ${ev.date === selectedDate ? 'is-selected' : ''}`}
-                        onClick={() => openMyPending(ev)}
-                      >
-                        <span className="calendar-orlando-week-when">
-                          {new Date(`${ev.date}T12:00:00`).toLocaleDateString('es-MX', {
-                            weekday: 'short',
-                            day: 'numeric',
-                            month: 'short',
-                          })}{' '}
-                          · {ev.time}
-                        </span>
-                        <span className="calendar-orlando-week-title">{ev.title}</span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-
-            <h4 className="calendar-orlando-week-sub">
-              Próximas semanas y meses ({myUpcomingPendings.length})
-            </h4>
-            {myUpcomingPendings.length === 0 ? (
-              <p className="calendar-empty">No hay pendientes más adelante.</p>
-            ) : (
-              myUpcomingByMonth.map((group) => (
-                <div key={group.monthKey} className="calendar-orlando-month-group">
-                  <p className="calendar-orlando-month-label">{group.label}</p>
-                  <ul className="calendar-orlando-week-list">
-                    {group.events.map((ev) => (
+          {!isOrlandoViewer && (
+            <div
+              className={`calendar-orlando ${orlandoBusyToday ? 'busy' : 'free'}`}
+              aria-label="Disponibilidad de Orlando"
+            >
+              <h3>Orlando · {orlandoBusyToday ? 'Ocupado' : 'Disponible'}</h3>
+              {orlandoDayEvents.length === 0 ? (
+                <p className="calendar-orlando-status calendar-orlando-status--free">
+                  Sin eventos este día — Orlando parece disponible.
+                </p>
+              ) : (
+                <>
+                  <p className="calendar-orlando-status calendar-orlando-status--busy">
+                    Orlando Villagómez · {orlandoDayEvents.length} evento
+                    {orlandoDayEvents.length === 1 ? '' : 's'}
+                  </p>
+                  <ul className="calendar-orlando-list">
+                    {orlandoDayEvents.map((ev) => (
                       <li key={ev.id}>
-                        <button
-                          type="button"
-                          className={`calendar-orlando-week-item ${ev.date === selectedDate ? 'is-selected' : ''}`}
-                          onClick={() => openMyPending(ev)}
-                        >
-                          <span className="calendar-orlando-week-when">
-                            {new Date(`${ev.date}T12:00:00`).toLocaleDateString('es-MX', {
-                              weekday: 'short',
-                              day: 'numeric',
-                              month: 'short',
-                            })}{' '}
-                            · {ev.time}
-                          </span>
-                          <span className="calendar-orlando-week-title">{ev.title}</span>
-                        </button>
+                        <strong>{ev.time}</strong>
+                        <span>
+                          {ev.title}
+                          {ev.estimatedMinutes > 0
+                            ? ` · ${formatDuration(ev.estimatedMinutes)}`
+                            : ''}
+                        </span>
                       </li>
                     ))}
                   </ul>
-                </div>
-              ))
-            )}
-
-            <h4 className="calendar-orlando-week-sub">Anteriores ({myPastPendings.length})</h4>
-            {myPastPendings.length === 0 ? (
-              <p className="calendar-empty">Sin eventos anteriores sincronizados.</p>
-            ) : (
-              myPastByMonth.map((group) => (
-                <div key={`past-${group.monthKey}`} className="calendar-orlando-month-group">
-                  <p className="calendar-orlando-month-label">{group.label}</p>
-                  <ul className="calendar-orlando-week-list">
-                    {group.events.map((ev) => (
-                      <li key={`past-${ev.id}`}>
-                        <button
-                          type="button"
-                          className={`calendar-orlando-week-item ${ev.date === selectedDate ? 'is-selected' : ''}`}
-                          onClick={() => openMyPending(ev)}
-                        >
-                          <span className="calendar-orlando-week-when">
-                            {new Date(`${ev.date}T12:00:00`).toLocaleDateString('es-MX', {
-                              weekday: 'short',
-                              day: 'numeric',
-                              month: 'short',
-                              year: 'numeric',
-                            })}{' '}
-                            · {ev.time}
-                          </span>
-                          <span className="calendar-orlando-week-title">{ev.title}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))
-            )}
-          </div>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="calendar-events">
             <h3>Pendientes del día ({dayEvents.length})</h3>
+            <p className="calendar-orlando-week-hint">
+              Solo el día seleccionado. Marca como hecho cuando lo termines.
+            </p>
             {dayEvents.length === 0 ? (
               <p className="calendar-empty">No hay pendientes para este día.</p>
             ) : (

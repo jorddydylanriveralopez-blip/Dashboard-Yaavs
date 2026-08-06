@@ -23,14 +23,19 @@ export default async function handler(req, res) {
       ).trim();
       const calendars = state.calendars || {};
       const busySlots = state.busySlots || {};
-      // Agendas privadas: cada colaborador solo recibe la suya.
-      const filtered = viewerId
-        ? {
-            ...state,
-            calendars: calendars[viewerId] ? { [viewerId]: calendars[viewerId] } : {},
-            busySlots: busySlots[viewerId] ? { [viewerId]: busySlots[viewerId] } : {},
-          }
-        : { ...state, calendars: {}, busySlots: {} };
+      // Agenda propia + Orlando (ocupado visible al equipo).
+      const pick = (store, id) => (id && store[id] ? { [id]: store[id] } : {});
+      const filtered = {
+        ...state,
+        calendars: {
+          ...pick(calendars, viewerId),
+          ...(calendars['u-orlando'] ? { 'u-orlando': calendars['u-orlando'] } : {}),
+        },
+        busySlots: {
+          ...pick(busySlots, viewerId),
+          ...(busySlots['u-orlando'] ? { 'u-orlando': busySlots['u-orlando'] } : {}),
+        },
+      };
       res.setHeader('Cache-Control', 'no-store');
       res.status(200).json(filtered);
     } catch (error) {

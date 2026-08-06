@@ -93,22 +93,19 @@ app.get('/api/evidence/:filename', (req, res) => {
 app.get('/api/state', async (req, res) => {
   try {
     const state = await loadAppState();
-    // Agendas privadas: cada colaborador solo recibe la suya (no la de Orlando u otros).
+    // Agenda propia + Orlando (ocupado visible al equipo). El resto sigue privado.
     const viewerId = String(req.query.userId || '').trim();
     const calendars = state.calendars || {};
     const busySlots = state.busySlots || {};
-    if (viewerId) {
-      res.json({
-        ...state,
-        calendars: calendars[viewerId] ? { [viewerId]: calendars[viewerId] } : {},
-        busySlots: busySlots[viewerId] ? { [viewerId]: busySlots[viewerId] } : {},
-      });
-      return;
-    }
+    const pick = (store, id) => (id && store[id] ? { [id]: store[id] } : {});
+    const withOrlando = (store) => ({
+      ...pick(store, viewerId),
+      ...(store['u-orlando'] ? { 'u-orlando': store['u-orlando'] } : {}),
+    });
     res.json({
       ...state,
-      calendars: {},
-      busySlots: {},
+      calendars: withOrlando(calendars),
+      busySlots: withOrlando(busySlots),
     });
   } catch (error) {
     res.status(500).json({
