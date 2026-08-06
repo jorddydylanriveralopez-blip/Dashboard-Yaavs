@@ -277,6 +277,10 @@ export interface CalendarEvent {
   source?: 'local' | 'outlook' | 'ics' | 'google';
   /** ID externo para reimportar sin duplicar (UUID Outlook, UID ICS, Google…). */
   externalId?: string;
+  /** Integrantes del pendiente (user ids). */
+  memberIds?: string[];
+  /** Nombres de integrantes (para mostrar sin resolver roster). */
+  memberNames?: string[];
 }
 
 /** Franja de ocupación visible al equipo (sin título ni detalles). */

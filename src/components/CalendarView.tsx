@@ -30,6 +30,7 @@ import { SpellCheckInput, SpellCheckTextarea } from './SpellCheckField';
 import { useSharedNow } from '../hooks/useSharedNow';
 import type { CalendarEvent } from '../types';
 import './CalendarView.css';
+import './CollaboratorMultiSelect.css';
 
 const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const ORLANDO_USER_ID = 'u-orlando';
@@ -59,6 +60,7 @@ export function CalendarView() {
     calendar,
     calendarStore,
     canEditAll,
+    activeUsers,
     enablePushNotifications,
     addCalendarEvent,
     importExternalCalendarEvents,
@@ -428,6 +430,7 @@ export function CalendarView() {
   const [endTime, setEndTime] = useState('10:00');
   const [reminderMinutes, setReminderMinutes] = useState(30);
   const [notes, setNotes] = useState('');
+  const [memberIds, setMemberIds] = useState<string[]>([]);
   const dayExpandRef = useRef<HTMLDivElement>(null);
 
   useEventReminders(calendar.events, user, markEventReminded, markEventEmailReminded);
@@ -518,6 +521,7 @@ export function CalendarView() {
   const handleAdd = (e: FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
+    const selectedMembers = activeUsers.filter((u) => memberIds.includes(u.id));
     addCalendarEvent({
       title: title.trim(),
       date: selectedDate,
@@ -527,9 +531,12 @@ export function CalendarView() {
       notes: notes.trim(),
       kind: 'event',
       shared: false,
+      memberIds: selectedMembers.map((u) => u.id),
+      memberNames: selectedMembers.map((u) => u.name),
     });
     setTitle('');
     setNotes('');
+    setMemberIds([]);
   };
 
   const handleMarkBusy = () => {
@@ -746,7 +753,12 @@ export function CalendarView() {
                         ? `–${endTimeFromStart(ev.time, ev.estimatedMinutes)}`
                         : ''}
                     </strong>
-                    <span>{ev.title}</span>
+                    <span>
+                      {ev.title}
+                      {ev.memberNames && ev.memberNames.length > 0
+                        ? ` · ${ev.memberNames.join(', ')}`
+                        : ''}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -863,6 +875,48 @@ export function CalendarView() {
                 />
               </label>
             </div>
+            <fieldset className="calendar-members">
+              <legend>Integrantes</legend>
+              <p className="calendar-members-hint">
+                Elige uno o más colaboradores (opcional).
+              </p>
+              <div className="collab-multi">
+                <label className="collab-multi-option collab-multi-option--all">
+                  <input
+                    type="checkbox"
+                    checked={
+                      activeUsers.length > 0 &&
+                      activeUsers.every((u) => memberIds.includes(u.id))
+                    }
+                    onChange={() => {
+                      const allIds = activeUsers.map((u) => u.id);
+                      const allOn =
+                        allIds.length > 0 && allIds.every((id) => memberIds.includes(id));
+                      setMemberIds(allOn ? [] : allIds);
+                    }}
+                  />
+                  <span>Todos</span>
+                </label>
+                <div className="collab-multi-grid">
+                  {activeUsers.map((u) => (
+                    <label key={u.id} className="collab-multi-option">
+                      <input
+                        type="checkbox"
+                        checked={memberIds.includes(u.id)}
+                        onChange={() => {
+                          setMemberIds((prev) =>
+                            prev.includes(u.id)
+                              ? prev.filter((id) => id !== u.id)
+                              : [...prev, u.id],
+                          );
+                        }}
+                      />
+                      <span>{u.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </fieldset>
             <label>
               Recordatorio
               <select
@@ -1235,6 +1289,12 @@ function EventCard({
         </label>
         <span className="event-time">{event.time}</span>
       </div>
+
+      {event.memberNames && event.memberNames.length > 0 && (
+        <p className="event-members">
+          Integrantes: {event.memberNames.join(', ')}
+        </p>
+      )}
 
       {!isBusy && (
         <>
