@@ -86,7 +86,7 @@ export async function saveGoogleOAuthConfig({ clientId, clientSecret, redirectUr
     redirectUri: String(
       redirectUri ||
         env('GOOGLE_REDIRECT_URI') ||
-        'https://darkred-wasp-801635.hostingersite.com/api/google/callback',
+        'https://darkred-wasp-801835.hostingersite.com/api/google/callback',
     ).trim(),
   };
   if (!cfg.clientId || !cfg.clientSecret || !cfg.redirectUri) {
@@ -116,7 +116,7 @@ export async function saveGoogleOAuthConfig({ clientId, clientSecret, redirectUr
 function redirectUri() {
   return env(
     'GOOGLE_REDIRECT_URI',
-    'https://darkred-wasp-801635.hostingersite.com/api/google/callback',
+    'https://darkred-wasp-801835.hostingersite.com/api/google/callback',
   );
 }
 

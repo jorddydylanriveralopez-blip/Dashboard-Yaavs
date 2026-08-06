@@ -76,7 +76,7 @@ export function CalendarView() {
   const defaultRedirectUri =
     typeof window !== 'undefined'
       ? `${window.location.origin}/api/google/callback`
-      : 'https://darkred-wasp-801635.hostingersite.com/api/google/callback';
+      : 'https://darkred-wasp-801835.hostingersite.com/api/google/callback';
 
   const refreshGoogleStatus = async () => {
     if (!googleUserId) return null;
