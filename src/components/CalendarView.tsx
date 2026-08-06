@@ -99,7 +99,10 @@ export function CalendarView() {
   const googleUserId = user?.id ?? '';
   const googleOwnerName = user?.name ?? '';
   const canConnectGoogle = Boolean(user);
+  /** Solo admin ve paneles de sync Google/Outlook; colaboradores no los necesitan. */
+  const canManageCalendarIntegrations = user?.role === 'admin';
   const canImportOrlandoAgenda =
+    canManageCalendarIntegrations &&
     Boolean(user) &&
     (canEditAll || user?.employeeId === 'emp-orlando' || user?.id === ORLANDO_USER_ID);
 
@@ -921,6 +924,7 @@ export function CalendarView() {
             </div>
           </form>
 
+          {canManageCalendarIntegrations && (
           <div className="calendar-ics">
             <h3>Mi Google Calendar</h3>
             {canConnectGoogle ? (
@@ -1027,6 +1031,7 @@ export function CalendarView() {
               <p>Inicia sesión para vincular tu agenda de Gmail.</p>
             )}
           </div>
+          )}
 
           {canImportOrlandoAgenda && (
             <div className="calendar-ics">
