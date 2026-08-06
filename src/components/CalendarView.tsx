@@ -34,6 +34,25 @@ import './CalendarView.css';
 const WEEKDAYS = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 const ORLANDO_USER_ID = 'u-orlando';
 
+/** Minutos entre HH:MM inicio y fin (si fin ≤ inicio, asume al menos 30 min). */
+function minutesBetweenTimes(start: string, end: string): number {
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return 60;
+  let mins = eh * 60 + em - (sh * 60 + sm);
+  if (mins <= 0) mins = 30;
+  return mins;
+}
+
+/** Hora de fin a partir de inicio + minutos estimados. */
+function endTimeFromStart(start: string, estimatedMinutes: number): string {
+  const [sh, sm] = start.split(':').map(Number);
+  const total = (sh * 60 + sm + Math.max(0, estimatedMinutes || 60)) % (24 * 60);
+  const eh = Math.floor(total / 60);
+  const em = total % 60;
+  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+}
+
 export function CalendarView() {
   const {
     user,
@@ -406,9 +425,10 @@ export function CalendarView() {
 
   const [title, setTitle] = useState('');
   const [time, setTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('10:00');
   const [reminderMinutes, setReminderMinutes] = useState(30);
-  const [estimatedMinutes, setEstimatedMinutes] = useState(60);
   const [notes, setNotes] = useState('');
+  const dayExpandRef = useRef<HTMLDivElement>(null);
 
   useEventReminders(calendar.events, user, markEventReminded, markEventEmailReminded);
 
@@ -503,7 +523,7 @@ export function CalendarView() {
       date: selectedDate,
       time,
       reminderMinutes,
-      estimatedMinutes,
+      estimatedMinutes: minutesBetweenTimes(time, endTime),
       notes: notes.trim(),
       kind: 'event',
       shared: false,
@@ -518,12 +538,19 @@ export function CalendarView() {
       date: selectedDate,
       time: time || '09:00',
       reminderMinutes: 0,
-      estimatedMinutes: 0,
+      estimatedMinutes: minutesBetweenTimes(time || '09:00', endTime || '18:00'),
       notes: notes.trim() || 'No disponible',
       kind: 'busy',
       shared: false,
     });
     setNotes('');
+  };
+
+  const selectDay = (dateKey: string) => {
+    setSelectedDate(dateKey);
+    window.requestAnimationFrame(() => {
+      dayExpandRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   };
 
   const handleCalendarFileImport = async (file: File | null) => {
@@ -647,16 +674,16 @@ export function CalendarView() {
               const key = toDateKey(cell);
               const ownDay = eventsByDate.get(key) ?? [];
               const ownCount = ownDay.length;
-              const ownPreview = ownDay.slice(0, 2);
-              const orlandoCount = isOrlandoViewer ? 0 : orlandoByDate.get(key) ?? 0;
               const isSelected = key === selectedDate;
+              const ownPreview = isSelected ? ownDay.slice(0, 4) : ownDay.slice(0, 2);
+              const orlandoCount = isOrlandoViewer ? 0 : orlandoByDate.get(key) ?? 0;
               const isToday = key === toDateKey(new Date());
               return (
                 <button
                   key={key}
                   type="button"
-                  className={`calendar-day ${isSelected ? 'selected' : ''} ${isToday ? 'today' : ''} ${ownCount > 0 ? 'has-own' : ''} ${orlandoCount > 0 ? 'has-orlando' : ''} ${isInCurrentWeek(key) ? 'in-week' : ''}`}
-                  onClick={() => setSelectedDate(key)}
+                  className={`calendar-day ${isSelected ? 'selected is-expanded' : ''} ${isToday ? 'today' : ''} ${ownCount > 0 ? 'has-own' : ''} ${orlandoCount > 0 ? 'has-orlando' : ''} ${isInCurrentWeek(key) ? 'in-week' : ''}`}
+                  onClick={() => selectDay(key)}
                   title={
                     ownCount > 0
                       ? ownDay.map((e) => `${e.time} ${e.title}`).join('\n')
@@ -674,8 +701,10 @@ export function CalendarView() {
                           <span className="day-orlando-name">{ev.title}</span>
                         </span>
                       ))}
-                      {ownCount > 2 && (
-                        <span className="day-orlando-more">+{ownCount - 2} más</span>
+                      {ownCount > ownPreview.length && (
+                        <span className="day-orlando-more">
+                          +{ownCount - ownPreview.length} más
+                        </span>
                       )}
                     </span>
                   )}
@@ -688,6 +717,53 @@ export function CalendarView() {
                 </button>
               );
             })}
+          </div>
+
+          <div
+            ref={dayExpandRef}
+            className="calendar-day-expand"
+            aria-label="Pendientes del día seleccionado"
+          >
+            <h3>
+              {new Date(`${selectedDate}T12:00:00`).toLocaleDateString('es-MX', {
+                weekday: 'long',
+                day: 'numeric',
+                month: 'long',
+              })}
+              <span className="calendar-day-expand-count">
+                {dayEvents.length} pendiente{dayEvents.length === 1 ? '' : 's'}
+              </span>
+            </h3>
+            {dayEvents.length === 0 ? (
+              <p className="calendar-empty">Sin pendientes este día. Agrégalos a la derecha.</p>
+            ) : (
+              <ul className="calendar-day-expand-list">
+                {dayEvents.map((ev) => (
+                  <li key={ev.id}>
+                    <strong>
+                      {ev.time}
+                      {ev.estimatedMinutes > 0
+                        ? `–${endTimeFromStart(ev.time, ev.estimatedMinutes)}`
+                        : ''}
+                    </strong>
+                    <span>{ev.title}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!isOrlandoViewer && orlandoDayEvents.length > 0 && (
+              <div className="calendar-day-expand-orlando">
+                <p>Orlando ocupado</p>
+                <ul className="calendar-day-expand-list">
+                  {orlandoDayEvents.map((ev) => (
+                    <li key={`o-${ev.id}`}>
+                      <strong>{ev.time}</strong>
+                      <span>{ev.title}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
 
           <div className="calendar-summary">
@@ -763,22 +839,27 @@ export function CalendarView() {
             </label>
             <div className="calendar-form-row">
               <label>
-                Hora
+                Hora de inicio
                 <input
                   type="time"
                   value={time}
-                  onChange={(e) => setTime(e.target.value)}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setTime(next);
+                    if (minutesBetweenTimes(next, endTime) <= 0) {
+                      setEndTime(endTimeFromStart(next, 60));
+                    }
+                  }}
                   required
                 />
               </label>
               <label>
-                Tiempo estimado (min)
+                Hora finalizada
                 <input
-                  type="number"
-                  min={5}
-                  step={5}
-                  value={estimatedMinutes}
-                  onChange={(e) => setEstimatedMinutes(Number(e.target.value) || 60)}
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  required
                 />
               </label>
             </div>
