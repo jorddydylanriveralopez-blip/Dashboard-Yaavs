@@ -151,6 +151,19 @@ app.get('/api/google/auth', async (req, res) => {
   }
 });
 
+app.get('/api/google/auth-url', async (req, res) => {
+  try {
+    await ensureGoogleCredsLoaded();
+    const userId = String(req.query.userId || GOOGLE_CAL_USER_ID);
+    res.json({ ok: true, url: getGoogleAuthUrl(userId) });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+});
+
 app.get('/api/google/callback', async (req, res) => {
   await ensureGoogleCredsLoaded();
   const { code, state, error, error_description: errorDescription } = req.query;

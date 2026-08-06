@@ -3,8 +3,8 @@ import { useApp } from '../context/AppContext';
 import { REMINDER_OPTIONS } from '../constants';
 import { reminderEmailForUser } from '../api/calendar';
 import {
+  fetchGoogleAuthUrl,
   fetchGoogleCalendarStatus,
-  getGoogleAuthUrl,
   isApiEnabled,
   saveGoogleOAuthConfig,
   triggerGoogleCalendarSync,
@@ -75,13 +75,18 @@ export function CalendarView() {
     return () => window.clearInterval(id);
   }, [canImportOrlandoAgenda]);
 
-  const connectGoogleCalendar = () => {
-    const url = getGoogleAuthUrl(ORLANDO_USER_ID);
-    if (!url) {
-      setGoogleMessage('API no disponible. Revisa VITE_API_URL.');
+  const connectGoogleCalendar = async () => {
+    setGoogleMessage(null);
+    const result = await fetchGoogleAuthUrl(ORLANDO_USER_ID);
+    if (!result.ok || !result.url) {
+      setGoogleMessage(result.error || 'No se pudo abrir Google. Revisa las credenciales.');
       return;
     }
-    window.open(url, '_blank', 'noopener,noreferrer,width=520,height=720');
+    const popup = window.open(result.url, '_blank', 'noopener,noreferrer,width=520,height=720');
+    if (!popup) {
+      // Si el navegador bloquea popups, navegar en la misma pestaña.
+      window.location.assign(result.url);
+    }
   };
 
   const syncGoogleNow = async () => {
@@ -631,7 +636,11 @@ export function CalendarView() {
                     </button>
                   </>
                 ) : (
-                  <button type="button" className="btn-primary" onClick={connectGoogleCalendar}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => void connectGoogleCalendar()}
+                  >
                     Conectar Google Calendar
                   </button>
                 )}

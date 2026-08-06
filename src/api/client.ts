@@ -141,6 +141,30 @@ export function getGoogleAuthUrl(userId: string = CALENDAR_SYNC_USER_ID): string
   return `${API_URL}/api/google/auth?userId=${encodeURIComponent(userId)}`;
 }
 
+/** Devuelve la URL real de Google OAuth (evita que Hostinger sirva el SPA en /api/google/auth). */
+export async function fetchGoogleAuthUrl(
+  userId: string = CALENDAR_SYNC_USER_ID,
+): Promise<{ ok: boolean; url?: string; error?: string }> {
+  if (!isApiEnabled()) return { ok: false, error: 'API no disponible' };
+  try {
+    const res = await fetchWithTimeout(
+      `${API_URL}/api/google/auth-url?userId=${encodeURIComponent(userId)}`,
+      { cache: 'no-store' },
+      HEALTH_TIMEOUT_MS,
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      url?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.url) {
+      return { ok: false, error: data.error || 'No se pudo obtener la URL de Google' };
+    }
+    return { ok: true, url: data.url };
+  } catch {
+    return { ok: false, error: 'No se pudo obtener la URL de Google' };
+  }
+}
+
 export async function fetchGoogleCalendarStatus(
   userId: string = CALENDAR_SYNC_USER_ID,
 ): Promise<ExternalCalendarStatus | null> {
