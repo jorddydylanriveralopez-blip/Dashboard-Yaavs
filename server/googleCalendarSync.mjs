@@ -407,41 +407,60 @@ function localPartsFromDate(d) {
 
 function mapGoogleEvent(ev, userId, ownerName = '') {
   if (ev.status === 'cancelled') return null;
-  // All-day events: start.date / end.date
+
+  let date;
+  let time;
   let start;
   let end;
+  let allDay = false;
+
   if (ev.start?.dateTime) {
     start = new Date(ev.start.dateTime);
     end = ev.end?.dateTime ? new Date(ev.end.dateTime) : new Date(start.getTime() + 60 * 60_000);
+    if (Number.isNaN(start.getTime())) return null;
+    const parts = localPartsFromDate(start);
+    date = parts.date;
+    time = parts.time;
   } else if (ev.start?.date) {
-    start = new Date(`${ev.start.date}T09:00:00`);
-    const endDate = ev.end?.date || ev.start.date;
-    end = new Date(`${endDate}T10:00:00`);
+    // All-day: usar la fecha de Google tal cual (no reinterpretar en UTC del server).
+    allDay = true;
+    date = String(ev.start.date).slice(0, 10);
+    time = '09:00';
+    start = new Date(`${date}T09:00:00-06:00`);
+    const endDate = String(ev.end?.date || ev.start.date).slice(0, 10);
+    end = new Date(`${endDate}T10:00:00-06:00`);
   } else {
     return null;
   }
   if (Number.isNaN(start.getTime())) return null;
 
-  const parts = localPartsFromDate(start);
-  const estimatedMinutes = Math.max(
-    15,
-    Math.round((end.getTime() - start.getTime()) / 60_000) || 60,
-  );
-  const externalId = String(ev.id || '');
+  const estimatedMinutes = allDay
+    ? 8 * 60
+    : Math.max(15, Math.round((end.getTime() - start.getTime()) / 60_000) || 60);
+  const externalId = ev._calendarId
+    ? `${ev._calendarId}:${ev.id || Date.now()}`
+    : String(ev.id || '');
   const transparency = String(ev.transparency || '').toLowerCase();
   const showAsFree = transparency === 'transparent';
 
   return {
-    id: `google-${userId.slice(0, 12)}-${externalId.slice(0, 40) || Date.now()}`,
+    id: `google-${userId.slice(0, 12)}-${externalId.replace(/[^a-zA-Z0-9:_-]/g, '').slice(0, 48) || Date.now()}`,
     userId,
     title: (ev.summary || '').trim() || '(Sin título)',
-    date: parts.date,
-    time: parts.time,
+    date,
+    time,
     reminderMinutes: 15,
     estimatedMinutes,
     trackedMinutes: 0,
     done: false,
-    notes: (ev.description || '').trim().slice(0, 500),
+    notes: [
+      allDay ? 'Todo el día' : '',
+      (ev.description || '').trim().slice(0, 450),
+      ev._calendarSummary ? String(ev._calendarSummary) : '',
+    ]
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 500),
     source: 'google',
     externalId,
     shared: true,
@@ -491,6 +510,62 @@ function windowRange() {
   };
 }
 
+async function listGoogleCalendarIds(accessToken) {
+  const calendars = [];
+  let pageToken = '';
+  do {
+    const params = new URLSearchParams({
+      minAccessRole: 'reader',
+      maxResults: '250',
+      showHidden: 'true',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+    const payload = await googleGet(
+      accessToken,
+      `https://www.googleapis.com/calendar/v3/users/me/calendarList?${params}`,
+    );
+    for (const cal of payload.items || []) {
+      if (!cal?.id) continue;
+      calendars.push({
+        id: String(cal.id),
+        summary: String(cal.summary || cal.id),
+        primary: Boolean(cal.primary),
+        selected: cal.selected !== false,
+      });
+    }
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken);
+
+  if (!calendars.some((c) => c.primary || c.id === 'primary')) {
+    calendars.unshift({ id: 'primary', summary: 'Primary', primary: true, selected: true });
+  }
+  return calendars;
+}
+
+async function fetchGoogleEventsForCalendar(accessToken, calendarId, start, end) {
+  const items = [];
+  let pageToken = '';
+  const encodedId = encodeURIComponent(calendarId);
+  do {
+    const params = new URLSearchParams({
+      timeMin: start.toISOString(),
+      timeMax: end.toISOString(),
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '250',
+      showDeleted: 'false',
+    });
+    if (pageToken) params.set('pageToken', pageToken);
+    const payload = await googleGet(
+      accessToken,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodedId}/events?${params}`,
+    );
+    items.push(...(payload.items || []));
+    pageToken = payload.nextPageToken || '';
+  } while (pageToken && items.length < 5000);
+  return items;
+}
+
 /**
  * Pull Google Calendar events into app state.
  * @param {() => object | Promise<object>} readState
@@ -505,24 +580,28 @@ export async function syncGoogleCalendar(readState, writeState, userId = GOOGLE_
     (userId === GOOGLE_CAL_USER_ID ? 'Orlando Villagómez' : userId);
   const { start, end } = windowRange();
 
+  const calendarList = await listGoogleCalendarIds(accessToken);
+  const selected = calendarList.filter((c) => c.selected);
+  const targets = (selected.length ? selected : calendarList).slice(0, 30);
+
   const items = [];
-  let pageToken = '';
-  do {
-    const params = new URLSearchParams({
-      timeMin: start.toISOString(),
-      timeMax: end.toISOString(),
-      singleEvents: 'true',
-      orderBy: 'startTime',
-      maxResults: '250',
-    });
-    if (pageToken) params.set('pageToken', pageToken);
-    const payload = await googleGet(
-      accessToken,
-      `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params}`,
-    );
-    items.push(...(payload.items || []));
-    pageToken = payload.nextPageToken || '';
-  } while (pageToken && items.length < 5000);
+  const seen = new Set();
+  for (const cal of targets) {
+    try {
+      const batch = await fetchGoogleEventsForCalendar(accessToken, cal.id, start, end);
+      for (const ev of batch) {
+        const key = `${cal.id}:${ev.id || ev.iCalUID || Math.random()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push({ ...ev, _calendarSummary: cal.summary, _calendarId: cal.id });
+      }
+    } catch (err) {
+      console.warn(
+        `Google calendar ${cal.id} sync skip:`,
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
   const mapped = items.map((ev) => mapGoogleEvent(ev, userId, ownerName)).filter(Boolean);
 
