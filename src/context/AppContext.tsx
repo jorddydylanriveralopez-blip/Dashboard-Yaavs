@@ -38,7 +38,7 @@ import {
 } from '../api/client';
 import { saveAssignmentAttachments } from '../utils/attachmentStore';
 import { syncCalendarForReminders, notifyOrlandoAgendaAlert } from '../api/calendar';
-import { notifyPush, subscribeToPush, showLocalNotification } from '../api/pushClient';
+import { notifyPush, subscribeToPush } from '../api/pushClient';
 import {
   ASSIGNMENTS_STORAGE_KEY,
   BOARD_SCHEMA_VERSION,
